@@ -1,6 +1,6 @@
 # Karyon
 
-Radial overlay launcher for KDE Plasma 6 (Wayland **and** X11). Hold the mouse trigger button to open a radial menu (Windows / Apps / Files + Tray, Session, Favorites, Gestures); hold and flick for a mouse gesture. Created with Claude Opus.
+Radial overlay launcher for KDE Plasma 6 (Wayland **and** X11) meant to replace system task bar, -tray and -start menu. Hold the mouse trigger button to open a radial menu (Windows / Apps / Files + Tray, Session, Favorites, Gestures); hold and flick for a mouse gesture. Created with Claude Opus.
 
 ## Run (from source)
     ./run.sh [--debug]
