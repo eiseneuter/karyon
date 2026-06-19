@@ -1,0 +1,2341 @@
+"""The radial overlay menu -- geometry, model, hover/drill, drawing, glyphs.
+
+This is the heart of the launcher.  Coordinates: 0deg = right, 90deg = down
+(screen coordinates).  All sizes scale with ``self.s``.
+"""
+from __future__ import annotations
+
+import logging
+import math
+import time
+from dataclasses import dataclass, field
+
+from PyQt6.QtCore import (Qt, QTimer, QPoint, QPointF, QRect, QRectF,
+                          QMimeDatabase, pyqtSignal)
+from PyQt6.QtGui import (QColor, QGuiApplication, QIcon, QPainter, QPainterPath,
+                         QPen, QPolygonF, QRadialGradient, QFont, QFontMetrics)
+from PyQt6.QtWidgets import QWidget
+
+log = logging.getLogger(__name__)
+
+# -- colors -----------------------------------------------------------------
+GLYPH = QColor(232, 238, 246)
+SEG_BASE = QColor(28, 32, 42)
+SEG_HOVER = QColor(72, 80, 97)
+CYAN = QColor("#37d0ff")
+RED = QColor("#ff5c6a")
+
+# -- sectors ----------------------------------------------------------------
+SEC_WINDOWS = 0
+SEC_APPS = 1
+SEC_FILES = 2
+
+# -- node kinds -------------------------------------------------------------
+IT_WINDOW_GROUP = "window_group"
+IT_WINDOW = "window"
+IT_SHOW_DESKTOP = "show_desktop"
+IT_TRAY_MENU = "tray_menu"
+IT_TRAY = "tray"
+IT_MENU = "menu"
+IT_APP = "app"
+IT_CATEGORY = "category"
+IT_SESSION = "session"
+IT_FAV_MENU = "fav_menu"
+IT_FILE = "file"
+IT_CTRL_BTN = "ctrl_btn"
+IT_TRAY_MENUITEM = "tray_menuitem"   # an entry from an app's DBus context menu
+
+# -- angle constants --------------------------------------------------------
+ANG_GAP = 0.6
+RING2_SLOT = 28.0
+APPS_SPAN = 180.0
+SECTOR_MARGIN = 0.66
+RING2_SPAN = 180.0 - 2 * SECTOR_MARGIN
+RING3_SPAN = 200.0
+RING2_FIT = 8
+
+
+@dataclass
+class Node:
+    kind: str
+    label: str = ""
+    sublabel: str = ""
+    icon: object = None            # QIcon or None
+    data: object = None
+    angle: float = 0.0             # center angle in degrees
+    radius: float = 0.0            # center radius
+    size: float = 0.0
+    half_deg: float = 0.0          # half angular width
+    closable: bool = False
+    card: bool = False
+    passive: bool = False
+    glow: bool = False
+    icon_scale: float = 1.0
+    render_icon: bool = False      # draw a glyph instead of label text
+    hover_t: float = 0.0
+    control: object = None         # control_key for drilldown controls
+    glyph: str = ""                # named glyph to draw
+    children: list = field(default_factory=list)
+    sector: int = -1
+    row: int = 0
+    count: int = 0
+
+
+def approach(value: float, target: float, rate: float) -> float:
+    nv = value + (target - value) * rate
+    if abs(nv - target) < 0.0008:
+        return target
+    return nv
+
+
+def _norm(a: float) -> float:
+    while a <= -180:
+        a += 360
+    while a > 180:
+        a -= 360
+    return a
+
+
+def _ang_dist(a: float, b: float) -> float:
+    return abs(_norm(a - b))
+
+
+class RadialOverlay(QWidget):
+    request_gesture = pyqtSignal(str)
+    request_session = pyqtSignal(str)
+    request_reactivate = pyqtSignal()
+    request_settings = pyqtSignal()
+    request_setup_input = pyqtSignal()
+    request_quit = pyqtSignal()
+    closed = pyqtSignal()
+
+    def __init__(self, config, kwin, app_index, tray, recent_files, progress=None,
+                 audio=None):
+        super().__init__(None)
+        self.config = config
+        self.kwin = kwin
+        self.app_index = app_index
+        self.tray = tray
+        self.recent_files = recent_files
+        self.progress = progress
+        self.audio = audio
+
+        self.setWindowFlags(
+            Qt.WindowType.Tool
+            | Qt.WindowType.FramelessWindowHint
+            | Qt.WindowType.WindowStaysOnTopHint
+            | Qt.WindowType.WindowDoesNotAcceptFocus
+        )
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
+        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.setCursor(Qt.CursorShape.BlankCursor)
+        self.setWindowTitle("Karyon")
+
+        self._tick_timer = QTimer(self)
+        self._tick_timer.setSingleShot(True)
+        self._tick_timer.timeout.connect(self._tick)
+
+        self._glyph_cache: dict = {}
+        self._icon_pixmap_cache: dict = {}
+        self._path_cache: dict = {}
+        self._mimedb = QMimeDatabase()
+        # Authoritative most-recently-used window list, maintained by US (the
+        # snapshot is racy right after an activation), most-recent first.
+        self._mru: list[str] = []
+        self._last_activate_time = 0.0
+        self._reset_state()
+        self._compute_geometry()
+
+    # -- geometry -----------------------------------------------------------
+    def _compute_geometry(self) -> None:
+        s = float(self.config["scale"])
+        self.s = s
+        gap = 2 * s                       # uniform gap between ALL rings
+        self.r_neutral = (2.5 / 1.5) * s  # 5px-diameter neutral centre at s=1.5
+        self.r_hub = 46 * s
+        self.r1_in = self.r_hub + gap
+        self.r1_out = self.r1_in + 24 * s  # ring-1 band 20% thinner (was 30*s)
+        self.seg_depth = 54 * s
+        self.seg3_depth = 54 * s
+        self.r2_in = self.r1_out + gap
+        self.r2_out = self.r2_in + self.seg_depth
+        self.r2c = self.r2_in + self.seg_depth / 2
+        self.r3_in = self.r2_out + gap
+        self.r3_out = self.r3_in + self.seg3_depth
+        self.r3c = self.r3_in + self.seg3_depth / 2
+        self.r4c = self.r3_out + gap + self.seg3_depth / 2
+        # Close + drill bars share the same width: 13px at scale 1.5, growing
+        # with the configured menu size.
+        self.close_zone = (13 / 1.5) * s
+        self.drill_zone = (13 / 1.5) * s
+        self.bar_w = (13 / 1.5) * s
+        # Standard PHYSICAL segment width at the outer edge (a ring-2 segment,
+        # 8 per half-circle).  EVERY ring/row uses this same physical width, so
+        # the angular slot is derived as width/radius -> ring-3/4 and overflow
+        # rows are exactly as wide as ring 2 (not bigger at larger radius).
+        self._seg_phys_w = self.r2_out * math.radians(180.0 / RING2_FIT)
+        self._gap_phys = self.r2_out * math.radians(ANG_GAP)
+        self._seg_arc_std = self.r2c * math.radians(
+            (180.0 - 2 * SECTOR_MARGIN) / RING2_FIT - ANG_GAP)
+
+    # -- state --------------------------------------------------------------
+    def _reset_state(self) -> None:
+        self.ring2: dict[int, list[Node]] = {SEC_WINDOWS: [], SEC_APPS: [], SEC_FILES: []}
+        self.active_sectors: list[int] = []
+        self.open_sector = -1
+        self._sector_arc: dict[int, tuple] = {}
+        self._sector_vis: dict[int, tuple] = {}    # visual target arc (ring 1)
+        self._sector_draw: dict[int, list] = {}    # animated drawn arc
+        self.hover_node: Node | None = None
+        self.hover_close = False
+        self.hover_close_all = False
+        self.hover_mute = False
+        self.hover_mail = False
+        self.open_group: Node | None = None
+        self._ctrl_node: Node | None = None
+        self._ctrl_t = 0.0
+        self._repeat_last = 0.0
+        self._ctrl_on_button = False   # pointer strictly ON a control segment
+        self._drill_armed = False
+        self._win_lock = False
+        self._cursor_oy = 0.0         # persistent vertical cursor offset (px)
+        self._apps_stage = 0          # 0 = recents, 1 = categories
+        self._apps_recent_nodes: list = []
+        self._apps_cat_nodes: list = []
+        self._apps_morph_t = 1.0      # 0->1 width-grow animation on morph
+        self._center = QPointF(0, 0)
+        self._pointer = QPointF(0, 0)
+        self._hover_dirty = False             # pointer moved since last hover recompute
+        self._prev_pointer = QPointF(0, 0)   # last painted cursor, for region erase
+        self._last_title_rect = QRect()      # last painted title pill, for erase
+        self._frame_requested = False
+        self._cursor_overridden = False      # app override-cursor (hide sys cursor)
+        self._origin = QPointF(0, 0)
+        self._open_time = 0.0
+        self._path: list[tuple] = []
+        self._gesture_fired = False
+        self.open_t = 0.0
+        self._active_window_id = ""
+        self._desktop_min: list[str] = []
+
+    # -- open / close -------------------------------------------------------
+    def _screen_for_cursor(self, cursor):
+        if cursor:
+            s = QGuiApplication.screenAt(QPoint(int(cursor[0]), int(cursor[1])))
+            if s is not None:
+                return s
+        return QGuiApplication.primaryScreen()
+
+    def open(self, snapshot: dict) -> None:
+        self._reset_state()
+        self._compute_geometry()
+        cursor = snapshot.get("cursor")
+        screen = self._screen_for_cursor(cursor)
+        geo = screen.geometry()                 # global coordinates
+        self.setGeometry(geo)
+        # Pin the window onto the cursor's screen so showFullScreen() does not
+        # snap back to the primary monitor.
+        self.winId()
+        wh = self.windowHandle()
+        if wh is not None:
+            wh.setScreen(screen)
+        if not cursor:
+            cursor = (geo.x() + geo.width() // 2, geo.y() + geo.height() // 2)
+        gx, gy = self._clamp_center(cursor, geo)
+        # Everything internal is in screen-local coordinates.
+        self._origin = QPointF(geo.x(), geo.y())
+        self._center = QPointF(gx - geo.x(), gy - geo.y())
+        self._pointer = QPointF(self._center)
+        self._build_model(snapshot)
+        self._icon_pixmap_cache = {}
+        # With "Focus on Window-Switcher" off, do NOT pre-select the last window
+        # or auto-open the windows category -- the cursor stays neutral (centre).
+        # With it on, start the cursor ~15px ABOVE the centre, toward the
+        # pre-selected window at the top.  The offset persists as the cursor
+        # moves (applied in set_pointer), so it does not snap back to centre.
+        if self.config.get("focus_window_switcher", True):
+            self._preselect_window()
+            self._cursor_oy = -10 * self.s
+        self._pointer = QPointF(self._center.x(),
+                                self._center.y() + self._cursor_oy)
+        self._open_time = time.monotonic()
+        self._path = [(self._open_time, self._pointer.x(), self._pointer.y())]
+        if self.audio is not None:
+            self.audio.set_overlay_active(True)
+        # Pull a fresh tray read so the mail badge reflects new messages -- but
+        # DEFERRED (singleShot) so its DBus round-trip never blocks the open path
+        # (a synchronous call here wedged the grab and broke clicking).
+        if getattr(self.tray, "refresh_now", None):
+            QTimer.singleShot(0, self.tray.refresh_now)
+        self.showFullScreen()
+        self.raise_()
+        # Hide the system cursor.  Because we grab the mouse via evdev the
+        # compositor pointer never "enters" this surface, so a per-widget blank
+        # cursor set before show can be ignored on Wayland -- re-assert it after
+        # mapping AND push an application override cursor, which is honoured even
+        # without an enter event.
+        self.setCursor(Qt.CursorShape.BlankCursor)
+        if not self._cursor_overridden:
+            QGuiApplication.setOverrideCursor(Qt.CursorShape.BlankCursor)
+            self._cursor_overridden = True
+        # Force an immediate synchronous paint so the first frame is never blank
+        # on a rapid re-open.
+        self.repaint()
+        self._schedule_next_idle_tick()
+
+    def _clamp_center(self, cursor, screen) -> tuple:
+        # Centre on the cursor; near edges shift inward so all four rings fit.
+        margin = self.r4c + 30 * self.s
+        x = max(screen.x() + margin,
+                min(screen.x() + screen.width() - margin, cursor[0]))
+        y = max(screen.y() + margin,
+                min(screen.y() + screen.height() - margin, cursor[1]))
+        # Drawn offset from the cursor -> lock window selection (the other two
+        # sectors can then only be reached via the drawn hub).
+        if abs(x - cursor[0]) > 20 or abs(y - cursor[1]) > 20:
+            self._win_lock = True
+        return x, y
+
+    def _note_activated(self, win_id: str) -> None:
+        if not win_id:
+            return
+        self._mru = [win_id] + [x for x in self._mru if x != win_id]
+        self._last_activate_time = time.monotonic()
+
+    def _preselect_window(self) -> None:
+        """Pre-select the previously active window so a press-and-release with no
+        mouse movement toggles between the two most-recent windows.
+
+        Driven by our OWN MRU (reliable), reconciled with the snapshot only once
+        the snapshot has had time to settle after our last activation."""
+        nodes = self.ring2.get(SEC_WINDOWS, [])
+        groups = [n for n in nodes if n.kind == IT_WINDOW_GROUP]
+        if not groups:
+            return
+
+        id_to_group: dict[str, Node] = {}
+        for g in groups:
+            for w in (g.data or []):
+                id_to_group[w["id"]] = g
+
+        cur = self._active_window_id
+        settled = (time.monotonic() - self._last_activate_time) > 2.0
+        if cur and cur in id_to_group:
+            if not self._mru or (settled and self._mru[0] != cur):
+                self._mru = [cur] + [x for x in self._mru if x != cur]
+        # prune dead windows from the MRU
+        self._mru = [x for x in self._mru if x in id_to_group]
+
+        prev_id = next((x for x in self._mru[1:] if x in id_to_group), None)
+        if prev_id is not None:
+            anchor = id_to_group[prev_id]
+            if anchor.data and anchor.data[0]["id"] == prev_id:
+                target = anchor
+            else:
+                target = next((c for c in anchor.children if c.data == prev_id),
+                              anchor)
+        else:
+            # fallback: stacking-based previous window
+            active_group = id_to_group.get(cur)
+            others = [g for g in groups if g is not active_group]
+            if others:
+                target = anchor = others[0]
+            elif active_group is not None and active_group.children:
+                target = active_group.children[0]
+                anchor = active_group
+            else:
+                target = anchor = groups[0]
+        # Centre the pre-selected (ping-pong) window straight up and fan the rest
+        # out around it by recency -- 2nd most recent immediately left, 3rd
+        # immediately right, 4th further left, 5th further right, ...  The
+        # pre-selection / focus target stays on the anchor, so a press-release
+        # toggles to the previous window without losing it.
+        nodes = self.ring2.get(SEC_WINDOWS, [])
+
+        def grank(g):
+            best = len(self._mru) + 1
+            for w in (g.data or []):
+                if w["id"] in self._mru:
+                    best = min(best, self._mru.index(w["id"]))
+            return best
+        others = sorted((g for g in groups if g is not anchor), key=grank)
+        left, right = [], []
+        for i, g in enumerate(others):
+            (left if i % 2 == 0 else right).append(g)
+        arranged = left[::-1] + [anchor] + right
+        sd = next((n for n in nodes if n.kind == IT_SHOW_DESKTOP), None)
+        tray = next((n for n in nodes if n.kind == IT_TRAY_MENU), None)
+        self.ring2[SEC_WINDOWS] = (([sd] if sd else []) + arranged
+                                   + ([tray] if tray else []))
+        self.open_sector = SEC_WINDOWS
+        self._layout_sectors()
+        self.hover_node = target
+        target.hover_t_target = 1.0
+        target.hover_t = 1.0
+        # Highlighting the main symbol immediately reveals all its windows.
+        if anchor.children:
+            self.open_group = anchor
+            self._drill_armed = False
+            self._layout_children(anchor)
+        log.info("PRESELECT: active=%s target=%s mru=%s",
+                 (self._active_window_id or "")[:10],
+                 (target.label[:14] if target else None),
+                 [m[:8] for m in self._mru[:3]])
+
+    def refresh_model(self, snapshot: dict) -> None:
+        """Rebuild ring2 from a fresher snapshot while the menu stays open,
+        preserving the user's current sector and apps stage."""
+        keep_sector = self.open_sector
+        keep_stage = self._apps_stage
+        self.open_group = None
+        self._ctrl_node = None
+        self._icon_pixmap_cache = {}
+        self._path_cache = {}
+        self.ring2 = {SEC_WINDOWS: [], SEC_APPS: [], SEC_FILES: []}
+        self._build_model(snapshot)
+        self._apps_stage = keep_stage if keep_sector == SEC_APPS else 0
+        self._rebuild_apps_stage()
+        self.open_sector = keep_sector if keep_sector in self.active_sectors else -1
+        self._layout_sectors()
+        # If the user has not moved yet, keep the window pre-selection fresh and
+        # snap the menu onto the up-to-date cursor (the first snapshot after an
+        # idle period can be stale, which would otherwise draw the menu offset).
+        if len(self._path) <= 1:
+            self._recenter_on_cursor(snapshot.get("cursor"))
+            if self.config.get("focus_window_switcher", True):
+                self._preselect_window()
+        self.request_repaint()
+
+    def _recenter_on_cursor(self, cursor) -> None:
+        """Re-place the still-fresh menu on an up-to-date cursor position.  Only
+        called before the user has started navigating, so it is safe to move the
+        whole menu; it also re-evaluates ``_win_lock`` for the new position."""
+        if not cursor:
+            return
+        geo = self.geometry()
+        # Only re-centre when the cursor is on the screen we already occupy.
+        if not (geo.x() <= cursor[0] < geo.x() + geo.width()
+                and geo.y() <= cursor[1] < geo.y() + geo.height()):
+            return
+        self._win_lock = False
+        gx, gy = self._clamp_center(cursor, geo)   # may re-arm _win_lock
+        new_center = QPointF(gx - geo.x(), gy - geo.y())
+        if (abs(new_center.x() - self._center.x()) < 1.0
+                and abs(new_center.y() - self._center.y()) < 1.0):
+            return
+        self._center = new_center
+        self._pointer = QPointF(self._center.x(),
+                                self._center.y() + self._cursor_oy)
+        self._open_time = time.monotonic()
+        self._path = [(self._open_time, self._pointer.x(), self._pointer.y())]
+
+    def close_menu(self) -> None:
+        if self.isVisible():
+            self.hide()
+        self._restore_cursor()
+        self._tick_timer.stop()
+        if self.audio is not None:
+            self.audio.set_overlay_active(False)
+        self.closed.emit()
+
+    def _restore_cursor(self) -> None:
+        if self._cursor_overridden:
+            QGuiApplication.restoreOverrideCursor()
+            self._cursor_overridden = False
+
+    def hideEvent(self, event) -> None:  # noqa: N802
+        # Safety net: never leave the app override (blank) cursor stuck, whatever
+        # path hid the overlay.
+        self._restore_cursor()
+        super().hideEvent(event)
+
+    # -- model build --------------------------------------------------------
+    def _build_model(self, snapshot: dict) -> None:
+        cfg = self.config
+        windows = snapshot.get("windows", [])
+        self._build_windows(windows)
+        if cfg["show_apps"]:
+            self._build_apps(windows)
+        if cfg["show_recent_files"]:
+            self._build_files()
+        self.active_sectors = [sec for sec in (SEC_WINDOWS, SEC_APPS, SEC_FILES)
+                               if self.ring2[sec]]
+        if not self.active_sectors:
+            self.active_sectors = [SEC_WINDOWS]
+        self._layout_sectors()
+
+    def _build_windows(self, windows: list) -> None:
+        cfg = self.config
+        ignore = {"karyon", "python3", "plasmashell", "org.kde.plasmashell"}
+        nodes: list[Node] = []
+        if cfg["show_desktop"]:
+            nodes.append(Node(kind=IT_SHOW_DESKTOP, label="Show Desktop",
+                              passive=True, glow=True, glyph="show_desktop"))
+        # group windows by resourceClass; order by stacking (most-recently-used
+        # first), since workspace.windowList() is NOT in MRU order.
+        groups: dict[str, list] = {}
+        for w in windows:
+            rc = w["rc"]
+            if rc in ignore or not rc:
+                continue
+            if w["active"]:
+                self._active_window_id = w["id"]
+            groups.setdefault(rc, []).append(w)
+        for rc in groups:
+            groups[rc].sort(key=lambda w: w.get("stack", -1), reverse=True)
+        order = sorted(groups, key=lambda rc: groups[rc][0].get("stack", -1),
+                       reverse=True)
+        for rc in order:
+            wins = groups[rc]
+            app = self.app_index.match_window(rc, wins[0].get("desktop_file", ""))
+            if app is not None:
+                self.app_index.note_seen(app.app_id)
+                label = app.name
+                icon = QIcon.fromTheme(app.icon) if app.icon else QIcon()
+            else:
+                # App without a .desktop (e.g. AppImage): pseudo entry from /proc.
+                label, icon = self._pseudo_from_proc(rc, wins)
+                icon = icon or QIcon.fromTheme(rc)
+            # Every group has a RED close bar on its main symbol (closes the
+            # active/main window); multi-window groups additionally drill to the
+            # others on hover and close ALL via the count badge.
+            app_name = label
+            node = Node(kind=IT_WINDOW_GROUP,
+                        label=self._window_label(app_name,
+                                                 wins[0].get("caption", "")),
+                        icon=icon, data=wins, closable=True)
+            # Candidate app ids for matching LauncherEntry progress signals.
+            node.progress_keys = [wins[0].get("desktop_file", ""),
+                                  (app.app_id if app is not None else ""), rc]
+            node.app_pid = int(wins[0].get("pid", 0) or 0)
+            node.app_rc = rc
+            if len(wins) > 1:
+                node.sublabel = f"{len(wins)} windows"
+                node.count = len(wins)        # count badge on the group symbol
+                # other windows (besides most-recent active) as children: same
+                # app icon, no text; the caption is only used for the title pill.
+                for w in wins[1:]:
+                    node.children.append(Node(
+                        kind=IT_WINDOW,
+                        label=self._window_label(app_name, w.get("caption", "")),
+                        icon=icon, data=w["id"], closable=True))
+            nodes.append(node)
+        if cfg["show_tray"]:
+            nodes.append(self._build_tray_node())
+        self.ring2[SEC_WINDOWS] = nodes
+
+    # Untitled / unsaved-document markers across common apps and locales.
+    _UNSAVED_MARKERS = ("unsaved", "untitled", "no name", "new document",
+                        "ungespeichert", "nicht gespeichert", "neues dokument",
+                        "neues textdokument", "unbenannt", "namenlos")
+
+    @staticmethod
+    def _clean_caption(cap: str) -> str:
+        # Drop Unicode control/format chars (directional marks etc.) that some
+        # apps put in their title and that render as stray boxes/symbols.
+        import unicodedata
+        return "".join(ch for ch in (cap or "")
+                       if unicodedata.category(ch)[0] != "C").strip()
+
+    def _normalize_loc(self, loc: str) -> str:
+        loc = loc.strip()
+        bare = loc.lstrip("*").strip()
+        low = bare.lower()
+        if any(m in low for m in self._UNSAVED_MARKERS):
+            return "Nicht gespeichert"
+        if not any(ch.isalnum() for ch in bare):   # nothing meaningful left
+            return ""
+        return bare
+
+    def _window_label(self, fallback_app: str, caption: str) -> str:
+        """'<file/location> - <App>' from a window caption, like the level-2
+        window symbols: strips the trailing ' — App' suffix, normalises unsaved
+        documents to 'Nicht gespeichert', caps the location at 30 chars, and uses
+        a short hyphen (never the long em/en dash)."""
+        import re
+        cap = self._clean_caption(caption)
+        if not cap:
+            return fallback_app
+        app = fallback_app
+        parts = re.split(r"\s+[—–\-]\s+", cap)   # em / en / hyphen
+        if len(parts) >= 2 and self._looks_like_app_suffix(parts[-1], fallback_app):
+            loc = " - ".join(p.strip() for p in parts[:-1])
+        else:
+            loc = "" if cap.strip().lower() == fallback_app.strip().lower() else cap
+        app = (app[:1].upper() + app[1:]) if app else fallback_app
+        loc = self._normalize_loc(loc)
+        if not loc:
+            return app
+        if len(loc) > 30:
+            loc = loc[:27].rstrip() + "..."
+        return f"{loc} - {app}"
+
+    @staticmethod
+    def _looks_like_app_suffix(suffix: str, app: str) -> bool:
+        suffix = (suffix or "").strip().lower()
+        app = (app or "").strip().lower()
+        return bool(suffix and app and (suffix in app or app in suffix))
+
+    def _pseudo_from_proc(self, rc: str, wins: list):
+        """Derive a name/icon for a window whose app has no .desktop, and record
+        it as a pseudo recent so it can resurface in the Apps sector."""
+        import os
+        label = wins[0].get("caption") or rc
+        icon = QIcon()
+        pid = 0
+        for w in wins:
+            if w.get("pid"):
+                pid = int(w["pid"])
+                break
+        exe = ""
+        if pid:
+            try:
+                exe = os.readlink(f"/proc/{pid}/exe")
+            except Exception:  # noqa: BLE001
+                exe = ""
+        name = rc.capitalize() if rc else (os.path.basename(exe) if exe else label)
+        if exe:
+            ic = QIcon.fromTheme(os.path.basename(exe).lower())
+            if not ic.isNull():
+                icon = ic
+            app_id = f"pseudo:{rc or os.path.basename(exe)}"
+            try:
+                self.app_index.add_pseudo(app_id, name, exe, "")
+                self.app_index.note_seen(app_id)
+            except Exception:  # noqa: BLE001
+                pass
+        return name, icon
+
+    def _build_tray_node(self) -> Node:
+        node = Node(kind=IT_TRAY_MENU, label="Tray", passive=True, glow=True,
+                    glyph="tray")
+        for item in self.tray.enabled_tray_items():
+            child = Node(kind=IT_TRAY, label=item.label, data=item.data,
+                         glyph=item.glyph or "", icon=item.qicon,
+                         control=item.control_key)
+            child.icon_name = item.icon_name
+            child.controls = item.controls
+            node.children.append(child)
+        for item in self.tray.sni_items:
+            # Skip the launcher's own SNI item -- it gets an explicit entry below.
+            norm = "".join(ch for ch in (item.label or "").lower() if ch.isalnum())
+            if "dumblauncher" in norm:
+                continue
+            child = Node(kind=IT_TRAY, label=item.label, data=item.data,
+                         icon=item.qicon)
+            child.icon_name = item.icon_name
+            child.icon_sig = item.icon_sig
+            # The app's context menu -> drill into the symbol to fan it out.
+            child.menu = item.menu or []
+            child.menu_bus = item.menu_bus
+            child.menu_path = item.menu_path
+            node.children.append(child)
+        # The launcher's own icon (always in the system tray) -> opens Settings.
+        import os
+        svg = os.path.join(os.path.dirname(__file__), "karyon.svg")
+        dl = Node(kind=IT_TRAY, label="Karyon", data="__dl_settings__",
+                  icon=QIcon(svg) if os.path.exists(svg) else QIcon())
+        dl.icon_name = ""
+        dl.local_menu = [
+            ("Settings", ("dl_settings",)),
+            ("Set up input access...", ("dl_setup_input",)),
+            ("Quit", ("dl_quit",)),
+        ]
+        node.children.append(dl)
+        # Volume always sits dead-centre of the tray fan (on the hub line).
+        vol = next((c for c in node.children if c.glyph == "volume"), None)
+        if vol is not None:
+            node.children.remove(vol)
+            node.children.insert(len(node.children) // 2, vol)
+        # "..." popup drawer (FIRST, ALWAYS present): the remaining system-tray
+        # items, fanned one ring further (ring 4) when its drill bar is touched.
+        drawer = Node(kind=IT_TRAY, label="Tray Popup", glyph="dots",
+                      data=("noop", None), control="drawer")
+        drawer.drawer_children = []
+        for it in self.tray.hidden_tray_items():
+            k = Node(kind=IT_TRAY, label=it.label, data=it.data,
+                     glyph=it.glyph or "", icon=it.qicon)
+            k.icon_name = it.icon_name
+            k.icon_sig = it.icon_sig
+            drawer.drawer_children.append(k)
+        node.children.insert(0, drawer)
+        return node
+
+    def _tray_attention(self) -> list:
+        """Tray apps currently flagging a new message -- read live so the mail
+        badge appears/clears in (near) real time while the overlay is open."""
+        try:
+            return self.tray.attention_items()
+        except Exception:  # noqa: BLE001
+            return []
+
+    def _layout_drawer_children(self, node: Node) -> None:
+        kids = getattr(node, "drawer_children", []) or []
+        r_out = self.r4c + self.seg3_depth / 2
+        slot = math.degrees(self._seg_phys_w / r_out)
+        gap = math.degrees(self._gap_phys / r_out)
+        start = node.angle - (len(kids) - 1) * slot / 2
+        for i, kid in enumerate(kids):
+            kid.angle = start + i * slot
+            kid.radius = self.r4c
+            kid.half_deg = (slot - gap) / 2
+            kid.hover_t = 0.0
+        node.children_ctrl = list(kids)
+
+    def _menu_nodes(self, node: Node) -> list:
+        """Build ring-4 nodes from an SNI app's DBus context menu (separators
+        dropped, a checkmark prefixed for active toggles).  No 'Öffnen' entry --
+        releasing on the app symbol itself already activates it (left-click)."""
+        local = getattr(node, "local_menu", None)
+        if local:
+            return [Node(kind=IT_TRAY_MENUITEM, label=label, data=data)
+                    for label, data in local]
+        kids = []
+        for e in getattr(node, "menu", []) or []:
+            if e.separator or not e.visible or not (e.label or "").strip():
+                continue
+            label = e.label
+            if e.toggle_type and e.toggle_state == 1:
+                label = "✓ " + label
+            m = Node(kind=IT_TRAY_MENUITEM, label=label,
+                     data=("menu_click", node.menu_bus, node.menu_path, e.id))
+            m.passive = not e.enabled
+            kids.append(m)
+        return kids
+
+    def _layout_menu_children(self, node: Node) -> None:
+        kids = self._menu_nodes(node)
+        r_out = self.r4c + self.seg3_depth / 2
+        slot = math.degrees(self._seg_phys_w / r_out)
+        gap = math.degrees(self._gap_phys / r_out)
+        start = node.angle - (len(kids) - 1) * slot / 2
+        for i, kid in enumerate(kids):
+            kid.angle = start + i * slot
+            kid.radius = self.r4c
+            kid.half_deg = (slot - gap) / 2
+            kid.hover_t = 0.0
+        node.children_ctrl = list(kids)
+
+    def _build_apps(self, windows: list) -> None:
+        cfg = self.config
+        nodes: list[Node] = []
+        # The centred pivot of the row: "All Applications" -- or, when that is
+        # disabled, "Favorites" promotes into exactly its place.
+        pivot = None
+        if cfg["show_all_apps"]:
+            # Menu button: drilling it morphs the row into the category list.
+            pivot = Node(kind=IT_MENU, label="All Applications",
+                         passive=True, glow=True, icon_scale=0.8,
+                         glyph="hamburger")
+        elif cfg["show_favorites"]:
+            pivot = Node(kind=IT_FAV_MENU, label="Favorites", glow=True,
+                         glyph="star", children=self._fav_nodes())
+        running = set()
+        for w in windows:
+            app = self.app_index.match_window(w["rc"], w.get("desktop_file", ""))
+            if app:
+                running.add(app.app_id)
+        if cfg["show_recent_apps"]:
+            for app in self.app_index.frequent(cfg["max_recent_apps"], exclude=running):
+                nodes.append(Node(kind=IT_APP, label=app.name,
+                                  icon=QIcon.fromTheme(app.icon) if app.icon else QIcon(),
+                                  data=app))
+        if cfg["show_session"]:
+            nodes.append(self._session_node())
+        # The pivot is centred by _layout_apps_recents (its position here only
+        # seeds a tidy order).
+        if pivot is not None:
+            pos = len(nodes) // 2
+            nodes = nodes[:pos] + [pivot] + nodes[pos:]
+        self._apps_recent_nodes = nodes
+        self._apps_cat_nodes = self._cat_nodes() if cfg["show_all_apps"] else []
+        self.ring2[SEC_APPS] = nodes
+
+    def _rebuild_apps_stage(self) -> None:
+        if SEC_APPS not in self.active_sectors:
+            return
+        if self._apps_stage == 1 and self._apps_cat_nodes:
+            self.ring2[SEC_APPS] = self._apps_cat_nodes
+        else:
+            self.ring2[SEC_APPS] = self._apps_recent_nodes
+
+    def _session_node(self) -> Node:
+        from .session import SESSION_ACTIONS
+        node = Node(kind=IT_SESSION, label="Session", glow=True, glyph="session")
+        for key, label, _destr in SESSION_ACTIONS:
+            node.children.append(Node(kind=IT_SESSION, label=label, data=key,
+                                      glyph=f"session_{key}"))
+        return node
+
+    def _cat_nodes(self) -> list[Node]:
+        nodes = []
+        cats = self.app_index.categories()
+        fav_index = len(cats) // 2
+        items = list(cats.items())
+        for i, (name, apps) in enumerate(items):
+            if self.config["show_favorites"] and i == fav_index:
+                # In the category list (after All Applications) Favorites opens on
+                # aim with NO drill bar, like the other categories.  (As the apps
+                # pivot -- show_all_apps off -- it is IT_FAV_MENU with a bar.)
+                nodes.append(Node(kind=IT_CATEGORY, label="Favorites",
+                                  render_icon=True, glow=True, glyph="star",
+                                  children=self._fav_nodes()))
+            node = Node(kind=IT_CATEGORY, label=name, sublabel=f"{len(apps)} apps",
+                        children=[Node(kind=IT_APP, label=a.name, data=a,
+                                       icon=QIcon.fromTheme(a.icon) if a.icon else QIcon())
+                                  for a in apps])
+            nodes.append(node)
+        return nodes
+
+    def _fav_nodes(self) -> list[Node]:
+        return [Node(kind=IT_APP, label=a.name, data=a,
+                     icon=QIcon.fromTheme(a.icon) if a.icon else QIcon())
+                for a in self.app_index.favorites()]
+
+    def _file_icon(self, path: str, icon_name: str = "") -> QIcon:
+        if icon_name:
+            ic = QIcon.fromTheme(icon_name)
+            if not ic.isNull():
+                return ic
+        mt = self._mimedb.mimeTypeForFile(path)
+        for name in (mt.iconName(), mt.genericIconName(), "text-x-generic"):
+            if not name:
+                continue
+            ic = QIcon.fromTheme(name)
+            if not ic.isNull():
+                return ic
+        return QIcon()
+
+    def _build_files(self) -> None:
+        nodes = []
+        for rf in self.recent_files.items(self.config["max_recent_files"]):
+            nodes.append(Node(kind=IT_FILE, label=rf.name, data=rf.path,
+                              icon=self._file_icon(rf.path, rf.icon_name)))
+        if not self.config["show_apps"] and self.config["show_session"]:
+            nodes.append(self._session_node())
+        self.ring2[SEC_FILES] = nodes
+
+    # -- sector layout ------------------------------------------------------
+    def _nominal_for(self, secs: list) -> dict:
+        """Centre angle of each active sector (0=right, 90=down)."""
+        n = len(secs)
+        if n == 3:
+            # Straight orientation: Windows up, Apps right, Files left. The arcs
+            # are uneven (the bottom is shared) but tile the circle with no gap.
+            return {SEC_WINDOWS: -90.0, SEC_APPS: 0.0, SEC_FILES: 180.0}
+        if n == 2:
+            # Windows top half, the other bottom half.
+            out = {}
+            for s in secs:
+                out[s] = -90.0 if s == SEC_WINDOWS else 90.0
+            return out
+        return {secs[0]: -90.0}
+
+    def _layout_sectors(self) -> None:
+        """Assign each active sector an arc, then lay out the ring2 nodes of the
+        currently selected sector (or all, when none is selected yet)."""
+        self._sector_arc: dict[int, tuple] = {}
+        secs = self.active_sectors
+        n = len(secs)
+        nominal = self._nominal_for(secs)
+        self._nominal = nominal
+
+        if n == 1:
+            s = secs[0]
+            self._sector_arc[s] = (nominal[s] - 180.0, nominal[s] + 180.0)
+            self._layout_ring2(s)
+            self._update_sector_vis()
+            return
+
+        if self.open_sector == -1:
+            # Boundaries at the midpoints between consecutive sector centres
+            # (tiles the circle with no gap, even for uneven spacing).
+            order = sorted(secs, key=lambda s: nominal[s] % 360.0)
+            ns = [nominal[s] % 360.0 for s in order]
+            m = len(order)
+            bounds = []
+            for i in range(m):
+                a = ns[i]
+                b = ns[(i + 1) % m] + (360.0 if i + 1 == m else 0.0)
+                bounds.append((a + b) / 2)
+            for i, s in enumerate(order):
+                a0 = bounds[(i - 1) % m]
+                a1 = bounds[i]
+                if a1 < a0:
+                    a1 += 360.0
+                self._sector_arc[s] = (a0, a1)
+                self._layout_ring2(s)
+            self._update_sector_vis()
+            return
+
+        # A sector is selected: it expands to a half-circle, the others tile the
+        # rest contiguously as quarters (n=3) / the remaining half (n=2).
+        sel = self.open_sector
+        big = 180.0
+        rest = (360.0 - big) / (n - 1)
+        order = sorted(secs, key=lambda s: nominal[s] % 360.0)
+        self._sector_arc[sel] = (nominal[sel] - big / 2, nominal[sel] + big / 2)
+        idx = order.index(sel)
+        cur = nominal[sel] + big / 2
+        for k in range(1, n):
+            s = order[(idx + k) % n]
+            self._sector_arc[s] = (cur, cur + rest)
+            cur += rest
+        self._layout_ring2(sel)
+        self._update_sector_vis()
+
+    def _update_sector_vis(self) -> None:
+        """Visual ring-1 arcs as (centre, half-width): selected stays wide,
+        collapsed sectors shrink to a thin line.  Animated (centre + half) so the
+        transformation is smooth and never inverts at angle wrap-around."""
+        # Rings snap straight to their settled arcs (no build-up animation).
+        anim = False
+        self._sector_vis = {}
+        for sec in self.active_sectors:
+            a0, a1 = self._sector_arc.get(sec, (0.0, 0.0))
+            center = (a0 + a1) / 2
+            half = (a1 - a0) / 2
+            if self.open_sector == -1 or sec == self.open_sector:
+                self._sector_vis[sec] = (center, half)
+            else:
+                self._sector_vis[sec] = (center, 0.0)   # shrink away completely
+        for sec in list(self._sector_draw):
+            if sec not in self.active_sectors:
+                del self._sector_draw[sec]
+        for sec in self.active_sectors:
+            if sec not in self._sector_draw or not anim:
+                self._sector_draw[sec] = list(self._sector_vis[sec])
+
+    def _center_on(self, sec: int, anchor) -> None:
+        """Rotate a sector's ring-2 row so ``anchor`` sits at the sector nominal
+        (Windows -> straight up, Apps -> straight right)."""
+        nodes = self.ring2.get(sec, [])
+        if anchor is None or anchor not in nodes:
+            return
+        nominal = self._nominal.get(sec)
+        if nominal is None:
+            return
+        delta = nominal - anchor.angle
+        for n in nodes:
+            n.angle += delta
+
+    def _sector_containing(self, a: float) -> int:
+        """Which active sector's arc currently contains angle a."""
+        for sec, (a0, a1) in self._sector_arc.items():
+            lo = _norm(a0)
+            span = a1 - a0
+            d = _norm(a - a0)
+            if d < 0:
+                d += 360.0
+            if 0 <= d <= span:
+                return sec
+        # fallback: nearest nominal
+        best, bestd = self.active_sectors[0], 999.0
+        for sec in self.active_sectors:
+            d = _ang_dist(a, self._nominal.get(sec, 0.0))
+            if d < bestd:
+                best, bestd = sec, d
+        return best
+
+    def _ring_gap(self, ring: int) -> int:
+        """Empty segments left before a row wraps outward, per absolute ring:
+        ring 2 -> 4, ring 3 -> 7, ring 4 and beyond -> 10."""
+        if ring <= 2:
+            return 4
+        if ring == 3:
+            return 7
+        return 10
+
+    def _layout_radial(self, nodes, center, base_r, depth, base_span,
+                       start_ring=2, single_row=False, gap_override=None) -> None:
+        """Lay nodes on arcs of identical physical-width segments.  Each row
+        leaves a per-ring number of empty segments before wrapping outward
+        (see :meth:`_ring_gap`); ``gap_override`` forces a fixed count.  With
+        ``single_row`` the overflow is dropped instead of wrapped."""
+        count = len(nodes)
+        # Every segment has the SAME physical width (self._seg_phys_w); the
+        # angular slot is width/radius, so segments are identical across rings.
+        i = 0
+        row = 0
+        while i < count:
+            ring = start_ring + row
+            gap_segs = gap_override if gap_override is not None else self._ring_gap(ring)
+            row_radius = base_r + row * (depth + 2 * self.s)   # uniform 2s gap
+            r_out = row_radius + depth / 2
+            slot = math.degrees(self._seg_phys_w / r_out)
+            gap = math.degrees(self._gap_phys / r_out)
+            cap = max(1, int(360.0 / slot) - gap_segs)
+            take = min(cap, count - i)
+            total = slot * take
+            for col in range(take):
+                node = nodes[i + col]
+                node.angle = center - total / 2 + slot / 2 + col * slot
+                node.radius = row_radius
+                node.half_deg = (slot - gap) / 2
+                node.row = row
+            i += take
+            row += 1
+            if single_row:
+                break
+        for node in nodes[i:]:      # dropped overflow (single_row only)
+            node.half_deg = 0.0
+            node.row = -1
+
+    def _per_row(self, base_r: float, depth: float, gap_segs: int) -> int:
+        """Segments that fit on one row before ``gap_segs`` are left free."""
+        slot_base = math.degrees(self._seg_phys_w / (base_r + depth / 2))
+        return max(1, int(360.0 / slot_base) - gap_segs)
+
+    def _layout_pinned_row(self, nodes: list, center: float) -> None:
+        """Ring-2 row with pinned symbols: the apps pivot ('All Applications' or
+        'Favorites') to the EXACT centre, and 'Session' to the very end of
+        ring 2 -- Session never wraps onto ring 3.  Surplus items overflow to
+        ring 3+ with the usual per-ring gaps.  Also used for the Recent Files
+        row when it carries the relocated Session symbol."""
+        pivot = next((n for n in nodes if n.kind in (IT_MENU, IT_FAV_MENU)), None)
+        session = next((n for n in nodes if n.kind == IT_SESSION), None)
+        recents = [n for n in nodes if n is not pivot and n is not session]
+
+        r_out = self.r2c + self.seg_depth / 2
+        slot = math.degrees(self._seg_phys_w / r_out)
+        gap = math.degrees(self._gap_phys / r_out)
+        cap = max(1, int(360.0 / slot) - self._ring_gap(2))
+
+        reserved = (1 if pivot else 0) + (1 if session else 0)
+        target = len(recents) + reserved
+        L = min(cap, target)
+        # Force an ODD row so a true centre slot exists for the pivot symbol.
+        if pivot is not None and L % 2 == 0:
+            L -= 1
+        L = max(L, reserved)
+
+        # Compose row 0: pivot at the exact centre column, session at the last.
+        row0 = [None] * L
+        if pivot is not None:
+            row0[(L - 1) // 2] = pivot
+        if session is not None:
+            row0[L - 1] = session
+        ri = 0
+        for col in range(L):
+            if row0[col] is None and ri < len(recents):
+                row0[col] = recents[ri]
+                ri += 1
+        overflow = recents[ri:]
+
+        total = slot * L
+        for col, node in enumerate(row0):
+            if node is None:
+                continue
+            node.angle = center - total / 2 + slot / 2 + col * slot
+            node.radius = self.r2c
+            node.half_deg = (slot - gap) / 2
+            node.row = 0
+        # Remaining recents start on ring 3 (gap 7), then ring 4 (gap 10)...
+        if overflow:
+            base = self.r2c + (self.seg_depth + 2 * self.s)
+            self._layout_radial(overflow, center, base, self.seg_depth,
+                                RING3_SPAN, start_ring=3)
+
+    def _layout_ring2(self, sec: int) -> None:
+        nodes = self.ring2.get(sec, [])
+        if not nodes:
+            return
+        a0, a1 = self._sector_arc[sec]
+        c = self._nominal.get(sec, (a0 + a1) / 2)
+        span = (a1 - a0) - 2 * SECTOR_MARGIN
+        # Start-menu category text segments: single row, only 1 free segment,
+        # extras at the end are dropped (not wrapped).  All other lists use the
+        # per-ring gaps (ring 2: 4, ring 3: 7, ring 4+: 10).
+        if sec == SEC_APPS and self._apps_stage == 1:
+            self._layout_radial(nodes, c, self.r2c, self.seg_depth, span,
+                                single_row=True, gap_override=1)
+        elif sec == SEC_APPS and self._apps_stage == 0:
+            # Keep "All Applications" centred and "Session" at the end of ring 2
+            # even when recents overflow onto ring 3.
+            self._layout_pinned_row(nodes, c)
+        elif sec == SEC_FILES and any(n.kind == IT_SESSION for n in nodes):
+            # Session relocated into the files row -> keep it at the end of
+            # ring 2, never wrapping onto ring 3.
+            self._layout_pinned_row(nodes, c)
+        else:
+            self._layout_radial(nodes, c, self.r2c, self.seg_depth, span)
+        for node in nodes:
+            node.sector = sec
+
+    # -- pointer input ------------------------------------------------------
+    def set_pointer(self, dx: float, dy: float) -> None:
+        # dx/dy are the virtual delta from the menu center (since open); the
+        # persistent vertical offset keeps the start point above centre.
+        x = self._center.x() + dx
+        y = self._center.y() + dy + self._cursor_oy
+        self._pointer = QPointF(x, y)
+        self._path.append((time.monotonic(), x, y))
+        # Hit-testing is throttled to the 30 fps tick (see _tick): a high-rate
+        # mouse (125-1000 Hz) would otherwise recompute the full nearest-node
+        # hover search on every raw event.  We only record that the pointer moved;
+        # _update_hover() runs once per frame, which is visually identical.
+        self._hover_dirty = True
+        self.request_repaint()
+
+    def request_repaint(self) -> None:
+        if not self.isVisible():
+            return
+        self._frame_requested = True
+        if (not self._tick_timer.isActive()
+                or self._tick_timer.remainingTime() > 0):
+            self._tick_timer.start(0)
+
+    def _schedule_next_idle_tick(self) -> None:
+        if not self.isVisible() or self._tick_timer.isActive():
+            return
+        if self._repeat_active():
+            self._tick_timer.start(80)
+            return
+        if (self.config.get("hub_show_monitor", False)
+                or self.config.get("hub_show_clock", True)
+                or self.config.get("hub_show_date", True)):
+            self._tick_timer.start(1000)
+
+    def _repeat_active(self) -> bool:
+        hn = self.hover_node
+        return (self._ctrl_node is not None and hn is not None
+                and hn.kind == IT_CTRL_BTN and hn.data and hn.data[0] == "repeat"
+                and self._ctrl_on_button)
+
+    def _pointer_polar(self) -> tuple:
+        dx = self._pointer.x() - self._center.x()
+        dy = self._pointer.y() - self._center.y()
+        r = math.hypot(dx, dy)
+        a = math.degrees(math.atan2(dy, dx))
+        return r, a
+
+    def _clear_hover_targets(self) -> None:
+        for sec in self.active_sectors:
+            for node in self.ring2.get(sec, []):
+                node.hover_t_target = 0.0
+                for kid in node.children:
+                    kid.hover_t_target = 0.0
+        if self._ctrl_node is not None:
+            for btn in getattr(self._ctrl_node, "children_ctrl", []):
+                btn.hover_t_target = 0.0
+
+    def _set_open_sector(self, sec: int) -> None:
+        if sec == self.open_sector:
+            return
+        self.open_sector = sec
+        self.open_group = None
+        self._ctrl_node = None
+        if sec != SEC_APPS:
+            self._apps_stage = 0
+        self._rebuild_apps_stage()
+        self._layout_sectors()
+
+    def _update_hover(self) -> None:
+        r, a = self._pointer_polar()
+
+        # Neutral centre dot: NO trigger -- keep the current selection (and its
+        # highlight) so a press+release without moving fires the pre-selection.
+        if r <= self.r_neutral:
+            return
+
+        self._clear_hover_targets()
+        self.hover_close = self.hover_close_all = self.hover_mute = False
+        self.hover_mail = False
+
+        # Offset-open lock: only the Windows sector is selectable by moving; the
+        # other two sectors can only be reached via the drawn hub (which unlocks).
+        if self._win_lock:
+            if r <= self.r1_in:
+                self._win_lock = False        # reached the hub -> unlock
+            else:
+                self.open_sector = SEC_WINDOWS
+                self._hover_in_sector(SEC_WINDOWS, r, a)
+                return
+
+        # Inner circle: trigger zones for switching AND a compressed selection
+        # field for the active sector's symbols.
+        if r <= self.r1_in:
+            here = self._sector_containing(a)
+            if self.open_sector == -1 or here != self.open_sector:
+                self._set_open_sector(here)
+                self.hover_node = None
+                self.open_group = None
+                self._ctrl_node = None
+                return
+            # within the active sector -> select its symbols (like ring 1)
+            self._hover_in_sector(self.open_sector, r, a)
+            return
+
+        if self.open_sector == -1:
+            self._set_open_sector(self._sector_containing(a))
+
+        self._hover_in_sector(self.open_sector, r, a)
+
+    def _hover_window_lock(self, r: float, a: float) -> None:
+        nodes = [n for n in self.ring2[SEC_WINDOWS]
+                 if n.kind in (IT_WINDOW_GROUP, IT_SHOW_DESKTOP, IT_TRAY_MENU)]
+        self._pick_nearest(nodes, r, a)
+
+    def _hover_in_sector(self, sec: int, r: float, a: float) -> None:
+        if sec == -1 or sec not in self.ring2:
+            self.hover_node = None
+            return
+
+        # Control submenu has its own captured state.
+        if self._ctrl_node is not None:
+            self._hover_control(r, a)
+            return
+
+        # In the Apps category stage, ring 1 (the band below ring 2) is the way
+        # back: touching it morphs the row back to the recent apps.
+        if (sec == SEC_APPS and self._apps_stage == 1 and r < self.r2_in):
+            self._apps_stage = 0
+            self.open_group = None
+            self._rebuild_apps_stage()
+            self._layout_sectors()
+            self.hover_node = None
+            return
+
+        # Sticky open group: while the pointer is beyond the band, keep it open
+        # and select among its children.
+        if self.open_group is not None and r > self.r2_out:
+            self._hover_open_group_children(a)
+            return
+
+        nodes = self.ring2[sec]
+        node = self._pick_nearest(nodes, r, a)
+        if node is None:
+            self.open_group = None
+            return
+
+        # The outer-edge zone of THIS node's row (close / drill bar).  The bar
+        # only spans the segment's own angular width -- require the cursor to be
+        # angularly WITHIN it, else aiming at empty space beyond the last element
+        # (but at the outer radius) would falsely trigger the nearest node's bar.
+        row = getattr(node, "row", 0)
+        node_rout = node.radius + self.seg_depth / 2
+        # The bar is a BAND at the segment's outer edge: within the drill zone
+        # radially AND within the segment angularly.  Beyond the edge (toward the
+        # next ring) or beside the segment is empty space -> never triggers.
+        in_outer = (node_rout - self.drill_zone <= r <= node_rout + self.s
+                    and _ang_dist(a, node.angle) <= node.half_deg)
+
+        # Apps menu button: drilling morphs the row into categories.
+        if node.kind == IT_MENU and in_outer:
+            if self._apps_stage != 1:
+                self._apps_stage = 1
+                self._rebuild_apps_stage()
+                self._layout_sectors()
+                self._apps_morph_t = 0.0 if self.config.get("category_anim", True) else 1.0
+            return
+
+        # Control drilldown.
+        if node.control and in_outer:
+            if self._ctrl_node is not node:
+                self._ctrl_node = node
+                self._ctrl_t = 0.0
+                self._layout_control_buttons(node)
+            return
+
+        # Closable window items: red close bar on the outer edge.  The red bar is
+        # ONLY a close trigger -- never a drilldown trigger.  Ring 3 is opened by
+        # highlighting the symbol body (below); here we just keep it open so the
+        # close bar does not block reaching the other windows.
+        if node.kind in (IT_WINDOW_GROUP, IT_WINDOW) and node.closable and in_outer:
+            self.hover_close = True
+            if not node.children:
+                self.open_group = None
+            return
+
+        # Multi-window group: a round count badge on the symbol closes ALL its
+        # windows when the pointer is over it (outer edge still drills).
+        if node.kind == IT_WINDOW_GROUP and node.children:
+            if self._over_badge(node, r, a):
+                self.hover_close_all = True
+                return
+
+        # Speaker badge (opposite side from the count badge): mute the app.
+        if (node.kind == IT_WINDOW_GROUP and self.audio is not None
+                and self.audio.has_stream(getattr(node, "app_pid", 0),
+                                          getattr(node, "app_rc", ""))
+                and self._over_speaker(node, r, a)):
+            self.hover_mute = True
+            return
+
+        # Tray symbol mail badge: a tray app has a new message -> releasing here
+        # opens that app (drilling into the tray still works via the bar).
+        if (node.kind == IT_TRAY_MENU and self._tray_attention()
+                and self._over_badge(node, r, a)):
+            self.hover_mail = True
+            return
+
+        # Drilldown into children.
+        if node.children:
+            if self._opens_on_hover(node) or (self._needs_bar(node) and in_outer):
+                if self.open_group is not node:
+                    self.open_group = node
+                    self._drill_armed = False
+                    self._layout_children(node)
+            elif self.open_group is not node:
+                self.open_group = None
+        else:
+            self.open_group = None
+
+    def _hover_open_group_children(self, a: float) -> None:
+        r, _a = self._pointer_polar()
+        best = self._pick_nearest(self.open_group.children, r, a)
+        if best is None:
+            return
+        edge = best.radius + self.seg3_depth / 2
+        # Same rule as ring 2: the outer bar is a BAND (within the drill zone
+        # radially AND within the segment angularly), so a ring-3 control / close
+        # bar only triggers on the bar itself -- not from empty space beside or
+        # beyond it.
+        on_bar = (edge - self.drill_zone <= r <= edge + self.s
+                  and _ang_dist(a, best.angle) <= best.half_deg)
+        # SNI tray app or local launcher symbol: drilling its bar fans out its
+        # context menu one ring further.
+        if (getattr(best, "menu", None) or getattr(best, "local_menu", None)) and on_bar:
+            if self._ctrl_node is not best:
+                self._ctrl_node = best
+                self._ctrl_t = 0.0
+                self._layout_menu_children(best)
+            return
+        # "..." popup drawer: detected by its control marker, NOT by a non-empty
+        # child list -- an empty drawer must still open (and may fill in as tray
+        # items appear), and must never fall through to the generic control branch.
+        if getattr(best, "control", None) == "drawer" and on_bar:
+            if self._ctrl_node is not best:
+                self._ctrl_node = best
+                self._ctrl_t = 0.0
+                self._layout_drawer_children(best)
+            return
+        if getattr(best, "control", None) and on_bar:
+            if self._ctrl_node is not best:
+                self._ctrl_node = best
+                self._ctrl_t = 0.0
+                self._layout_control_buttons(best)
+            return
+        if best.closable and on_bar:
+            self.hover_close = True
+
+    def _pick_nearest(self, nodes: list, r: float, a: float) -> Node | None:
+        best, bestscore = None, 1e9
+        for n in nodes:
+            if n.half_deg <= 0.01:      # skip dropped nodes
+                continue
+            score = _ang_dist(a, n.angle) + 0.5 * abs(r - n.radius) / max(self.s, 0.1)
+            if score < bestscore:
+                best, bestscore = n, score
+        for n in nodes:
+            n.hover_t_target = 1.0 if n is best else 0.0
+        self.hover_node = best
+        return best
+
+    def _opens_on_hover(self, node: Node) -> bool:
+        # Window groups and categories open on aim (no drill bar); favorites,
+        # tray, session, menu and control need the cyan drill bar.
+        return node.kind in (IT_WINDOW_GROUP, IT_CATEGORY)
+
+    def _needs_bar(self, node: Node) -> bool:
+        # Items that reveal ring 3 only via the cyan drill bar.
+        if node.kind in (IT_MENU, IT_FAV_MENU, IT_TRAY_MENU):
+            return True
+        if node.kind == IT_SESSION and not node.data:
+            return True
+        if (node.kind == IT_TRAY
+                and (getattr(node, "menu", None) or getattr(node, "local_menu", None))):
+            return True
+        return bool(node.control)
+
+    def _is_drillable(self, node: Node) -> bool:
+        # Favorites, menu and tray get a cyan drill bar; categories open on aim.
+        if node.kind in (IT_MENU, IT_FAV_MENU, IT_TRAY_MENU):
+            return True
+        if node.kind == IT_SESSION and not node.data:
+            return True
+        if node.kind == IT_WINDOW_GROUP and node.children:
+            return True
+        # An SNI tray app or local launcher symbol with a context menu drills into
+        # that menu.
+        if (node.kind == IT_TRAY
+                and (getattr(node, "menu", None) or getattr(node, "local_menu", None))):
+            return True
+        return bool(node.control)
+
+    def _in_drill_zone(self, r: float) -> bool:
+        return r >= self.r2_out - self.drill_zone
+
+    def _layout_children(self, node: Node) -> None:
+        kids = node.children
+        if not kids:
+            return
+        self._layout_radial(kids, node.angle, self.r3c, self.seg3_depth,
+                            RING3_SPAN, start_ring=3)
+
+    # -- control buttons ----------------------------------------------------
+    def _layout_control_buttons(self, node: Node) -> None:
+        controls = getattr(node, "controls", []) or []
+        node.children_ctrl = []
+        # Standard physical width (same as every other segment).
+        r_out = self.r4c + self.seg3_depth / 2
+        slot = math.degrees(self._seg_phys_w / r_out)
+        gap = math.degrees(self._gap_phys / r_out)
+        count = len(controls)
+        start = node.angle - (count - 1) * slot / 2
+        for i, (glyph, label, mode, argv) in enumerate(controls):
+            btn = Node(kind=IT_CTRL_BTN, label=label, glyph=glyph,
+                       data=(mode, argv), angle=start + i * slot,
+                       radius=self.r4c, half_deg=(slot - gap) / 2)
+            node.children_ctrl.append(btn)
+
+    def _hover_control(self, r: float, a: float) -> None:
+        node = self._ctrl_node
+        if node is None:
+            return
+        depth = self.seg3_depth
+        band = self.r4c
+        buttons = getattr(node, "children_ctrl", [])
+        in_band = abs(r - band) <= depth / 2 + 8 * self.s
+        self._ctrl_on_button = False
+        best, bestd = None, 999.0
+        if in_band:
+            for btn in buttons:
+                d = _ang_dist(a, btn.angle)
+                if d <= btn.half_deg + 12 and d < bestd:
+                    best, bestd = btn, d
+        if best is not None:
+            self.hover_node = best
+            # Strict containment: the auto-repeat (volume/brightness) fires ONLY
+            # when the pointer is really ON the segment, not merely nearest.
+            self._ctrl_on_button = (bestd <= best.half_deg
+                                    and abs(r - band) <= depth / 2)
+            return  # the repeat itself is driven from _tick (fires while still)
+        # Not on a control button: keep this control open ONLY while its owning
+        # symbol is still the nearest ring-3 item.  Sliding onto a different
+        # drilldown sibling drops it, so that sibling opens its own next frame.
+        if r >= self.r3_in:
+            sibs = [n for n in (self.open_group.children if self.open_group else [node])
+                    if n.half_deg > 0.01]
+            nearest = min(sibs, key=lambda n: _ang_dist(a, n.angle), default=node)
+            if nearest is node and _ang_dist(a, node.angle) <= node.half_deg + 14:
+                self.hover_node = node     # still on the owning symbol
+                return
+        # Moved off (toward the hub or onto another drilldown): drop the control.
+        self._ctrl_node = None
+        self.hover_node = None
+
+    # -- release / activate -------------------------------------------------
+    def on_release(self) -> None:
+        # Flush any throttled pointer move so the selection reflects the final
+        # cursor position, not the last frame's (a fast release right after a
+        # move must not pick a stale node).
+        if self._hover_dirty:
+            self._hover_dirty = False
+            self._update_hover()
+        node = self.hover_node
+        log.info("RELEASE: gesture_fired=%s hover=%s close=%s sector=%s",
+                 self._gesture_fired,
+                 (node.kind + ":" + node.label[:14]) if node else None,
+                 self.hover_close, self.open_sector)
+        if self._gesture_fired:
+            self.close_menu()
+            return
+        if node is None:
+            self.close_menu()
+            return
+        if self.hover_mute and self.audio is not None:
+            self.audio.toggle_mute(getattr(node, "app_pid", 0),
+                                   getattr(node, "app_rc", ""))
+            self.close_menu()
+            return
+        # Mail badge: open the app that has a new message (first attention app).
+        if self.hover_mail:
+            att = self._tray_attention()
+            if att:
+                self.close_menu()
+                try:
+                    self._activate_tray(Node(kind=IT_TRAY, label=att[0].label,
+                                             data=att[0].data))
+                except Exception:  # noqa: BLE001
+                    log.exception("Mail-Badge-Aktivierung fehlgeschlagen")
+                return
+        self._activate(node, self.hover_close, self.hover_close_all)
+
+    def _activate(self, node: Node, close_one: bool, close_all: bool) -> None:
+        kind = node.kind
+        if kind in (IT_WINDOW_GROUP, IT_WINDOW):
+            if kind == IT_WINDOW_GROUP and node.data:
+                win_id = node.data[0]["id"]
+            else:
+                win_id = node.data
+            if close_all and kind == IT_WINDOW_GROUP:
+                self.close_menu()
+                # Close EVERY window of the group (incl. the active main one),
+                # staggered so KWin reliably processes each close.
+                ids = [w["id"] for w in node.data]
+                for i, wid in enumerate(ids):
+                    QTimer.singleShot(i * 70, lambda x=wid: self.kwin.close(x))
+            elif close_one:
+                self.close_menu()
+                self.kwin.close(win_id)
+            else:
+                # Close first, then kwin.activate re-asserts the activation
+                # several times so it lands after KWin's focus-restore-on-close.
+                log.info("ACTIVATE window %s", win_id[:14])
+                self._note_activated(win_id)
+                self.close_menu()
+                self.kwin.activate(win_id)
+            return
+        if kind == IT_APP:
+            self.close_menu()
+            self.app_index.launch(node.data)
+            return
+        if kind == IT_FILE:
+            self.close_menu()
+            self.recent_files.open(node.data)
+            return
+        if kind == IT_TRAY_MENUITEM:
+            self.close_menu()
+            data = node.data or ()
+            if data and data[0] == "menu_click":
+                _tag, bus, path, item_id = data
+                from . import dbusmenu
+                dbusmenu.send_clicked(bus, path, item_id)
+            elif data and data[0] == "sni":
+                self._activate_tray(node)   # "Öffnen" entry
+            elif data and data[0] == "dl_settings":
+                self.request_settings.emit()
+            elif data and data[0] == "dl_setup_input":
+                self.request_setup_input.emit()
+            elif data and data[0] == "dl_quit":
+                self.request_quit.emit()
+            return
+        if kind == IT_TRAY:
+            if node.data == "__dl_settings__":
+                self.close_menu()
+                self.request_settings.emit()
+                return
+            # Releasing on a tray app's symbol behaves like a left-click in a
+            # real tray: activate it (almost always = bring the app to the
+            # front).  Its context menu is reached via the cyan drill bar.
+            self._activate_tray(node)
+            self.close_menu()
+            return
+        if kind == IT_CTRL_BTN:
+            mode, argv = node.data
+            if mode == "toggle":
+                self._run_control(argv)
+            self.close_menu()
+            return
+        if kind == IT_SESSION and node.data:
+            self.close_menu()
+            self.request_session.emit(node.data)
+            return
+        if kind == IT_SHOW_DESKTOP:
+            self.close_menu()
+            self.kwin.toggle_show_desktop()
+            return
+        # passive / drilldown-only nodes -> no action, but ALWAYS close so the
+        # overlay never stays up with the mouse grabbed (was a freeze).
+        self.close_menu()
+
+    def _activate_tray(self, node: Node) -> None:
+        data = node.data or ("noop", None)
+        kind, payload = data
+        if kind == "sni":
+            self.tray.activate_sni(payload)
+        elif kind == "klipper":
+            self.tray.show_clipboard()
+        elif kind == "builtin":
+            self.tray.run_builtin(payload)
+        # noop -> nothing
+
+    def _run_control(self, argv) -> None:
+        """Run a control command, substituting the configured volume step into
+        wpctl volume commands ('1%-' -> '<volume_steps>%-')."""
+        argv = list(argv)
+        if (len(argv) >= 2 and argv[0] == "wpctl"
+                and argv[-1] and argv[-1][-1] in "+-"):
+            step = max(1, int(self.config.get("volume_steps", 1)))
+            argv[-1] = f"{step}%{argv[-1][-1]}"
+        self.tray.run_builtin(argv)
+
+    # -- gesture check ------------------------------------------------------
+    def check_gesture(self) -> str | None:
+        if not self.config.get("gestures_enabled", True):
+            return None
+        if (time.monotonic() - self._open_time) * 1000.0 > self.config["gesture_time_window"]:
+            return None
+        from .input_proxy import classify_direction
+        r, a = self._pointer_polar()
+        if r < self.r2_out:
+            return None
+        speed = self._recent_speed()
+        if speed < self.config["gesture_min_speed"]:
+            return None
+        dx = self._pointer.x() - self._center.x()
+        dy = self._pointer.y() - self._center.y()
+        self._gesture_fired = True
+        return classify_direction(dx, dy, self.config["gesture_diagonal_size"])
+
+    def _recent_speed(self) -> float:
+        if len(self._path) < 2:
+            return 0.0
+        now = self._path[-1][0]
+        window = [p for p in self._path if now - p[0] <= 0.05]
+        if len(window) < 2:
+            window = self._path[-2:]
+        (t0, x0, y0), (t1, x1, y1) = window[0], window[-1]
+        dt = max(1e-4, t1 - t0)
+        return math.hypot(x1 - x0, y1 - y0) / dt
+
+    # -- animation tick -----------------------------------------------------
+    def _approach_angle(self, cur: float, tgt: float, rate: float = 0.32) -> float:
+        d = _norm(tgt - cur)
+        if abs(d) < 0.15:
+            return tgt
+        return cur + d * rate
+
+    def _tick(self) -> None:
+        repaint = self._frame_requested
+        self._frame_requested = False
+        # Throttled hit-testing: set_pointer() only flags movement; recompute the
+        # hover target at most once per frame (here), not on every raw input event.
+        if self._hover_dirty:
+            self._hover_dirty = False
+            self._update_hover()
+            repaint = True
+        # Snap animations straight to their targets (rate 1.0) instead of
+        # interpolating, so there is no per-frame easing work and the menu is
+        # already settled (cheap, static scene + cursor).
+        pm = True
+        ang_r = 1.0 if pm else 0.32
+
+        def R(base):
+            return 1.0 if pm else base
+
+        self.open_t = approach(self.open_t, 1.0, R(0.35))
+        # Control repeat (Volume/Brightness +/-): time-based 5%/s (1% every 0.2s),
+        # fps-independent, fires while the mouse is held still on the button.
+        hn = self.hover_node
+        if self._repeat_active():
+            now = time.monotonic()
+            if now - self._repeat_last >= 0.5:
+                self._repeat_last = now
+                self._run_control(hn.data[1])
+                repaint = True
+        # animate the ring-1 sector transformation (centre + half-width)
+        for sec in self.active_sectors:
+            tgt = self._sector_vis.get(sec)
+            cur = self._sector_draw.get(sec)
+            if tgt and cur:
+                cur[0] = self._approach_angle(cur[0], tgt[0], ang_r)
+                cur[1] = approach(cur[1], tgt[1], R(0.32))
+        for sec in self.active_sectors:
+            for node in self.ring2[sec]:
+                target = getattr(node, "hover_t_target", 0.0)
+                node.hover_t = approach(node.hover_t, target, R(0.35))
+        if self.open_group is not None:
+            for kid in self.open_group.children:
+                target = 1.0 if kid is self.hover_node else 0.0
+                kid.hover_t = approach(kid.hover_t, target, R(0.35))
+        if self._ctrl_node is not None:
+            self._ctrl_t = approach(self._ctrl_t, 1.0, R(0.3))
+            for btn in getattr(self._ctrl_node, "children_ctrl", []):
+                target = 1.0 if btn is self.hover_node else 0.0
+                btn.hover_t = approach(btn.hover_t, target, R(0.35))
+        else:
+            self._ctrl_t = approach(self._ctrl_t, 0.0, R(0.3))
+        if (self.config.get("hub_show_monitor", False)
+                or self.config.get("hub_show_clock", True)
+                or self.config.get("hub_show_date", True)):
+            repaint = True
+        if repaint:
+            self.update(self._dirty_rect())
+            self._prev_pointer = QPointF(self._pointer)
+            self._last_title_rect = self._current_title_rect()
+        self._schedule_next_idle_tick()
+
+    def _dirty_rect(self) -> QRect:
+        s = self.s
+        # Generously cover the outermost drawable: ring-4 outer edge + drill/close
+        # bar + edge glow + margin.
+        max_r = self.r3_out + 2 * s + self.seg3_depth + self.bar_w + 24 * s
+        cx, cy = self._center.x(), self._center.y()
+        rect = QRect(int(cx - max_r), int(cy - max_r),
+                     int(2 * max_r), int(2 * max_r))
+        cr = int(16 * s)   # cursor dot + pen + margin
+
+        def crect(pt):
+            return QRect(int(pt.x() - cr), int(pt.y() - cr), 2 * cr, 2 * cr)
+
+        # Union current AND previous cursor/title so old pixels are erased when
+        # the pointer or hovered node moves.  Long title pills can extend far
+        # beyond the radial menu, so the menu-only dirty rect is not enough.
+        return (rect.united(crect(self._pointer))
+                .united(crect(self._prev_pointer))
+                .united(self._current_title_rect())
+                .united(self._last_title_rect))
+
+    # -- painting -----------------------------------------------------------
+    def paintEvent(self, event) -> None:  # noqa: N802
+        p = QPainter(self)
+        # Flat glow/dim, snapped animation and 30 fps are always on (the cheap
+        # render path).  Performance Mode now controls ONLY antialiasing: off in
+        # perf mode (crisp-but-jagged, cheapest raster), on otherwise.  When on it
+        # is selective -- _paint_bar / _paint_hub_ticks switch AA off locally for
+        # those thin elements (no visible jaggies) and restore to self._aa.
+        self._perf = True
+        self._aa = not self.config.get("performance_mode", False)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing, self._aa)
+        # Clear the damaged region to fully transparent first.  With partial
+        # (region) repaints on a translucent surface this is mandatory -- without
+        # it the new frame's semi-transparent pixels blend onto the old frame's
+        # and alpha accumulates (ghosting/trails).
+        p.setCompositionMode(QPainter.CompositionMode.CompositionMode_Source)
+        p.fillRect(event.rect(), Qt.GlobalColor.transparent)
+        p.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceOver)
+        cx, cy = self._center.x(), self._center.y()
+
+        # global transparency
+        trans = self.config.get("transparency", 10) / 100.0
+        p.setOpacity(1.0 - trans * 0.5)
+
+        if self.config.get("darken_area", True):
+            self._paint_darken(p, cx, cy)
+
+        # three-way hub
+        self._paint_hub(p, cx, cy)
+
+        # ring1 sector bands
+        self._paint_sectors(p, cx, cy)
+
+        # ring2 nodes -- only once a sector is actually selected (no crammed
+        # all-sectors preview on open; you pick a direction first).
+        if self.open_sector != -1:
+            for node in self.ring2.get(self.open_sector, []):
+                self._paint_node(p, cx, cy, node)
+
+        # ring3 drill children
+        if self.open_group is not None:
+            for kid in self.open_group.children:
+                self._paint_node(p, cx, cy, kid, ring3=True)
+            # Cyan drill bar ONLY on genuine bar-opened nodes (menu / tray /
+            # session / favorites pivot).  Categories and the Favorites category
+            # open on aim, and window groups use a red close bar -- no cyan there.
+            if (self._is_drillable(self.open_group)
+                    and self.open_group.kind != IT_WINDOW_GROUP):
+                self._paint_drill_bar(p, cx, cy, self.open_group)
+
+        # control buttons
+        if self._ctrl_node is not None and self._ctrl_t > 0.05:
+            for btn in getattr(self._ctrl_node, "children_ctrl", []):
+                self._paint_node(p, cx, cy, btn, ring3=True)
+
+        # title label for the hovered item (black on white), at the element
+        if self.hover_node is not None and self.hover_node.label:
+            self._paint_title(p, cx, cy, self.hover_node)
+            # Re-draw the hovered node's badges so the white title pill can never
+            # cover its count / audio / mail badges.
+            self._paint_badges(p, cx, cy, self.hover_node)
+
+        # virtual pointer (the real cursor is parked, so this is the only one)
+        self._paint_cursor(p)
+        p.end()
+
+    def _paint_title(self, p, cx, cy, node) -> None:
+        box, f = self._title_box_and_font(node)
+        if box.isEmpty():
+            return
+        p.setFont(f)
+        text = node.label
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(QColor(245, 247, 250))
+        p.drawRoundedRect(box, 5 * self.s, 5 * self.s)
+        p.setPen(QPen(QColor(16, 18, 24)))
+        p.drawText(box, Qt.AlignmentFlag.AlignCenter, text)
+
+    def _current_title_rect(self) -> QRect:
+        if self.hover_node is None or not self.hover_node.label:
+            return QRect()
+        box, _font = self._title_box_and_font(self.hover_node)
+        if box.isEmpty():
+            return QRect()
+        margin = int(math.ceil(8 * self.s))
+        return box.toAlignedRect().adjusted(-margin, -margin, margin, margin)
+
+    def _title_box_and_font(self, node) -> tuple[QRectF, QFont]:
+        text = node.label
+        f = QFont()
+        f.setPointSizeF(7.0 * self.s)   # a bit smaller than before
+        f.setBold(True)
+        fm = QFontMetrics(f)
+        pad = 6 * self.s
+        rect = self.rect()
+        max_w = max(80.0, rect.width() - 8.0)
+        max_text_w = max(40.0, max_w - 2 * pad)
+        tw = fm.horizontalAdvance(text)
+        while tw > max_text_w and f.pointSizeF() > 4.2 * self.s:
+            f.setPointSizeF(f.pointSizeF() - 0.35 * self.s)
+            fm = QFontMetrics(f)
+            tw = fm.horizontalAdvance(text)
+        if tw > max_text_w and tw > 0:
+            f.setStretch(max(10, int(100 * max_text_w / tw)))
+            fm = QFontMetrics(f)
+            tw = fm.horizontalAdvance(text)
+        th = fm.height()
+        w = min(tw + 2 * pad, max_w)
+        h = th + pad * 0.7
+        # Place the pill just outside the hovered element, along its direction.
+        depth = self.seg3_depth if node.kind == IT_CTRL_BTN else self.seg_depth
+        r_out = node.radius + depth / 2 + 8 * self.s + h / 2
+        ang = math.radians(node.angle)
+        cx, cy = self._center.x(), self._center.y()
+        cxp = cx + r_out * math.cos(ang)
+        cyp = cy + r_out * math.sin(ang)
+        px, py = cxp - w / 2, cyp - h / 2
+        px = max(rect.left() + 4, min(rect.right() - w - 4, px))
+        py = max(rect.top() + 4, min(rect.bottom() - h - 4, py))
+        return QRectF(px, py, w, h), f
+
+    def _paint_cursor(self, p) -> None:
+        accent = QColor(self.config.get("accent", "#37d0ff"))
+        px, py = self._pointer.x(), self._pointer.y()
+        r = 6 * self.s
+        p.setPen(QPen(QColor(12, 16, 22, 200), 2 * self.s))
+        p.setBrush(accent)
+        p.drawEllipse(QPointF(px, py), r, r)
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(QColor(255, 255, 255))
+        p.drawEllipse(QPointF(px, py), r * 0.4, r * 0.4)
+
+    def _paint_darken(self, p, cx, cy) -> None:
+        p.setPen(Qt.PenStyle.NoPen)
+        if getattr(self, "_perf", False):
+            # flat dim instead of a per-pixel radial gradient
+            p.setBrush(QColor(0, 0, 0, 90))
+            p.drawRect(self.rect())
+            return
+        grad = QRadialGradient(cx, cy, self.r3_out * 1.8)
+        grad.setColorAt(0.0, QColor(0, 0, 0, 140))
+        grad.setColorAt(1.0, QColor(0, 0, 0, 0))
+        p.setBrush(grad)
+        p.drawRect(self.rect())
+
+    def _paint_hub(self, p, cx, cy) -> None:
+        # Plain disc; the trigger thirds/quarters are invisible hit zones.
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(SEG_BASE)
+        p.drawEllipse(QPointF(cx, cy), self.r_hub, self.r_hub)
+        # 2px accent ring around the hub.
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        p.setPen(QPen(QColor(self.config.get("accent", "#37d0ff")), 2.0))
+        p.drawEllipse(QPointF(cx, cy), self.r_hub, self.r_hub)
+        self._paint_hub_ticks(p, cx, cy)
+        self._paint_info_card(p, cx, cy)
+
+    def _paint_hub_ticks(self, p, cx, cy) -> None:
+        # 20px ticks at the trigger-zone boundaries, starting at the hub edge and
+        # going inward, fading from opaque (edge) to transparent (inner).
+        # Selective AA: these are short radial lines -- jaggies don't read, so
+        # draw them aliased to save the AA edge work.
+        p.setRenderHint(QPainter.RenderHint.Antialiasing, False)
+        bounds = set()
+        for (a0, a1) in self._sector_arc.values():
+            bounds.add(round(_norm(a0), 1))
+        tick = 20.0
+        segs = 10
+        for b in bounds:
+            ca, sa = math.cos(math.radians(b)), math.sin(math.radians(b))
+            for i in range(segs):
+                f0, f1 = i / segs, (i + 1) / segs   # 0 = edge, 1 = inner
+                ra = self.r_hub - f0 * tick
+                rb = self.r_hub - f1 * tick
+                col = QColor(GLYPH)
+                col.setAlpha(int(170 * (1.0 - f0)))
+                pen = QPen(col, 3.0)   # a touch wider than before (was 2.0)
+                pen.setCapStyle(Qt.PenCapStyle.FlatCap)
+                p.setPen(pen)
+                p.drawLine(QPointF(cx + ra * ca, cy + ra * sa),
+                           QPointF(cx + rb * ca, cy + rb * sa))
+        p.setRenderHint(QPainter.RenderHint.Antialiasing,
+                        getattr(self, "_aa", True))
+
+    def _paint_info_card(self, p, cx, cy) -> None:
+        import datetime
+        cfg = self.config
+        now = datetime.datetime.now()
+        r = self.r_hub
+        # system monitor (top slot) -- 3 vertical bars: CPU / GPU / RAM
+        if cfg.get("hub_show_monitor", False):
+            self._paint_monitor(p, cx, cy)
+        # battery charge (below the monitor): yellow bolt + charge in the accent
+        if cfg.get("hub_show_charge", True):
+            try:
+                from . import sysinfo
+                bat = sysinfo.battery_status()
+            except Exception:  # noqa: BLE001
+                bat = None
+            if bat is not None:
+                fb = QFont(); fb.setPointSizeF(6.8 * self.s)
+                p.setFont(fb)
+                txt = f"{bat['percent']}%"
+                rect = QRectF(cx - r, cy - r * 0.36, 2 * r, r * 0.26)
+                tw = p.fontMetrics().horizontalAdvance(txt)
+                cyr = rect.center().y()
+                self._draw_lightning(p, cx - tw / 2 - 6 * self.s, cyr, 8 * self.s)
+                p.setPen(QPen(QColor(cfg.get("accent", "#37d0ff"))))
+                p.drawText(rect, Qt.AlignmentFlag.AlignCenter, txt)
+        # time (middle, big)
+        if cfg.get("hub_show_clock", True):
+            ft = QFont(); ft.setPointSizeF(14 * self.s); ft.setBold(True)
+            p.setFont(ft)
+            p.setPen(QPen(GLYPH))
+            p.drawText(QRectF(cx - r, cy - r * 0.16, 2 * r, r * 0.52),
+                       Qt.AlignmentFlag.AlignCenter, now.strftime("%H:%M"))
+        # date (bottom)
+        if cfg.get("hub_show_date", True):
+            fd = QFont(); fd.setPointSizeF(7.5 * self.s)
+            p.setFont(fd)
+            p.setPen(QPen(GLYPH))
+            p.drawText(QRectF(cx - r, cy + r * 0.30, 2 * r, r * 0.34),
+                       Qt.AlignmentFlag.AlignCenter, now.strftime("%a %d %b"))
+
+    def _paint_monitor(self, p, cx, cy) -> None:
+        from . import sysinfo
+        load = sysinfo.system_load()
+        s, r = self.s, self.r_hub
+        accent = QColor(self.config.get("accent", "#37d0ff"))
+        gpu_label = (load.get("gpu_vendor") or "GPU") if load.get("gpu_available") else "GPU"
+        rows = [("CPU", load["cpu"], accent),
+                (gpu_label, load["gpu"], QColor("#b46cff")),
+                ("RAM", load["ram"], QColor("#3ddc84"))]
+        f = QFont(); f.setPointSizeF(5.6 * s); f.setBold(True)
+        p.setFont(f)
+        fm = p.fontMetrics()
+        items = [(lbl, f"{int(round(max(0.0, min(100.0, float(val)))))} %", col)
+                 for lbl, val, col in rows]
+        # Two centred columns: labels right-aligned, values left-aligned, meeting
+        # at a common divider so the percent signs line up.
+        gap = 4.0 * s
+        max_lw = max(fm.horizontalAdvance(lbl) for lbl, _, _ in items)
+        max_vw = max(fm.horizontalAdvance(vt) for _, vt, _ in items)
+        x0 = cx - (max_lw + gap + max_vw) / 2.0
+        xv = x0 + max_lw + gap
+        h = r * 0.18
+        ys = (cy - r * 0.82, cy - r * 0.64, cy - r * 0.46)
+        for (lbl, val_txt, col), yc in zip(items, ys):
+            # label in its metric colour (GPU row = active vendor), value in white
+            p.setPen(QPen(col))
+            p.drawText(QRectF(x0, yc - h / 2.0, max_lw, h),
+                       Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight, lbl)
+            p.setPen(QPen(GLYPH))
+            p.drawText(QRectF(xv, yc - h / 2.0, max_vw, h),
+                       Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, val_txt)
+
+    def _draw_lightning(self, p, cx, cy, size) -> None:
+        h = size
+        pts = [(0.15, -0.5), (-0.25, 0.06), (0.02, 0.06),
+               (-0.15, 0.5), (0.30, -0.10), (0.0, -0.10)]
+        poly = QPolygonF([QPointF(cx + x * h, cy + y * h) for x, y in pts])
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(QColor(255, 209, 48))
+        p.drawPolygon(poly)
+
+    def _paint_sectors(self, p, cx, cy) -> None:
+        # Draw every active sector's ring-1 band using its animated arc, so the
+        # transformation (thirds <-> expanded/collapsed) is smooth.
+        acc = QColor(self.config.get("accent", "#37d0ff"))
+        acc.setAlpha(160)
+        rin, rout = self.r1_in, self.r1_out
+        # Only the selected sector is drawn once one is chosen (others are simply
+        # gone, not animated away); the selected one animates its growth.
+        secs = ([self.open_sector] if self.open_sector != -1
+                else self.active_sectors)
+        for sec in secs:
+            cd = self._sector_draw.get(sec)
+            if cd is None:
+                a0, a1 = self._sector_arc.get(sec, (0, 0))
+            else:
+                a0, a1 = cd[0] - cd[1], cd[0] + cd[1]
+            span = a1 - a0
+            if span <= 0.5:
+                continue
+            path = self._band_path(cx, cy, rin, rout, a0, a1)
+            p.setBrush(SEG_BASE)
+            p.setPen(Qt.PenStyle.NoPen)
+            p.drawPath(path)
+            self._paint_edge_glow(p, cx, cy, path, rout, a0, a1)
+            # glyph at the (straight) sector nominal -- only while wide enough.
+            if span > 26.0:
+                mid = self._nominal.get(sec, (a0 + a1) / 2)
+                gx = cx + (rin + rout) / 2 * math.cos(math.radians(mid))
+                gy = cy + (rin + rout) / 2 * math.sin(math.radians(mid))
+                scale = 0.45 * min(1.0, (span - 26.0) / 30.0 + 0.3)
+                self._paint_glyph(p, gx, gy,
+                                  {SEC_WINDOWS: "sec_windows", SEC_APPS: "sec_apps",
+                                   SEC_FILES: "sec_files"}[sec], scale)
+
+    def _arc_rect(self, cx, cy, r) -> QRectF:
+        return QRectF(cx - r, cy - r, 2 * r, 2 * r)
+
+    def _band_path(self, cx, cy, rin, rout, a0, a1) -> QPainterPath:
+        key = ("band", round(cx, 2), round(cy, 2), round(rin, 2),
+               round(rout, 2), round(a0, 2), round(a1, 2))
+        path = self._path_cache.get(key)
+        if path is None:
+            span = a1 - a0
+            path = QPainterPath()
+            path.arcMoveTo(self._arc_rect(cx, cy, rin), -a0)
+            path.arcTo(self._arc_rect(cx, cy, rin), -a0, -span)
+            path.arcTo(self._arc_rect(cx, cy, rout), -a1, span)
+            path.closeSubpath()
+            self._path_cache[key] = path
+        return path
+
+    def _arc_path(self, cx, cy, r, a0, a1) -> QPainterPath:
+        key = ("arc", round(cx, 2), round(cy, 2), round(r, 2),
+               round(a0, 2), round(a1, 2))
+        path = self._path_cache.get(key)
+        if path is None:
+            path = QPainterPath()
+            path.arcMoveTo(self._arc_rect(cx, cy, r), -a1)
+            path.arcTo(self._arc_rect(cx, cy, r), -a1, (a1 - a0))
+            self._path_cache[key] = path
+        return path
+
+    def _paint_progress_ring(self, p, gx, gy, r, frac) -> None:
+        """A thin progress ring around an app symbol (0..1); full accent colour
+        that fades out toward the leading end of the line."""
+        frac = max(0.0, min(1.0, float(frac)))
+        rect = QRectF(gx - r, gy - r, 2 * r, 2 * r)
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        track = QPen(QColor(255, 255, 255, 45), 2.0 * self.s)
+        track.setCapStyle(Qt.PenCapStyle.FlatCap)
+        p.setPen(track)
+        p.drawEllipse(rect)
+        if frac <= 0.001:
+            return
+        # Solid full-colour arc (no transparency fade), same in both perf modes.
+        pen = QPen(QColor(self.config.get("accent", "#37d0ff")), 2.4 * self.s)
+        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        p.setPen(pen)
+        p.drawArc(rect, 90 * 16, -int(round(frac * 360 * 16)))
+
+    def _paint_node(self, p, cx, cy, node: Node, ring3=False, wf=1.0) -> None:
+        if node.half_deg <= 0.01:   # dropped (overflowed single-row) node
+            return
+        depth = self.seg3_depth if (ring3 or node.kind == IT_CTRL_BTN) else self.seg_depth
+        rc = node.radius
+        rin = rc - depth / 2
+        rout = rc + depth / 2
+        hw = node.half_deg * max(0.04, wf)   # width-grow animation (morph)
+        a0 = node.angle - hw
+        a1 = node.angle + hw
+        # dark segment background (interpolates lighter on hover)
+        t = node.hover_t
+        col = QColor(
+            int(SEG_BASE.red() + (SEG_HOVER.red() - SEG_BASE.red()) * t),
+            int(SEG_BASE.green() + (SEG_HOVER.green() - SEG_BASE.green()) * t),
+            int(SEG_BASE.blue() + (SEG_HOVER.blue() - SEG_BASE.blue()) * t),
+        )
+        path = self._band_path(cx, cy, rin, rout, a0, a1)
+        p.setBrush(col)
+        p.setPen(Qt.PenStyle.NoPen)
+        p.drawPath(path)
+        # faded inner glow at the outer edge (accent), instead of a 1px border
+        self._paint_edge_glow(p, cx, cy, path, rout, a0, a1)
+
+        # icon or glyph at node center -- sized to fit the segment.
+        gx = cx + rc * math.cos(math.radians(node.angle))
+        gy = cy + rc * math.sin(math.radians(node.angle))
+        # Cap the icon to the ring-2 standard size, so ring-3/4 and overflow rows
+        # (which sit at a larger radius / wider span) never draw bigger icons.
+        arc_w = min(rc * math.radians(max(2.0, 2 * node.half_deg)),
+                    self._seg_arc_std)
+        avail = min(depth, arc_w)
+        if node.glyph:
+            fit = min(node.icon_scale, (avail * 0.66) / (36 * self.s))
+            self._paint_glyph(p, gx, gy, node.glyph, max(0.25, fit))
+        elif isinstance(node.icon, QIcon) and not node.icon.isNull():
+            size = int(min(28 * self.s * node.icon_scale, avail * 0.7))
+            size = max(12, size)
+            key = (id(node.icon), node.icon.cacheKey(), size,
+                   getattr(node, "icon_sig", ""))
+            pm = self._icon_pixmap_cache.get(key)
+            if pm is None:
+                pm = node.icon.pixmap(size, size)
+                self._icon_pixmap_cache[key] = pm
+            p.drawPixmap(int(gx - size / 2), int(gy - size / 2), pm)
+        else:
+            self._paint_node_text(p, cx, cy, node, rin, rout)
+
+        # Subtle progress ring around the app symbol (Dolphin copy, render, ...).
+        if node.kind == IT_WINDOW_GROUP and self.progress is not None:
+            frac = self.progress.get(*getattr(node, "progress_keys", ()))
+            if frac is not None:
+                self._paint_progress_ring(p, gx, gy, avail * 0.46, frac)
+
+        # Always-visible bars (same width): cyan drill on drillable nodes, red
+        # close on closable single windows.  A MULTI-window group shows neither
+        # on its main symbol -- it opens on hover and is closed via its badge.
+        if self._is_drillable(node) and node.kind != IT_WINDOW_GROUP:
+            self._paint_bar(p, cx, cy, node, rout, CYAN)
+        if node.closable and node.kind in (IT_WINDOW_GROUP, IT_WINDOW):
+            framed = node is self.hover_node and self.hover_close
+            self._paint_bar(p, cx, cy, node, rout, RED, framed=framed)
+        # Count / mail / speaker badges.  Drawn last here AND re-drawn on top of
+        # the title pill (see paintEvent) so the white title can never cover them.
+        self._paint_badges(p, cx, cy, node)
+
+    def _paint_badges(self, p, cx, cy, node: Node) -> None:
+        # Multi-window group: round count badge (cyan/black) -> red with white X
+        # when hovered, to close ALL windows.
+        if node.kind == IT_WINDOW_GROUP and node.children:
+            hot = node is self.hover_node and self.hover_close_all
+            self._paint_count_badge(p, cx, cy, node, hot)
+        # Tray symbol: mail badge when a tray app signals a new message; red bg
+        # on hover (release opens that app).
+        if node.kind == IT_TRAY_MENU and self._tray_attention():
+            hot = node is self.hover_node and self.hover_mail
+            self._paint_mail_badge(p, cx, cy, node, hot)
+        # Speaker badge for any app with a live audio stream (incl. while muted,
+        # so it can be un-muted); opposite side from the count badge.
+        if (node.kind == IT_WINDOW_GROUP and self.audio is not None
+                and self.audio.has_stream(getattr(node, "app_pid", 0),
+                                          getattr(node, "app_rc", ""))):
+            muted = self.audio.is_muted(getattr(node, "app_pid", 0),
+                                        getattr(node, "app_rc", ""))
+            hovering = node is self.hover_node and self.hover_mute
+            # Background previews the RESULT of releasing here: red = will be (or
+            # is) muted, cyan = will be (or is) playing.  Muted-at-rest is red;
+            # hovering a muted badge turns it cyan (= will un-mute), and vice
+            # versa.  The speaker symbol itself never changes.
+            self._paint_speaker_badge(p, cx, cy, node, muted != hovering)
+
+    def _paint_edge_glow(self, p, cx, cy, path, r_edge, a0=None, a1=None) -> None:
+        """A soft accent glow that fades in over the outer 10px of a shape, so
+        the menu stays visible against dark backgrounds without a hard border."""
+        if r_edge <= 1:
+            return
+        acc = QColor(self.config.get("accent", "#37d0ff"))
+        if getattr(self, "_perf", False):
+            # Cheap flat accent line -- and ONLY on the OUTER arc (the outward-
+            # facing edge), matching where the real radial glow shows.  Never the
+            # inner/side edges.
+            if a0 is None or a1 is None:
+                return
+            acc.setAlpha(180)
+            arc = self._arc_path(cx, cy, r_edge, a0, a1)
+            p.setBrush(Qt.BrushStyle.NoBrush)
+            p.setPen(QPen(acc, max(1.0, 0.9 * self.s)))
+            p.drawPath(arc)
+            return
+        gw = (10 * self.s) / r_edge
+        grad = QRadialGradient(cx, cy, r_edge)
+        clear = QColor(acc); clear.setAlpha(0)
+        edge = QColor(acc); edge.setAlpha(150)
+        grad.setColorAt(0.0, clear)
+        grad.setColorAt(max(0.0, 1.0 - gw), clear)
+        grad.setColorAt(1.0, edge)
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(grad)
+        p.drawPath(path)
+
+    def _badge_geom(self, node):
+        br = 6.5 * self.s
+        rout = node.radius + self.seg_depth / 2
+        # Tucked just below the LEFT end of the close bar -- never touching it.
+        r_b = rout - self.bar_w - br - 3.0 * self.s
+        a_b = node.angle - node.half_deg * 0.6
+        return r_b, a_b, br
+
+    def _over_badge(self, node, r: float, a: float) -> bool:
+        r_b, a_b, br = self._badge_geom(node)
+        px, py = r * math.cos(math.radians(a)), r * math.sin(math.radians(a))
+        bx, by = r_b * math.cos(math.radians(a_b)), r_b * math.sin(math.radians(a_b))
+        return math.hypot(px - bx, py - by) <= br + 4 * self.s
+
+    def _speaker_geom(self, node):
+        # Mirror of the count badge, on the OTHER (right) end of the segment, so
+        # both badges can sit on one symbol at once.
+        br = 6.5 * self.s
+        rout = node.radius + self.seg_depth / 2
+        r_b = rout - self.bar_w - br - 3.0 * self.s
+        a_b = node.angle + node.half_deg * 0.6
+        return r_b, a_b, br
+
+    def _over_speaker(self, node, r: float, a: float) -> bool:
+        r_b, a_b, br = self._speaker_geom(node)
+        px, py = r * math.cos(math.radians(a)), r * math.sin(math.radians(a))
+        bx, by = r_b * math.cos(math.radians(a_b)), r_b * math.sin(math.radians(a_b))
+        return math.hypot(px - bx, py - by) <= br + 4 * self.s
+
+    def _paint_speaker_badge(self, p, cx, cy, node, red_bg: bool) -> None:
+        # Same size/border as the count badge, with a black speaker symbol.  The
+        # ONLY state cue is the fill: red = muted (or will mute), cyan = playing
+        # (or will un-mute).  The symbol is never struck through or altered.
+        r_b, a_b, br = self._speaker_geom(node)
+        bx = cx + r_b * math.cos(math.radians(a_b))
+        by = cy + r_b * math.sin(math.radians(a_b))
+        border = max(0.8, 1.5 * self.s - 1.0)
+        p.setPen(QPen(QColor(12, 16, 22), border))
+        p.setBrush(RED if red_bg else CYAN)
+        p.drawEllipse(QPointF(bx, by), br, br)
+        s = br
+        black = QColor(8, 10, 14)
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(black)
+        body = QPolygonF([
+            QPointF(bx - 0.46 * s, by - 0.16 * s),
+            QPointF(bx - 0.16 * s, by - 0.16 * s),
+            QPointF(bx + 0.14 * s, by - 0.42 * s),
+            QPointF(bx + 0.14 * s, by + 0.42 * s),
+            QPointF(bx - 0.16 * s, by + 0.16 * s),
+            QPointF(bx - 0.46 * s, by + 0.16 * s),
+        ])
+        p.drawPolygon(body)
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        p.setPen(QPen(black, max(0.8, 0.9 * self.s)))
+        p.drawArc(QRectF(bx + 0.06 * s, by - 0.30 * s, 0.5 * s, 0.6 * s),
+                  -55 * 16, 110 * 16)
+
+    def _paint_count_badge(self, p, cx, cy, node, hot: bool) -> None:
+        r_b, a_b, br = self._badge_geom(node)
+        bx = cx + r_b * math.cos(math.radians(a_b))
+        by = cy + r_b * math.sin(math.radians(a_b))
+        border = max(0.8, 1.5 * self.s - 1.0)   # 1px thinner
+        p.setPen(QPen(QColor(12, 16, 22), border))
+        p.setBrush(RED if hot else CYAN)
+        p.drawEllipse(QPointF(bx, by), br, br)
+        if hot:
+            # white close cross (kept small so it never touches the rim)
+            p.setPen(QPen(QColor(255, 255, 255), 1.5 * self.s))
+            d = br * 0.36
+            p.drawLine(QPointF(bx - d, by - d), QPointF(bx + d, by + d))
+            p.drawLine(QPointF(bx - d, by + d), QPointF(bx + d, by - d))
+        else:
+            p.setPen(QPen(QColor(8, 10, 14)))
+            f = QFont(); f.setPointSizeF(6.5 * self.s); f.setBold(True)
+            p.setFont(f)
+            n = min(99, node.count or len(node.children) + 1)
+            p.drawText(QRectF(bx - br, by - br, 2 * br, 2 * br),
+                       Qt.AlignmentFlag.AlignCenter, str(n))
+
+    def _paint_mail_badge(self, p, cx, cy, node, hot: bool) -> None:
+        # Same size/border as the count badge, with a black envelope; cyan at
+        # rest, red on hover (release opens the messaging app).
+        r_b, a_b, br = self._badge_geom(node)
+        bx = cx + r_b * math.cos(math.radians(a_b))
+        by = cy + r_b * math.sin(math.radians(a_b))
+        border = max(0.8, 1.5 * self.s - 1.0)
+        p.setPen(QPen(QColor(12, 16, 22), border))
+        p.setBrush(RED if hot else CYAN)
+        p.drawEllipse(QPointF(bx, by), br, br)
+        # envelope: rectangle + flap (the 'V' to the centre)
+        black = QColor(8, 10, 14)
+        ew, eh = br * 1.02, br * 0.72
+        rect = QRectF(bx - ew / 2, by - eh / 2, ew, eh)
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        pen = QPen(black, max(0.9, 1.1 * self.s))
+        pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+        p.setPen(pen)
+        p.drawRect(rect)
+        p.drawPolyline(QPolygonF([
+            QPointF(rect.left(), rect.top()),
+            QPointF(bx, by + eh * 0.12),
+            QPointF(rect.right(), rect.top()),
+        ]))
+
+    def _paint_bar(self, p, cx, cy, node, r_edge, color, faint=False,
+                   framed=False) -> None:
+        if color is RED:
+            # Deeper/darker red at rest; lighten the bar when the pointer is on
+            # it (no accent outline).
+            col = QColor(255, 110, 122) if framed else QColor(176, 36, 48)
+        else:
+            col = QColor(color)
+        base = 70 if faint else 240
+        # Both the red close bar AND the cyan drill bar follow the transparency
+        # setting (may fade out with the rest of the overlay).
+        base = int(base * (1.0 - self.config.get("transparency", 10) / 100.0))
+        col.setAlpha(max(20, base))
+        # Bar fills its zone (same width for drill and close), drawn just inside
+        # the segment edge.
+        w = self.bar_w
+        a0 = node.angle - node.half_deg
+        a1 = node.angle + node.half_deg
+        rc = r_edge - w / 2
+        pen = QPen(col, w)
+        pen.setCapStyle(Qt.PenCapStyle.FlatCap)
+        p.setPen(pen)
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        # Selective AA: bars are thin flat-capped arcs.  The outer (rim) edge is
+        # already smoothed by the antialiased segment behind it, so aliasing them
+        # is normally invisible and saves edge work.  Exception: in regular mode
+        # the CYAN drill bar's INNER edge sits inside the segment with nothing to
+        # smooth it -- so antialias the cyan bar there (never the red close bar,
+        # never in Performance Mode).
+        smooth = (color is CYAN) and getattr(self, "_aa", True)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing, smooth)
+        p.drawArc(self._arc_rect(cx, cy, rc), int(-a0 * 16), int(-(a1 - a0) * 16))
+        p.setRenderHint(QPainter.RenderHint.Antialiasing,
+                        getattr(self, "_aa", True))
+
+    def _paint_node_text(self, p, cx, cy, node, rin, rout) -> None:
+        # Single-line radial label: fills the segment depth, ellipsised with
+        # "..." toward the hub, never drawn outside the segment, flipped on the
+        # left half so it is never upside-down.
+        angle = node.angle
+        flip = angle > 90 or angle < -90
+        rot = angle - 180 if flip else angle
+        depth = rout - rin
+        rc = (rin + rout) / 2
+        m = 3 * self.s
+        p.save()
+        p.translate(cx, cy)
+        p.rotate(rot)
+        f = QFont()
+        f.setPointSizeF(6.2 * self.s)
+        p.setFont(f)
+        fm = p.fontMetrics()
+        th = fm.height()
+        avail = max(8, int(depth - 2 * m))
+        elided = fm.elidedText(node.label, Qt.TextElideMode.ElideRight, avail)
+        cxr = (-rc) if flip else rc          # band centre along the (rotated) x
+        rect = QRectF(cxr - (depth / 2 - m), -th / 2, depth - 2 * m, th)
+        p.setPen(QPen(GLYPH))
+        p.setClipRect(QRectF(cxr - (depth / 2 - m) - 1, -th, depth - 2 * m + 2, 2 * th))
+        p.drawText(rect, int(Qt.AlignmentFlag.AlignCenter), elided)
+        p.restore()
+
+    def _paint_hub_label(self, p, cx, cy, text) -> None:
+        if not text:
+            return
+        p.setPen(QPen(GLYPH))
+        f = QFont()
+        f.setPointSizeF(8 * self.s)
+        f.setBold(True)
+        p.setFont(f)
+        p.drawText(QRectF(cx - self.r_hub, cy - 12, 2 * self.r_hub, 24),
+                   int(Qt.AlignmentFlag.AlignCenter | Qt.TextFlag.TextWordWrap),
+                   text[:16])
+
+    def _paint_drill_bar(self, p, cx, cy, node: Node) -> None:
+        # cyan bar on the outer edge of the (possibly overflowed) parent band
+        depth = self.seg3_depth if node.kind == IT_CTRL_BTN else self.seg_depth
+        r_edge = node.radius + depth / 2
+        self._paint_bar(p, cx, cy, node, r_edge, CYAN)
+
+    # -- glyphs -------------------------------------------------------------
+    def _paint_glyph(self, p, x, y, name: str, scale: float = 1.0) -> None:
+        from . import glyphs
+        glyphs.set_accent(self.config.get("accent", "#37d0ff"))
+        size = 36 * self.s * scale
+        p.save()
+        p.translate(x - size / 2, y - size / 2)
+        p.scale(size / 64.0, size / 64.0)
+        glyphs.draw(p, name)
+        p.restore()
