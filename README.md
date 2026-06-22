@@ -2,6 +2,13 @@
 
 Radial overlay launcher for KDE Plasma 6 (Wayland **and** X11) meant to replace system task bar, -tray and -start menu. Hold the mouse trigger button to open a radial menu (Windows / Apps / Files + Tray, Session, Favorites, Gestures); hold and flick for a mouse gesture. Created with Claude Opus.
 
+Things to keep in mind:
+- not all window icons are showing
+- grabbing or resizing  a window while Karyon is starting up will result in faulty behavior
+- If you choose to get rid of your system tray in a task bar, some KDE tray-functions might be limited (like showing the clipboard with a hotkey)
+- To  access configuration of Karyon, while the program is closed, you need to open it via your system tray
+- if checked in the settings: you can increase and decrease the system volume fast in the overlay by using the scrollwheel, middle mouse click to mute
+
 ## Run (from source)
     ./run.sh [--debug]
     # or: python3 -m karyon [--debug]
