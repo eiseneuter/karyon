@@ -6,6 +6,7 @@ import os
 import signal
 import subprocess
 import sys
+import time
 
 from PyQt6.QtCore import QLockFile, QObject, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QIcon
@@ -75,6 +76,8 @@ def _ensure_kwin_taskbar_rule() -> None:
         w("skippagerrule", "2")
         w("skipswitcher", "true")
         w("skipswitcherrule", "2")
+        w("above", "true")
+        w("aboverule", "2")
         subprocess.run(["kwriteconfig6", "--file", "kwinrulesrc",
                         "--group", "General", "--key", "count",
                         str(len(new_rules.split(",")))], env=child_env())
@@ -182,6 +185,8 @@ class Launcher:
             self.settings.closed.connect(self._on_settings_closed)
 
         self._gesture_win_id = ""
+        self._fresh_snap_pending = False
+        self._press_time = 0.0
         self._wire_overlay()
         self._init_tray()
 
@@ -254,9 +259,15 @@ class Launcher:
 
     # -- input proxy callbacks (now in GUI thread) --------------------------
     def _on_press(self) -> None:
-        # Prime a fresh snapshot the moment the trigger goes down, so by the time
-        # the hold completes (~200 ms) the cache has the current cursor + windows.
-        self.kwin.snapshot_async(lambda snap: None, timeout_ms=300)
+        self._press_time = time.monotonic()
+        self._fresh_snap_pending = True
+        # Prime a fresh snapshot the moment the trigger goes down.
+        # If the hold completes, the pending callback will update the overlay.
+        def on_snap_done(snap):
+            self._fresh_snap_pending = False
+            if self.overlay.isVisible():
+                self._late_snapshot(snap)
+        self.kwin.snapshot_async(on_snap_done, timeout_ms=300)
 
     def _on_hold(self) -> None:
         snap = self.kwin.cached_snapshot
@@ -264,8 +275,13 @@ class Launcher:
         # Once the overlay surface is mapped, nudge the compositor pointer so KWin
         # hides the frozen hardware cursor sitting on top of the overlay.
         QTimer.singleShot(50, self.proxy.nudge_cursor)
-        # Refresh again and rebuild when it arrives (windows/cursor freshness).
-        self.kwin.snapshot_async(self._late_snapshot, timeout_ms=300)
+        
+        # If the snapshot from _on_press has not completed yet, and has not timed out,
+        # we do not trigger a second snapshot. The callback will handle the update.
+        timed_out = (time.monotonic() - self._press_time) > 0.35
+        if not self._fresh_snap_pending or timed_out:
+            self._fresh_snap_pending = True
+            self.kwin.snapshot_async(self._late_snapshot, timeout_ms=300)
 
     def _open_with(self, snap) -> None:
         if snap is None:
@@ -275,6 +291,7 @@ class Launcher:
         self.overlay.open(snap)
 
     def _late_snapshot(self, snap) -> None:
+        self._fresh_snap_pending = False
         # Rebuild the model in place with fresh data while the menu is open,
         # keeping the user's current sector/pointer.
         if self.overlay.isVisible():

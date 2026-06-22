@@ -239,9 +239,17 @@ class KWinBridge:
     def _normalize(self, payload: dict) -> dict:
         cursor = payload.get("cursor") or [0, 0]
         windows = []
+        seen_ids: set[str] = set()
         for w in payload.get("wins", []):
+            wid = w.get("id", "")
+            # KWin's windowList() can occasionally list the same window twice
+            # (transient stacking hiccups); a duplicate id would split one app
+            # into two ring-2 groups (e.g. two Dolphin symbols).  Drop repeats.
+            if not wid or wid in seen_ids:
+                continue
+            seen_ids.add(wid)
             windows.append({
-                "id": w.get("id", ""),
+                "id": wid,
                 "rc": w.get("rc", "") or "",
                 "caption": w.get("caption", "") or "",
                 "desktop_file": w.get("df", "") or "",
@@ -299,7 +307,14 @@ class KWinBridge:
         self._with_window(win_id, "w.minimized = true;")
 
     def close(self, win_id: str) -> None:
+        self._cache_remove(win_id)
         self._with_window(win_id, "w.closeWindow();")
+
+    def _cache_remove(self, win_id: str) -> None:
+        snap = self.cached_snapshot
+        if not snap:
+            return
+        snap["windows"] = [w for w in snap["windows"] if w["id"] != win_id]
 
     def focus_window(self, win_id: str) -> None:
         # Gentle focus: set keyboard focus only, do NOT raise (keepAbove toggle)
@@ -312,10 +327,12 @@ class KWinBridge:
         snap = self.cached_snapshot
         if not snap:
             return
+        max_stack = max((w.get("stack", -1) for w in snap["windows"]), default=0)
         for w in snap["windows"]:
             w["active"] = (w["id"] == win_id)
             if w["id"] == win_id:
                 w["minimized"] = False
+                w["stack"] = max_stack + 1
 
     def _cache_set_minimized(self, win_id: str, value: bool) -> None:
         snap = self.cached_snapshot

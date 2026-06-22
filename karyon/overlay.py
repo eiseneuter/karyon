@@ -9,6 +9,7 @@ import logging
 import math
 import time
 from dataclasses import dataclass, field
+import os
 
 from PyQt6.QtCore import (Qt, QTimer, QPoint, QPointF, QRect, QRectF,
                           QMimeDatabase, pyqtSignal)
@@ -98,6 +99,99 @@ def _norm(a: float) -> float:
 
 def _ang_dist(a: float, b: float) -> float:
     return abs(_norm(a - b))
+
+
+# Icon resolution fallback.  QIcon.fromTheme() only finds an icon if it lives in
+# the ACTIVE theme (or a theme it inherits).  Many apps ship their icon outside
+# that theme -- as a bare pixmap in /usr/share/pixmaps, inside another theme's
+# directory tree (e.g. a monochrome theme with no Inherits), or as an absolute
+# path in the .desktop file.  For all of those fromTheme() returns null and the
+# app would render as plain text.  _icon_for closes that gap with a direct file
+# search across every standard freedesktop icon location.
+
+_PIXMAP_EXTS = (".png", ".svg", ".xpm", ".svgz")
+# Prefer larger sizes; the painter scales down to the segment.
+_ICON_SIZES = ("48", "32", "24", "22", "16", "scalable", "symbolic")
+_ICON_CATS = ("apps", "devices", "places", "categories", "mimetypes", "actions")
+_icon_cache: dict[str, QIcon] = {}
+
+
+def _icon_search_roots() -> list[str]:
+    """All directories that may hold pixmaps or icon-theme trees."""
+    roots = ["/usr/share/pixmaps", os.path.expanduser("~/.local/share/pixmaps")]
+    for base in (os.environ.get("XDG_DATA_DIRS")
+                 or "/usr/local/share:/usr/share").split(":"):
+        base = base.strip()
+        if base:
+            roots.append(os.path.join(base, "icons"))
+    home_data = os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share")
+    roots.append(os.path.join(home_data, "icons"))
+    seen, out = set(), []
+    for r in roots:
+        if r and r not in seen:
+            seen.add(r)
+            out.append(r)
+    return out
+
+
+def _icon_for(name: str) -> QIcon:
+    """Resolve an app icon generically.
+
+    Handles three shapes an icon can take:
+      1. a theme name present in the active theme  -> QIcon.fromTheme
+      2. an absolute file path                      -> load the file directly
+      3. a name only present as a bare pixmap or in
+         another theme's directory tree             -> direct file search
+
+    Results are cached per name."""
+    if not name:
+        return QIcon()
+    cached = _icon_cache.get(name)
+    if cached is not None:
+        return cached
+    # 2) absolute path (some .desktop files set Icon=/opt/app/icon.png).
+    if name.startswith("/"):
+        qi = QIcon(name)
+        _icon_cache[name] = qi
+        return qi
+    # 1) active theme.
+    ic = QIcon.fromTheme(name)
+    if not ic.isNull():
+        _icon_cache[name] = ic
+        return ic
+    low = name.lower()
+    roots = _icon_search_roots()
+    # 3a) bare pixmap: <root>/<name>.<ext>
+    for root in roots:
+        for ext in _PIXMAP_EXTS:
+            p = os.path.join(root, low + ext)
+            if os.path.exists(p):
+                qi = QIcon(p)
+                if not qi.isNull():
+                    _icon_cache[name] = qi
+                    return qi
+    # 3b) inside any icon-theme tree: <root>/<theme>/<cat>/<size>/<name>.<ext>
+    for root in roots:
+        if not os.path.isdir(root):
+            continue
+        for theme in os.listdir(root):
+            tdir = os.path.join(root, theme)
+            if not os.path.isdir(tdir):
+                continue
+            for cat in _ICON_CATS:
+                for size in _ICON_SIZES:
+                    cdir = os.path.join(tdir, cat, size)
+                    if not os.path.isdir(cdir):
+                        continue
+                    for ext in _PIXMAP_EXTS:
+                        p = os.path.join(cdir, low + ext)
+                        if os.path.exists(p):
+                            qi = QIcon(p)
+                            if not qi.isNull():
+                                _icon_cache[name] = qi
+                                return qi
+    _icon_cache[name] = ic
+    return ic
 
 
 class RadialOverlay(QWidget):
@@ -320,13 +414,6 @@ class RadialOverlay(QWidget):
                 id_to_group[w["id"]] = g
 
         cur = self._active_window_id
-        settled = (time.monotonic() - self._last_activate_time) > 2.0
-        if cur and cur in id_to_group:
-            if not self._mru or (settled and self._mru[0] != cur):
-                self._mru = [cur] + [x for x in self._mru if x != cur]
-        # prune dead windows from the MRU
-        self._mru = [x for x in self._mru if x in id_to_group]
-
         prev_id = next((x for x in self._mru[1:] if x in id_to_group), None)
         if prev_id is not None:
             anchor = id_to_group[prev_id]
@@ -334,7 +421,7 @@ class RadialOverlay(QWidget):
                 target = anchor
             else:
                 target = next((c for c in anchor.children if c.data == prev_id),
-                              anchor)
+                               anchor)
         else:
             # fallback: stacking-based previous window
             active_group = id_to_group.get(cur)
@@ -346,28 +433,7 @@ class RadialOverlay(QWidget):
                 anchor = active_group
             else:
                 target = anchor = groups[0]
-        # Centre the pre-selected (ping-pong) window straight up and fan the rest
-        # out around it by recency -- 2nd most recent immediately left, 3rd
-        # immediately right, 4th further left, 5th further right, ...  The
-        # pre-selection / focus target stays on the anchor, so a press-release
-        # toggles to the previous window without losing it.
-        nodes = self.ring2.get(SEC_WINDOWS, [])
 
-        def grank(g):
-            best = len(self._mru) + 1
-            for w in (g.data or []):
-                if w["id"] in self._mru:
-                    best = min(best, self._mru.index(w["id"]))
-            return best
-        others = sorted((g for g in groups if g is not anchor), key=grank)
-        left, right = [], []
-        for i, g in enumerate(others):
-            (left if i % 2 == 0 else right).append(g)
-        arranged = left[::-1] + [anchor] + right
-        sd = next((n for n in nodes if n.kind == IT_SHOW_DESKTOP), None)
-        tray = next((n for n in nodes if n.kind == IT_TRAY_MENU), None)
-        self.ring2[SEC_WINDOWS] = (([sd] if sd else []) + arranged
-                                   + ([tray] if tray else []))
         self.open_sector = SEC_WINDOWS
         self._layout_sectors()
         self.hover_node = target
@@ -471,32 +537,33 @@ class RadialOverlay(QWidget):
         nodes: list[Node] = []
         if cfg["show_desktop"]:
             nodes.append(Node(kind=IT_SHOW_DESKTOP, label="Show Desktop",
-                              passive=True, glow=True, glyph="show_desktop"))
+                               passive=True, glow=True, glyph="show_desktop"))
         # group windows by resourceClass; order by stacking (most-recently-used
         # first), since workspace.windowList() is NOT in MRU order.
-        groups: dict[str, list] = {}
+        groups_dict: dict[str, list] = {}
         for w in windows:
             rc = w["rc"]
             if rc in ignore or not rc:
                 continue
             if w["active"]:
                 self._active_window_id = w["id"]
-            groups.setdefault(rc, []).append(w)
-        for rc in groups:
-            groups[rc].sort(key=lambda w: w.get("stack", -1), reverse=True)
-        order = sorted(groups, key=lambda rc: groups[rc][0].get("stack", -1),
+            groups_dict.setdefault(rc, []).append(w)
+        for rc in groups_dict:
+            groups_dict[rc].sort(key=lambda w: w.get("stack", -1), reverse=True)
+        order = sorted(groups_dict, key=lambda rc: groups_dict[rc][0].get("stack", -1),
                        reverse=True)
+        groups: list[Node] = []
         for rc in order:
-            wins = groups[rc]
+            wins = groups_dict[rc]
             app = self.app_index.match_window(rc, wins[0].get("desktop_file", ""))
             if app is not None:
                 self.app_index.note_seen(app.app_id)
                 label = app.name
-                icon = QIcon.fromTheme(app.icon) if app.icon else QIcon()
+                icon = _icon_for(app.icon)
             else:
                 # App without a .desktop (e.g. AppImage): pseudo entry from /proc.
                 label, icon = self._pseudo_from_proc(rc, wins)
-                icon = icon or QIcon.fromTheme(rc)
+                icon = icon or _icon_for(rc)
             # Every group has a RED close bar on its main symbol (closes the
             # active/main window); multi-window groups additionally drill to the
             # others on hover and close ALL via the count badge.
@@ -520,8 +587,54 @@ class RadialOverlay(QWidget):
                         kind=IT_WINDOW,
                         label=self._window_label(app_name, w.get("caption", "")),
                         icon=icon, data=w["id"], closable=True))
-            nodes.append(node)
-        if cfg["show_tray"]:
+            groups.append(node)
+
+        # Apply ping-pong sorting to groups based on self._mru
+        if groups:
+            id_to_group: dict[str, Node] = {}
+            for g in groups:
+                for w in (g.data or []):
+                    id_to_group[w["id"]] = g
+
+            cur = self._active_window_id
+            settled = (time.monotonic() - self._last_activate_time) > 2.0
+            if cur and cur in id_to_group:
+                if not self._mru or (settled and self._mru[0] != cur):
+                    self._mru = [cur] + [x for x in self._mru if x != cur]
+            # prune dead windows from the MRU
+            self._mru = [x for x in self._mru if x in id_to_group]
+
+            prev_id = next((x for x in self._mru[1:] if x in id_to_group), None)
+            if prev_id is not None:
+                anchor = id_to_group[prev_id]
+            else:
+                # fallback: stacking-based previous window
+                active_group = id_to_group.get(cur)
+                others = [g for g in groups if g is not active_group]
+                if others:
+                    anchor = others[0]
+                elif active_group is not None and active_group.children:
+                    anchor = active_group
+                else:
+                    anchor = groups[0]
+
+            def grank(g):
+                best = len(self._mru) + 1
+                for w in (g.data or []):
+                    if w["id"] in self._mru:
+                        best = min(best, self._mru.index(w["id"]))
+                return best
+
+            others = sorted((g for g in groups if g is not anchor), key=grank)
+            left, right = [], []
+            for i, g in enumerate(others):
+                (left if i % 2 == 0 else right).append(g)
+            arranged = left[::-1] + [anchor] + right
+        else:
+            arranged = []
+
+        nodes.extend(arranged)
+        if not cfg["show_apps"] and cfg["show_tray"]:
             nodes.append(self._build_tray_node())
         self.ring2[SEC_WINDOWS] = nodes
 
@@ -596,7 +709,7 @@ class RadialOverlay(QWidget):
                 exe = ""
         name = rc.capitalize() if rc else (os.path.basename(exe) if exe else label)
         if exe:
-            ic = QIcon.fromTheme(os.path.basename(exe).lower())
+            ic = _icon_for(os.path.basename(exe).lower())
             if not ic.isNull():
                 icon = ic
             app_id = f"pseudo:{rc or os.path.basename(exe)}"
@@ -739,10 +852,12 @@ class RadialOverlay(QWidget):
         if cfg["show_recent_apps"]:
             for app in self.app_index.frequent(cfg["max_recent_apps"], exclude=running):
                 nodes.append(Node(kind=IT_APP, label=app.name,
-                                  icon=QIcon.fromTheme(app.icon) if app.icon else QIcon(),
+                                  icon=_icon_for(app.icon),
                                   data=app))
         if cfg["show_session"]:
             nodes.append(self._session_node())
+        if cfg["show_tray"]:
+            nodes.append(self._build_tray_node())
         # The pivot is centred by _layout_apps_recents (its position here only
         # seeds a tidy order).
         if pivot is not None:
@@ -783,14 +898,14 @@ class RadialOverlay(QWidget):
                                   children=self._fav_nodes()))
             node = Node(kind=IT_CATEGORY, label=name, sublabel=f"{len(apps)} apps",
                         children=[Node(kind=IT_APP, label=a.name, data=a,
-                                       icon=QIcon.fromTheme(a.icon) if a.icon else QIcon())
+                                       icon=_icon_for(a.icon))
                                   for a in apps])
             nodes.append(node)
         return nodes
 
     def _fav_nodes(self) -> list[Node]:
         return [Node(kind=IT_APP, label=a.name, data=a,
-                     icon=QIcon.fromTheme(a.icon) if a.icon else QIcon())
+                     icon=_icon_for(a.icon))
                 for a in self.app_index.favorites()]
 
     def _file_icon(self, path: str, icon_name: str = "") -> QIcon:
@@ -995,14 +1110,15 @@ class RadialOverlay(QWidget):
         row when it carries the relocated Session symbol."""
         pivot = next((n for n in nodes if n.kind in (IT_MENU, IT_FAV_MENU)), None)
         session = next((n for n in nodes if n.kind == IT_SESSION), None)
-        recents = [n for n in nodes if n is not pivot and n is not session]
+        tray = next((n for n in nodes if n.kind == IT_TRAY_MENU), None)
+        recents = [n for n in nodes if n is not pivot and n is not session and n is not tray]
 
         r_out = self.r2c + self.seg_depth / 2
         slot = math.degrees(self._seg_phys_w / r_out)
         gap = math.degrees(self._gap_phys / r_out)
         cap = max(1, int(360.0 / slot) - self._ring_gap(2))
 
-        reserved = (1 if pivot else 0) + (1 if session else 0)
+        reserved = (1 if pivot else 0) + (1 if session else 0) + (1 if tray else 0)
         target = len(recents) + reserved
         L = min(cap, target)
         # Force an ODD row so a true centre slot exists for the pivot symbol.
@@ -1010,18 +1126,37 @@ class RadialOverlay(QWidget):
             L -= 1
         L = max(L, reserved)
 
+        recents_cap = L - reserved
+        on_ring2 = recents[:recents_cap]
+        overflow = recents[recents_cap:]
+
+        # Apply ping-pong sorting to the items on ring 2
+        left, right = [], []
+        for i, r in enumerate(on_ring2):
+            (left if i % 2 == 0 else right).append(r)
+        arranged_on_ring2 = left[::-1] + right
+
         # Compose row 0: pivot at the exact centre column, session at the last.
         row0 = [None] * L
         if pivot is not None:
-            row0[(L - 1) // 2] = pivot
+            mid = (L - 1) // 2
+            row0[mid] = pivot
+            if tray is not None:
+                if mid - 1 >= 0 and row0[mid - 1] is None:
+                    row0[mid - 1] = tray
+                elif mid + 1 < L and row0[mid + 1] is None:
+                    row0[mid + 1] = tray
+        else:
+            if tray is not None:
+                row0[0] = tray
         if session is not None:
             row0[L - 1] = session
+
         ri = 0
         for col in range(L):
-            if row0[col] is None and ri < len(recents):
-                row0[col] = recents[ri]
+            if row0[col] is None and ri < len(arranged_on_ring2):
+                row0[col] = arranged_on_ring2[ri]
                 ri += 1
-        overflow = recents[ri:]
 
         total = slot * L
         for col, node in enumerate(row0):
@@ -1031,7 +1166,57 @@ class RadialOverlay(QWidget):
             node.radius = self.r2c
             node.half_deg = (slot - gap) / 2
             node.row = 0
+        # Mutate the input nodes list in-place so that the visual/spatial order is correct
+        nodes[:] = [n for n in row0 if n is not None] + overflow
         # Remaining recents start on ring 3 (gap 7), then ring 4 (gap 10)...
+        if overflow:
+            base = self.r2c + (self.seg_depth + 2 * self.s)
+            self._layout_radial(overflow, center, base, self.seg_depth,
+                                RING3_SPAN, start_ring=3)
+
+    def _layout_windows_row(self, nodes: list, center: float) -> None:
+        """Windows sector row: Show Desktop leads and the Tray symbol closes
+        ring 2 -- both are PINNED to ring 2 and never wrap onto ring 3, no
+        matter how many window groups overflow.  The window groups fill the
+        space between them on ring 2; surplus groups fan out to ring 3+ with
+        the usual per-ring gaps."""
+        sd = next((n for n in nodes if n.kind == IT_SHOW_DESKTOP), None)
+        tray = next((n for n in nodes if n.kind == IT_TRAY_MENU), None)
+        groups = [n for n in nodes if n is not sd and n is not tray]
+
+        r_out = self.r2c + self.seg_depth / 2
+        slot = math.degrees(self._seg_phys_w / r_out)
+        gap = math.degrees(self._gap_phys / r_out)
+        cap = max(1, int(360.0 / slot) - self._ring_gap(2))
+
+        reserved = (1 if sd else 0) + (1 if tray else 0)
+        # Ring-2 slots available for window groups (the pinned symbols take theirs).
+        group_cap = max(0, cap - reserved)
+        on_ring2 = groups[:group_cap]
+        overflow = groups[group_cap:]
+        L = len(on_ring2) + reserved
+
+        # Compose row 0 left-to-right: [Show Desktop] [groups...] [Tray].
+        row0: list = [None] * max(L, reserved)
+        col = 0
+        if sd is not None:
+            row0[0] = sd
+            col = 1
+        for g in on_ring2:
+            row0[col] = g
+            col += 1
+        if tray is not None:
+            row0[-1] = tray
+
+        total = slot * len(row0)
+        for c, node in enumerate(row0):
+            if node is None:
+                continue
+            node.angle = center - total / 2 + slot / 2 + c * slot
+            node.radius = self.r2c
+            node.half_deg = (slot - gap) / 2
+            node.row = 0
+        # Surplus window groups fan out to ring 3 (gap 7), then ring 4 (gap 10)...
         if overflow:
             base = self.r2c + (self.seg_depth + 2 * self.s)
             self._layout_radial(overflow, center, base, self.seg_depth,
@@ -1058,7 +1243,30 @@ class RadialOverlay(QWidget):
             # Session relocated into the files row -> keep it at the end of
             # ring 2, never wrapping onto ring 3.
             self._layout_pinned_row(nodes, c)
+        elif sec == SEC_WINDOWS:
+            # The tray symbol stays at the very end of ring 2 (and Show Desktop
+            # at the start) -- they never wrap onto ring 3, no matter how many
+            # window groups overflow.
+            self._layout_windows_row(nodes, c)
         else:
+            if sec == SEC_FILES:
+                # Rearrange recent files for layout_radial
+                r_out = self.r2c + self.seg_depth / 2
+                slot = math.degrees(self._seg_phys_w / r_out)
+                cap = max(1, int(360.0 / slot) - self._ring_gap(2))
+                
+                on_ring2 = nodes[:cap]
+                overflow = nodes[cap:]
+                
+                if on_ring2:
+                    anchor = on_ring2[0]
+                    others = on_ring2[1:]
+                    left, right = [], []
+                    for idx, f in enumerate(others):
+                        (left if idx % 2 == 0 else right).append(f)
+                    arranged = left[::-1] + [anchor] + right
+                    nodes[:] = arranged + overflow
+            
             self._layout_radial(nodes, c, self.r2c, self.seg_depth, span)
         for node in nodes:
             node.sector = sec
@@ -1947,8 +2155,6 @@ class RadialOverlay(QWidget):
     def _paint_sectors(self, p, cx, cy) -> None:
         # Draw every active sector's ring-1 band using its animated arc, so the
         # transformation (thirds <-> expanded/collapsed) is smooth.
-        acc = QColor(self.config.get("accent", "#37d0ff"))
-        acc.setAlpha(160)
         rin, rout = self.r1_in, self.r1_out
         # Only the selected sector is drawn once one is chosen (others are simply
         # gone, not animated away); the selected one animates its growth.
@@ -1967,7 +2173,20 @@ class RadialOverlay(QWidget):
             p.setBrush(SEG_BASE)
             p.setPen(Qt.PenStyle.NoPen)
             p.drawPath(path)
-            self._paint_edge_glow(p, cx, cy, path, rout, a0, a1)
+            
+            # Draw thin 3-sided accent border (left, outer, right) for Ring 1 segments
+            border_path = QPainterPath()
+            border_path.moveTo(cx + rin * math.cos(math.radians(a0)), cy + rin * math.sin(math.radians(a0)))
+            border_path.lineTo(cx + rout * math.cos(math.radians(a0)), cy + rout * math.sin(math.radians(a0)))
+            border_path.arcTo(self._arc_rect(cx, cy, rout), -a0, -(a1 - a0))
+            border_path.lineTo(cx + rin * math.cos(math.radians(a1)), cy + rin * math.sin(math.radians(a1)))
+            
+            acc = QColor(self.config.get("accent", "#37d0ff"))
+            acc.setAlpha(180)
+            p.setBrush(Qt.BrushStyle.NoBrush)
+            p.setPen(QPen(acc, max(1.0, 0.9 * self.s)))
+            p.drawPath(border_path)
+            
             # glyph at the (straight) sector nominal -- only while wide enough.
             if span > 26.0:
                 mid = self._nominal.get(sec, (a0 + a1) / 2)

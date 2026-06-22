@@ -330,13 +330,19 @@ class InputProxy:
     def _is_touchpad(dev: "InputDevice") -> bool:
         if VIRTUAL_MARKER in (dev.name or ""):
             return False
+        name_lower = (dev.name or "").lower()
+        if "touchpad" in name_lower or "trackpad" in name_lower or "synaptics" in name_lower:
+            return True
         caps = dev.capabilities()
         keys = caps.get(ecodes.EV_KEY, [])
         abs_codes = [a[0] if isinstance(a, tuple) else a
                      for a in caps.get(ecodes.EV_ABS, [])]
         has_xy = (ecodes.ABS_X in abs_codes
                   or ecodes.ABS_MT_POSITION_X in abs_codes)
-        return has_xy and ecodes.BTN_TOUCH in keys
+        is_touch = (ecodes.BTN_TOUCH in keys
+                    or ecodes.BTN_TOOL_FINGER in keys
+                    or ecodes.BTN_TOOL_DOUBLETAP in keys)
+        return has_xy and is_touch
 
     def _tp_full(self) -> bool:
         """A touchpad button is configured as trigger/cancel -> the touchpad must

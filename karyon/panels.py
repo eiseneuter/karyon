@@ -167,7 +167,7 @@ class SettingsPanel(QFrame):
         scroll.setWidget(inner)
         outer.addWidget(scroll)
 
-        title = QLabel("Karyon 1.0")
+        title = QLabel("Karyon 1.1")
         title.setObjectName("title")
         self._lay.addWidget(title)
 
