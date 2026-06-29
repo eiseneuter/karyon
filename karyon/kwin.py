@@ -15,7 +15,7 @@ import tempfile
 from pathlib import Path
 
 from PyQt6.QtCore import QObject, QTimer, pyqtSlot
-from PyQt6.QtDBus import QDBusConnection, QDBusInterface
+from PyQt6.QtDBus import QDBusConnection, QDBusConnectionInterface, QDBusInterface
 
 log = logging.getLogger(__name__)
 
@@ -87,6 +87,14 @@ var payload = JSON.stringify({rid: "__RID__",
 callDBus("%(svc)s", "%(path)s", "%(iface)s", "result", payload);
 """ % {"svc": RESULT_SERVICE, "path": RESULT_PATH, "iface": RESULT_IFACE}
 
+# Check whether the active window is fullscreen (for game / 3D-app detection).
+_FULLSCREEN_JS = """
+var a = workspace.activeWindow;
+var fs = a ? (a.fullScreen === true) : false;
+callDBus("%(svc)s", "%(path)s", "%(iface)s", "result",
+         JSON.stringify({rid: "__RID__", fullscreen: fs}));
+""" % {"svc": RESULT_SERVICE, "path": RESULT_PATH, "iface": RESULT_IFACE}
+
 _SHOW_DESKTOP_JS = """
 var wins = workspace.windowList ? workspace.windowList() : workspace.stackingOrder;
 var ignore = ["karyon", "python3", "plasmashell", "org.kde.plasmashell"];
@@ -129,10 +137,19 @@ class KWinBridge:
         self.cached_snapshot: dict | None = None
         self._desktop_minimized: list[str] = []
         self._activate_gen = 0
+        self._daemon_plugin: str | None = None
+        self._daemon_path: Path | None = None
 
         self._receiver = _ResultReceiver(self)
-        if not self._bus.registerService(RESULT_SERVICE):
-            log.warning("DBus-Result-Service bereits registriert (anderer Prozess?)")
+        # Use ReplaceExistingService so a restart after a crash/update never
+        # blocks on the previous (dying) instance still holding the name.
+        reg = self._bus.interface().registerService(
+            RESULT_SERVICE,
+            QDBusConnectionInterface.ServiceQueueOptions.ReplaceExistingService,
+            QDBusConnectionInterface.ServiceReplacementOptions.AllowReplacement,
+        )
+        if reg.value() == QDBusConnectionInterface.RegisterServiceReply.ServiceNotRegistered:
+            log.warning("DBus-Result-Service konnte nicht registriert werden")
         ok = self._bus.registerObject(
             RESULT_PATH, RESULT_IFACE, self._receiver,
             QDBusConnection.RegisterOption.ExportAllSlots,
@@ -147,6 +164,13 @@ class KWinBridge:
         except Exception:  # noqa: BLE001
             return
         rid = str(payload.get("rid", ""))
+        if rid == "fullscreen_event":
+            if hasattr(self, "_on_fullscreen_event") and self._on_fullscreen_event:
+                try:
+                    self._on_fullscreen_event(payload)
+                except Exception:  # noqa: BLE001
+                    log.exception("Fullscreen-Event-Callback fehlgeschlagen")
+            return
         entry = self._pending.pop(rid, None)
         if entry is None:
             return
@@ -350,3 +374,77 @@ class KWinBridge:
         # the toggle stuck restoring forever).  Own minimise (not KWin's Show
         # Desktop mode, which is cancelled the moment our overlay maps).
         self._run_fire(_SHOW_DESKTOP_JS)
+
+    # -- fullscreen detection (game / 3D-app inhibit) -----------------------
+    def start_fullscreen_daemon(self, callback) -> None:
+        """Load a persistent KWin script to monitor active window changes and
+        fullscreen state changes, notifying us via DBus results.
+        """
+        self._on_fullscreen_event = callback
+        js = """
+        var connected = {};
+        var prevActive = workspace.activeWindow;
+        function reportFS(w) {
+            var fs = w ? (w.fullScreen === true) : false;
+            var rc = w ? (w.resourceClass || "") : "";
+            callDBus("%(svc)s", "%(path)s", "%(iface)s", "result",
+                     JSON.stringify({rid: "fullscreen_event", fullscreen: fs, rc: rc}));
+        }
+        workspace.windowActivated.connect(function(w) {
+            if (prevActive && prevActive !== w) {
+                try {
+                    prevActive.keepAbove = false;
+                } catch (e) {}
+            }
+            prevActive = w;
+            if (w) {
+                var id = w.internalId.toString();
+                if (!connected[id]) {
+                    w.fullScreenChanged.connect(function() {
+                        if (workspace.activeWindow === w) {
+                            reportFS(w);
+                        }
+                    });
+                    connected[id] = true;
+                }
+            }
+            reportFS(w);
+        });
+        // Initial state report
+        reportFS(workspace.activeWindow);
+        """ % {"svc": RESULT_SERVICE, "path": RESULT_PATH, "iface": RESULT_IFACE}
+        self._run_persistent_script(js)
+
+    def _run_persistent_script(self, js: str) -> None:
+        plugin = f"dl_daemon_{os.getpid()}_{next(self._counter)}"
+        path = self._tmpdir / f"{plugin}.js"
+        try:
+            path.write_text(js, encoding="utf-8")
+        except Exception:  # noqa: BLE001
+            log.exception("KWin-Daemon-Script konnte nicht geschrieben werden")
+            return
+
+        iface = QDBusInterface("org.kde.KWin", "/Scripting",
+                               "org.kde.kwin.Scripting", self._bus)
+        iface.setTimeout(900)
+        reply = iface.call("loadScript", str(path), plugin)
+        args = reply.arguments()
+        if not args:
+            log.warning("loadScript fuer Daemon ohne Antwort: %s", reply.errorMessage())
+            return
+        sid = args[0]
+        if not isinstance(sid, int) or sid < 0:
+            log.warning("loadScript fuer Daemon lieferte ungueltige id: %r", sid)
+            return
+        script = QDBusInterface("org.kde.KWin", f"/Scripting/Script{sid}",
+                                "org.kde.kwin.Script", self._bus)
+        script.setTimeout(900)
+        script.call("run")
+        self._daemon_plugin = plugin
+        self._daemon_path = path
+
+    def stop_fullscreen_daemon(self) -> None:
+        if self._daemon_plugin and self._daemon_path:
+            self._unload(self._daemon_plugin, self._daemon_path)
+            self._daemon_plugin = None
+            self._daemon_path = None

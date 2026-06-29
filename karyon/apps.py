@@ -49,7 +49,8 @@ class App:
 
 
 def _parse_desktop(path: Path, app_id: str) -> App | None:
-    name = icon = exec_line = wm_class = ""
+    names: dict[str, str] = {}
+    icon = exec_line = wm_class = ""
     terminal = no_display = hidden = False
     keywords: list = []
     categories: list = []
@@ -63,10 +64,14 @@ def _parse_desktop(path: Path, app_id: str) -> App | None:
             if not in_entry or "=" not in line:
                 continue
             key, _, val = line.partition("=")
-            key = key.split("[", 1)[0].strip()
+            key = key.strip()
             val = val.strip()
-            if key == "Name" and not name:
-                name = val
+            
+            if key.startswith("Name"):
+                if key == "Name":
+                    names[""] = val
+                elif key.startswith("Name[") and key.endswith("]"):
+                    names[key[5:-1]] = val
             elif key == "Icon":
                 icon = val
             elif key == "Exec":
@@ -87,6 +92,23 @@ def _parse_desktop(path: Path, app_id: str) -> App | None:
                 return None
     except Exception:  # noqa: BLE001
         return None
+
+    # Resolve name by matching locale preference
+    name = ""
+    loc = (os.environ.get("LC_MESSAGES") or os.environ.get("LANG")
+           or os.environ.get("LC_ALL") or "").split(".")[0]
+    locale_keys = []
+    if loc:
+        locale_keys.append(loc)
+        if "_" in loc:
+            locale_keys.append(loc.split("_")[0])
+    for k in locale_keys:
+        if k in names:
+            name = names[k]
+            break
+    if not name:
+        name = names.get("", "")
+
     if not name or not exec_line:
         return None
     return App(app_id=app_id, name=name, icon=icon, exec_line=exec_line,
@@ -334,13 +356,101 @@ class AppIndex:
                                    icon=icon, pseudo=True)
 
     # -- window matching ----------------------------------------------------
-    def match_window(self, rc: str, desktop_file: str = "") -> App | None:
+    def match_window(self, rc: str, desktop_file: str = "", pid: int = 0) -> App | None:
         rc_low = (rc or "").lower()
         if desktop_file:
             df = desktop_file.replace(".desktop", "").replace("/", "-")
             app = self._find_app(df)
             if app:
                 return app
+        if pid:
+            steam_id = ""
+            # 1) Try environment variables
+            try:
+                with open(f"/proc/{pid}/environ", "rb") as f:
+                    env_data = f.read()
+                for item in env_data.split(b"\x00"):
+                    if item.startswith(b"SteamAppId=") or item.startswith(b"STEAM_COMPAT_APP_ID="):
+                        steam_id = item.split(b"=", 1)[1].decode("utf-8", errors="ignore")
+                        break
+            except Exception:
+                pass
+
+            # 2) Try executable path lookup in appmanifest .acf files
+            if not steam_id:
+                try:
+                    exe = os.readlink(f"/proc/{pid}/exe")
+                    if exe and "steamapps/common/" in exe:
+                        parts = exe.split("steamapps/common/", 1)
+                        steamapps_dir = os.path.join(parts[0], "steamapps")
+                        rest = parts[1].split("/", 1)
+                        if rest:
+                            installdir = rest[0].lower()
+                            if os.path.isdir(steamapps_dir):
+                                import re
+                                for filename in os.listdir(steamapps_dir):
+                                    if filename.startswith("appmanifest_") and filename.endswith(".acf"):
+                                        acf_path = os.path.join(steamapps_dir, filename)
+                                        try:
+                                            with open(acf_path, "r", encoding="utf-8", errors="ignore") as f:
+                                                content = f.read()
+                                            appid_match = re.search(r'"appid"\s+"([^"]+)"', content)
+                                            installdir_match = re.search(r'"installdir"\s+"([^"]+)"', content)
+                                            if appid_match and installdir_match:
+                                                if installdir_match.group(1).lower() == installdir:
+                                                    steam_id = appid_match.group(1)
+                                                    break
+                                        except Exception:
+                                            pass
+                except Exception:
+                    pass
+
+            if steam_id:
+                # 1) Search in scanned apps Exec line first (since Steam menu entries are named '<Name>.desktop' instead of 'steam_app_<appid>.desktop')
+                for aid, app in self.apps.items():
+                    if f"rungameid/{steam_id}" in app.exec_line or f"applaunch/{steam_id}" in app.exec_line:
+                        return app
+                
+                # 2) Try direct ID lookup
+                app = self._find_app(f"steam_app_{steam_id}")
+                if app:
+                    return app
+
+                # 3) Fallback: Read game name from appmanifest_*.acf and register as a pseudo app
+                game_name = ""
+                steam_paths = [
+                    os.path.expanduser("~/.local/share/Steam/steamapps"),
+                    os.path.expanduser("~/.steam/steam/steamapps"),
+                ]
+                try:
+                    exe = os.readlink(f"/proc/{pid}/exe")
+                    if exe and "steamapps/common/" in exe:
+                        parts = exe.split("steamapps/common/", 1)
+                        steam_paths.append(os.path.join(parts[0], "steamapps"))
+                except Exception:
+                    pass
+
+                for s_path in steam_paths:
+                    acf_path = os.path.join(s_path, f"appmanifest_{steam_id}.acf")
+                    if os.path.isfile(acf_path):
+                        try:
+                            with open(acf_path, "r", encoding="utf-8", errors="ignore") as f:
+                                content = f.read()
+                            import re
+                            name_match = re.search(r'"name"\s+"([^"]+)"', content)
+                            if name_match:
+                                game_name = name_match.group(1)
+                                break
+                        except Exception:
+                            pass
+
+                if not game_name:
+                    game_name = rc.capitalize() if rc else f"Steam Game {steam_id}"
+
+                # Register pseudo app so it has a name and icon
+                pseudo_id = f"steam_app_{steam_id}"
+                self.add_pseudo(pseudo_id, game_name, f"steam steam://rungameid/{steam_id}", f"steam_icon_{steam_id}")
+                return self._pseudo[pseudo_id]
         if rc:
             app = self._find_app(rc)
             if app:

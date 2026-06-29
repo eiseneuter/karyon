@@ -148,6 +148,9 @@ class InputProxy:
 
         self.read_only = False
         self.capture_key = False  # capture-next-key mode for settings
+        # When True the trigger is not consumed and all input is forwarded 1:1.
+        # Used to pass mouse through while a fullscreen game/3D-app is active.
+        self.inhibit = False
 
         # runtime state
         self.state = IDLE
@@ -165,6 +168,18 @@ class InputProxy:
         self._last_gesture_rel = (0.0, 0.0)   # raw travel of the last flick
         self._press_path = ""
         self._trigger_replayed = False
+
+    def set_inhibit(self, value: bool) -> None:
+        """Enable or disable input inhibit (thread-safe).
+
+        When inhibited the trigger button is no longer consumed and all mouse
+        events are forwarded 1:1.  Used to keep the mouse working normally
+        while a fullscreen game / 3-D app holds exclusive pointer grab.
+        """
+        self.inhibit = bool(value)
+        if value and self.state != IDLE:
+            # Drop any in-progress press so the overlay doesn't get stuck open.
+            self.state = IDLE
 
     # -- lifecycle ----------------------------------------------------------
     def start(self) -> None:
@@ -224,7 +239,17 @@ class InputProxy:
         self._ui_keys = None
         self._ui_abs = None
 
-    # -- device classification ---------------------------------------------
+    # Names of remote-input / notification input forwarders that must never be
+    # exclusively grabbed -- grabbing them stalls the host when the remote device
+    # is idle (KDE Connect), or makes the remote input unusable (Barrier/Synergy).
+    _REMOTE_INPUT_NAMES = ("kde connect", "kdeconnect", "barrier", "synergy",
+                           "input-leap", "deskflow")
+
+    @classmethod
+    def _is_remote_input(cls, dev: "InputDevice") -> bool:
+        name = (dev.name or "").lower()
+        return any(kw in name for kw in cls._REMOTE_INPUT_NAMES)
+
     @staticmethod
     def _is_mouse(dev: "InputDevice") -> bool:
         if VIRTUAL_MARKER in (dev.name or ""):
@@ -283,6 +308,12 @@ class InputProxy:
             except Exception:  # noqa: BLE001
                 continue
             try:
+                # Remote-input forwarders (KDE Connect, Barrier, …) must never
+                # be grabbed: an exclusive grab stalls the host when the remote
+                # is idle and causes the system cursor to freeze.
+                if self._is_remote_input(dev):
+                    dev.close()
+                    continue
                 if self._is_mouse(dev):
                     seen_mice.add(path)
                     if path not in self._devices:
@@ -309,6 +340,7 @@ class InputProxy:
                 except Exception:  # noqa: BLE001
                     pass
         self._reconcile(seen_mice, seen_kb, seen_tp)
+
 
     def _add_mouse(self, path: str, dev: "InputDevice") -> None:
         try:
@@ -573,6 +605,11 @@ class InputProxy:
             pass
 
     def _handle_mouse_event(self, ev, path: str) -> None:
+        # When inhibited (fullscreen game active) forward everything 1:1 so the
+        # game keeps exclusive mouse control.
+        if self.inhibit:
+            self._forward(ev, path)
+            return
         codes = _trigger_codes(self.config)
         chord = self.config.get("trigger_button") == "lmb_rmb"
 

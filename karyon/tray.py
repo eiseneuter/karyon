@@ -231,6 +231,20 @@ def hidden_tray_items() -> list[TrayItem]:
     return _items_for([i for i in _DRAWER_ITEMS if _hw_present(i)])
 
 
+_MESSENGER_KEYWORDS = (
+    "rambox", "signal", "whatsapp", "telegram", "discord", "element", "slack",
+    "thunderbird", "evolution", "kmail", "skype", "teams", "zoom", "matrix",
+    "session", "threema", "viber", "messenger", "chat", "mail", "outlook",
+    "protonmail", "gmail", "icq", "pidgin", "hexchat", "mumble", "riot",
+    "wechat", "line"
+)
+
+
+def _is_messenger(label: str) -> bool:
+    low = label.lower()
+    return any(kw in low for kw in _MESSENGER_KEYWORDS)
+
+
 # ---------------------------------------------------------------------------
 # SNI worker (busctl in a worker thread -- never block the GUI thread).
 # ---------------------------------------------------------------------------
@@ -519,6 +533,8 @@ class TrayManager(QObject):
     def _on_items(self, items: list) -> None:
         for it in items:
             nm = _norm_app(it.label)
+            if not _is_messenger(nm):
+                continue
             matched = next((p for p in self._pending_notif
                             if p and (p in nm or nm in p)), None)
             if matched:

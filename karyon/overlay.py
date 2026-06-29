@@ -7,9 +7,9 @@ from __future__ import annotations
 
 import logging
 import math
+import os
 import time
 from dataclasses import dataclass, field
-import os
 
 from PyQt6.QtCore import (Qt, QTimer, QPoint, QPointF, QRect, QRectF,
                           QMimeDatabase, pyqtSignal)
@@ -45,6 +45,7 @@ IT_FAV_MENU = "fav_menu"
 IT_FILE = "file"
 IT_CTRL_BTN = "ctrl_btn"
 IT_TRAY_MENUITEM = "tray_menuitem"   # an entry from an app's DBus context menu
+IT_MAIL = "mail"                     # new-message segment at the end of ring 2
 
 # -- angle constants --------------------------------------------------------
 ANG_GAP = 0.6
@@ -146,6 +147,11 @@ def _icon_for(name: str) -> QIcon:
     Results are cached per name."""
     if not name:
         return QIcon()
+    
+    # Map common window classes/executables without direct icons to standard icons
+    if name.lower() in ("soffice", "soffice.bin"):
+        name = "libreoffice"
+
     cached = _icon_cache.get(name)
     if cached is not None:
         return cached
@@ -170,7 +176,7 @@ def _icon_for(name: str) -> QIcon:
                 if not qi.isNull():
                     _icon_cache[name] = qi
                     return qi
-    # 3b) inside any icon-theme tree: <root>/<theme>/<cat>/<size>/<name>.<ext>
+    # 3b) inside any icon-theme tree: <root>/<theme>/<size>/<cat>/<name>.<ext>
     for root in roots:
         if not os.path.isdir(root):
             continue
@@ -180,16 +186,17 @@ def _icon_for(name: str) -> QIcon:
                 continue
             for cat in _ICON_CATS:
                 for size in _ICON_SIZES:
-                    cdir = os.path.join(tdir, cat, size)
-                    if not os.path.isdir(cdir):
-                        continue
-                    for ext in _PIXMAP_EXTS:
-                        p = os.path.join(cdir, low + ext)
-                        if os.path.exists(p):
-                            qi = QIcon(p)
-                            if not qi.isNull():
-                                _icon_cache[name] = qi
-                                return qi
+                    # Try both <size>/<cat> (standard) and <cat>/<size>
+                    for cdir in (os.path.join(tdir, size, cat), os.path.join(tdir, cat, size)):
+                        if not os.path.isdir(cdir):
+                            continue
+                        for ext in _PIXMAP_EXTS:
+                            p = os.path.join(cdir, low + ext)
+                            if os.path.exists(p):
+                                qi = QIcon(p)
+                                if not qi.isNull():
+                                    _icon_cache[name] = qi
+                                    return qi
     _icon_cache[name] = ic
     return ic
 
@@ -229,6 +236,11 @@ class RadialOverlay(QWidget):
         self._tick_timer = QTimer(self)
         self._tick_timer.setSingleShot(True)
         self._tick_timer.timeout.connect(self._tick)
+
+        self._mail_blink_timer = QTimer(self)
+        self._mail_blink_timer.setSingleShot(True)
+        self._mail_blink_timer.timeout.connect(self._on_mail_blink_timeout)
+        self._mail_blink_state = 0
 
         self._glyph_cache: dict = {}
         self._icon_pixmap_cache: dict = {}
@@ -364,6 +376,7 @@ class RadialOverlay(QWidget):
             QTimer.singleShot(0, self.tray.refresh_now)
         self.showFullScreen()
         self.raise_()
+        self._check_start_mail_blink()
         # Hide the system cursor.  Because we grab the mouse via evdev the
         # compositor pointer never "enters" this surface, so a per-widget blank
         # cursor set before show can be ignored on Wayland -- re-assert it after
@@ -471,6 +484,7 @@ class RadialOverlay(QWidget):
             self._recenter_on_cursor(snapshot.get("cursor"))
             if self.config.get("focus_window_switcher", True):
                 self._preselect_window()
+        self._check_start_mail_blink()
         self.request_repaint()
 
     def _recenter_on_cursor(self, cursor) -> None:
@@ -555,7 +569,8 @@ class RadialOverlay(QWidget):
         groups: list[Node] = []
         for rc in order:
             wins = groups_dict[rc]
-            app = self.app_index.match_window(rc, wins[0].get("desktop_file", ""))
+            app = self.app_index.match_window(rc, wins[0].get("desktop_file", ""),
+                                              pid=int(wins[0].get("pid", 0) or 0))
             if app is not None:
                 self.app_index.note_seen(app.app_id)
                 label = app.name
@@ -625,17 +640,51 @@ class RadialOverlay(QWidget):
                         best = min(best, self._mru.index(w["id"]))
                 return best
 
-            others = sorted((g for g in groups if g is not anchor), key=grank)
-            left, right = [], []
-            for i, g in enumerate(others):
-                (left if i % 2 == 0 else right).append(g)
-            arranged = left[::-1] + [anchor] + right
+            # Determine which window is the "current" and which is "previous":
+            # MRU[0] = most recent active (current, shown at center)
+            # MRU[1] = previously active (just left of center, forms the pair)
+            cur_id = next((x for x in self._mru if x in id_to_group), None)
+            prev_id = next((x for x in self._mru[1:] if x in id_to_group), None) if cur_id else None
+
+            cur_group = id_to_group.get(cur_id) if cur_id else None
+            prev_group = id_to_group.get(prev_id) if prev_id else None
+
+            # Build "middle" pair: [prev, cur] = [..., prev, cur, ...]
+            middle = []
+            if cur_group is not None:
+                middle.append(cur_group)
+            if prev_group is not None and prev_group is not cur_group:
+                middle.insert(0, prev_group)  # prev to the left of cur
+
+            # Sort remaining by MRU rank (most recent first)
+            center_set = set(id(g) for g in middle)
+            others = sorted(
+                (g for g in groups if id(g) not in center_set),
+                key=grank,
+            )
+
+            # Split: right gets first half (more recent), left gets second half (older)
+            # Result: [...older_left | prev | cur | newer_right...]
+            half = (len(others) + 1) // 2  # favour right with extra item if odd
+            right = others[:half]           # most recent continue right of center
+            left = others[half:]            # older continue left (reversed so oldest is leftmost)
+            arranged = left[::-1] + middle + right
         else:
             arranged = []
 
         nodes.extend(arranged)
         if not cfg["show_apps"] and cfg["show_tray"]:
             nodes.append(self._build_tray_node())
+        # Mail segment: a dedicated ring-2 segment at the very END of the
+        # windows row, shown only when a tray app signals a new message.  It
+        # carries the first attention item's data so releasing on it activates
+        # that app.  Pinned to ring 2 (never wraps to ring 3) by the layout.
+        att = self._tray_attention()
+        if att:
+            mail_node = Node(kind=IT_MAIL, label="Neue Nachricht",
+                             passive=True, glow=True, glyph="mail",
+                             data=att[0].data)
+            nodes.append(mail_node)
         self.ring2[SEC_WINDOWS] = nodes
 
     # Untitled / unsaved-document markers across common apps and locales.
@@ -645,11 +694,35 @@ class RadialOverlay(QWidget):
 
     @staticmethod
     def _clean_caption(cap: str) -> str:
+        if not cap:
+            return ""
+        # Try to recover double-encoded UTF-8 (common in GTK window titles under KWin/XWayland)
+        try:
+            cap = cap.encode('latin-1').decode('utf-8')
+        except (UnicodeEncodeError, UnicodeDecodeError):
+            pass
+
         # Drop Unicode control/format chars (directional marks etc.) that some
         # apps put in their title and that render as stray boxes/symbols.
+        # Also drop:
+        #   Co = Private Use Area (Nerd Fonts icons, …)
+        #   Cs = Surrogate halves (should not appear in Python str, but guard anyway)
+        #   Cn = Unassigned codepoints (render as boxes / replacement chars)
+        import re
         import unicodedata
-        return "".join(ch for ch in (cap or "")
-                       if unicodedata.category(ch)[0] != "C").strip()
+        cleaned = []
+        for ch in (cap or ""):
+            cat = unicodedata.category(ch)
+            if cat in ("Cc", "Cf", "Co", "Cs", "Cn") or ch == "\ufffd":
+                continue
+            if cat == "Zs" and ch != " ":
+                # Normalize non-standard spaces to standard space
+                cleaned.append(" ")
+            else:
+                cleaned.append(ch)
+        res = "".join(cleaned)
+        return re.sub(r"\s+", " ", res).strip()
+
 
     def _normalize_loc(self, loc: str) -> str:
         loc = loc.strip()
@@ -708,10 +781,39 @@ class RadialOverlay(QWidget):
             except Exception:  # noqa: BLE001
                 exe = ""
         name = rc.capitalize() if rc else (os.path.basename(exe) if exe else label)
-        if exe:
-            ic = _icon_for(os.path.basename(exe).lower())
+        
+        # Determine fallback icon name
+        icon_name = rc.lower() if rc else (os.path.basename(exe).lower() if exe else "")
+        if "soffice" in icon_name or "libreoffice" in icon_name:
+            cap = (wins[0].get("caption") or "").lower()
+            if "writer" in cap or "document" in cap or "dokument" in cap or "unbenannt" in cap or "untitled" in cap:
+                icon_name = "libreoffice-writer"
+                # Check for calc/impress keywords inside the untitled string
+                if "tabelle" in cap or "calc" in cap or "spreadsheet" in cap:
+                    icon_name = "libreoffice-calc"
+                elif "präsentation" in cap or "presentation" in cap or "impress" in cap:
+                    icon_name = "libreoffice-impress"
+                elif "zeichnung" in cap or "drawing" in cap or "draw" in cap:
+                    icon_name = "libreoffice-draw"
+                elif "formel" in cap or "math" in cap:
+                    icon_name = "libreoffice-math"
+            elif "calc" in cap or "spreadsheet" in cap or "tabelle" in cap:
+                icon_name = "libreoffice-calc"
+            elif "impress" in cap or "presentation" in cap or "präsentation" in cap:
+                icon_name = "libreoffice-impress"
+            elif "draw" in cap or "zeichnung" in cap:
+                icon_name = "libreoffice-draw"
+            elif "math" in cap or "formel" in cap:
+                icon_name = "libreoffice-math"
+            else:
+                icon_name = "libreoffice"
+
+        if icon_name:
+            ic = _icon_for(icon_name)
             if not ic.isNull():
                 icon = ic
+
+        if exe:
             app_id = f"pseudo:{rc or os.path.basename(exe)}"
             try:
                 self.app_index.add_pseudo(app_id, name, exe, "")
@@ -846,7 +948,8 @@ class RadialOverlay(QWidget):
                          glyph="star", children=self._fav_nodes())
         running = set()
         for w in windows:
-            app = self.app_index.match_window(w["rc"], w.get("desktop_file", ""))
+            app = self.app_index.match_window(w["rc"], w.get("desktop_file", ""),
+                                              pid=int(w.get("pid", 0) or 0))
             if app:
                 running.add(app.app_id)
         if cfg["show_recent_apps"]:
@@ -858,11 +961,13 @@ class RadialOverlay(QWidget):
             nodes.append(self._session_node())
         if cfg["show_tray"]:
             nodes.append(self._build_tray_node())
-        # The pivot is centred by _layout_apps_recents (its position here only
-        # seeds a tidy order).
+        # The pivot is centred: most recently used apps go right, older apps fill left.
+        # Result: [...older_left | pivot | recent_right...]
         if pivot is not None:
-            pos = len(nodes) // 2
-            nodes = nodes[:pos] + [pivot] + nodes[pos:]
+            half = (len(nodes) + 1) // 2   # favour right with extra if odd
+            right = nodes[:half]            # most recent on the right of pivot
+            left = nodes[half:]             # older on the left (reversed so oldest is leftmost)
+            nodes = left[::-1] + [pivot] + right
         self._apps_recent_nodes = nodes
         self._apps_cat_nodes = self._cat_nodes() if cfg["show_all_apps"] else []
         self.ring2[SEC_APPS] = nodes
@@ -1250,22 +1355,22 @@ class RadialOverlay(QWidget):
             self._layout_windows_row(nodes, c)
         else:
             if sec == SEC_FILES:
-                # Rearrange recent files for layout_radial
+                # Rearrange recent files for layout_radial using center-split ordering:
+                # most recent file at center, next files continue right, oldest fill left.
                 r_out = self.r2c + self.seg_depth / 2
                 slot = math.degrees(self._seg_phys_w / r_out)
                 cap = max(1, int(360.0 / slot) - self._ring_gap(2))
-                
+
                 on_ring2 = nodes[:cap]
                 overflow = nodes[cap:]
-                
+
                 if on_ring2:
-                    anchor = on_ring2[0]
-                    others = on_ring2[1:]
-                    left, right = [], []
-                    for idx, f in enumerate(others):
-                        (left if idx % 2 == 0 else right).append(f)
-                    arranged = left[::-1] + [anchor] + right
-                    nodes[:] = arranged + overflow
+                    anchor = on_ring2[0]   # most recent = center
+                    others = on_ring2[1:]  # remaining in recency order (2nd, 3rd, ...)
+                    half = (len(others) + 1) // 2
+                    right = others[:half]        # 2nd, 3rd, ... go right of center
+                    left = others[half:]         # older fill left (oldest furthest left)
+                    nodes[:] = left[::-1] + [anchor] + right + overflow
             
             self._layout_radial(nodes, c, self.r2c, self.seg_depth, span)
         for node in nodes:
@@ -1338,6 +1443,7 @@ class RadialOverlay(QWidget):
             self._apps_stage = 0
         self._rebuild_apps_stage()
         self._layout_sectors()
+        self._check_start_mail_blink()
 
     def _update_hover(self) -> None:
         r, a = self._pointer_polar()
@@ -1407,15 +1513,23 @@ class RadialOverlay(QWidget):
 
         # Sticky open group: while the pointer is beyond the band, keep it open
         # and select among its children.
-        if self.open_group is not None and r > self.r2_out:
-            self._hover_open_group_children(a)
-            return
+        if self.open_group is not None:
+            threshold = self.r3_out if self.open_group.radius > self.r2c + 0.1 else self.r2_out
+            if r > threshold:
+                self._hover_open_group_children(a)
+                return
 
         nodes = self.ring2[sec]
+        if self.open_group is not None:
+            nodes = [n for n in nodes if n.radius <= self.r2c + 0.1 or n is self.open_group]
         node = self._pick_nearest(nodes, r, a)
         if node is None:
             self.open_group = None
             return
+
+        if node.kind == IT_MAIL:
+            self._mail_blink_state = 0
+            self._mail_blink_timer.stop()
 
         # The outer-edge zone of THIS node's row (close / drill bar).  The bar
         # only spans the segment's own angular width -- require the cursor to be
@@ -1469,13 +1583,6 @@ class RadialOverlay(QWidget):
                                           getattr(node, "app_rc", ""))
                 and self._over_speaker(node, r, a)):
             self.hover_mute = True
-            return
-
-        # Tray symbol mail badge: a tray app has a new message -> releasing here
-        # opens that app (drilling into the tray still works via the bar).
-        if (node.kind == IT_TRAY_MENU and self._tray_attention()
-                and self._over_badge(node, r, a)):
-            self.hover_mail = True
             return
 
         # Drilldown into children.
@@ -1579,8 +1686,12 @@ class RadialOverlay(QWidget):
         kids = node.children
         if not kids:
             return
-        self._layout_radial(kids, node.angle, self.r3c, self.seg3_depth,
-                            RING3_SPAN, start_ring=3)
+        if node.radius > self.r2c + 0.1:
+            self._layout_radial(kids, node.angle, self.r4c, self.seg3_depth,
+                                RING3_SPAN, start_ring=4)
+        else:
+            self._layout_radial(kids, node.angle, self.r3c, self.seg3_depth,
+                                RING3_SPAN, start_ring=3)
 
     # -- control buttons ----------------------------------------------------
     def _layout_control_buttons(self, node: Node) -> None:
@@ -1658,21 +1769,14 @@ class RadialOverlay(QWidget):
                                    getattr(node, "app_rc", ""))
             self.close_menu()
             return
-        # Mail badge: open the app that has a new message (first attention app).
-        if self.hover_mail:
-            att = self._tray_attention()
-            if att:
-                self.close_menu()
-                try:
-                    self._activate_tray(Node(kind=IT_TRAY, label=att[0].label,
-                                             data=att[0].data))
-                except Exception:  # noqa: BLE001
-                    log.exception("Mail-Badge-Aktivierung fehlgeschlagen")
-                return
         self._activate(node, self.hover_close, self.hover_close_all)
 
     def _activate(self, node: Node, close_one: bool, close_all: bool) -> None:
         kind = node.kind
+        if kind == IT_MAIL:
+            self.close_menu()
+            self._activate_tray(node)
+            return
         if kind in (IT_WINDOW_GROUP, IT_WINDOW):
             if kind == IT_WINDOW_GROUP and node.data:
                 win_id = node.data[0]["id"]
@@ -1749,11 +1853,62 @@ class RadialOverlay(QWidget):
         # overlay never stays up with the mouse grabbed (was a freeze).
         self.close_menu()
 
+    def _service_pid(self, service: str) -> int:
+        if not service:
+            return 0
+        if "/" in service:
+            bus = service.split("/", 1)[0]
+        else:
+            bus = service
+        from PyQt6.QtDBus import QDBusConnection
+        reply = QDBusConnection.sessionBus().interface().servicePid(bus)
+        if reply.isValid():
+            return int(reply.value())
+        return 0
+
+    def _find_tray_item(self, service: str):
+        for it in getattr(self.tray, "sni_items", []) + getattr(self.tray, "hidden_sni_items", []):
+            if it.service == service:
+                return it
+        return None
+
+    def _find_window_node_for_tray(self, tray_item) -> Node | None:
+        if not tray_item:
+            return None
+        pid = self._service_pid(tray_item.service)
+        if pid > 0:
+            for node in self.ring2.get(SEC_WINDOWS, []):
+                if node.kind == IT_WINDOW_GROUP and getattr(node, "app_pid", 0) == pid:
+                    return node
+        label = (getattr(tray_item, "label", "") or "").lower()
+        if label:
+            for node in self.ring2.get(SEC_WINDOWS, []):
+                if node.kind == IT_WINDOW_GROUP:
+                    rc = (getattr(node, "app_rc", "") or "").lower()
+                    if rc and (rc in label or label in rc):
+                        return node
+        return None
+
+    def _activate_tray_item(self, tray_item, fallback_service=None) -> None:
+        service = tray_item.service if tray_item else fallback_service
+        if not service:
+            return
+        win_node = self._find_window_node_for_tray(tray_item)
+        if win_node and win_node.data:
+            win_id = win_node.data[0]["id"] if isinstance(win_node.data, list) else win_node.data
+            log.info("Tray activation: bringing window %s to foreground", win_id[:14])
+            self._note_activated(win_id)
+            self.kwin.activate(win_id)
+        else:
+            log.info("Tray activation: calling activate_sni for %s", service)
+            self.tray.activate_sni(service)
+
     def _activate_tray(self, node: Node) -> None:
         data = node.data or ("noop", None)
         kind, payload = data
         if kind == "sni":
-            self.tray.activate_sni(payload)
+            tray_item = self._find_tray_item(payload)
+            self._activate_tray_item(tray_item, fallback_service=payload)
         elif kind == "klipper":
             self.tray.show_clipboard()
         elif kind == "builtin":
@@ -1798,6 +1953,29 @@ class RadialOverlay(QWidget):
         (t0, x0, y0), (t1, x1, y1) = window[0], window[-1]
         dt = max(1e-4, t1 - t0)
         return math.hypot(x1 - x0, y1 - y0) / dt
+
+
+
+    def _check_start_mail_blink(self) -> None:
+        """Start the mail blink animation whenever the overlay opens with a
+        mail badge present, as long as a blink is not already running."""
+        if self.open_sector == -1 or self._mail_blink_state != 0:
+            return
+        nodes = self.ring2.get(SEC_WINDOWS, [])
+        has_mail = any(n.kind == IT_MAIL for n in nodes)
+        if has_mail:
+            self._mail_blink_state = 1
+            self._mail_blink_timer.start(250)
+            self.update()
+
+    def _on_mail_blink_timeout(self) -> None:
+        if self._mail_blink_state > 0 and self._mail_blink_state < 8:
+            self._mail_blink_state += 1
+            self._mail_blink_timer.start(250)
+            self.update()
+        else:
+            self._mail_blink_state = 0
+            self.update()
 
     # -- animation tick -----------------------------------------------------
     def _approach_angle(self, cur: float, tgt: float, rate: float = 0.32) -> float:
@@ -1923,7 +2101,14 @@ class RadialOverlay(QWidget):
         # ring2 nodes -- only once a sector is actually selected (no crammed
         # all-sectors preview on open; you pick a direction first).
         if self.open_sector != -1:
+            active_in_ring2 = (
+                (self.open_group is not None and self.open_group.radius <= self.r2c + 0.1)
+                or (self._ctrl_node is not None and self._ctrl_node.radius <= self.r2c + 0.1)
+            )
             for node in self.ring2.get(self.open_sector, []):
+                if active_in_ring2 and node.radius > self.r2c + 0.1:
+                    if node is not self.open_group and node is not self._ctrl_node:
+                        continue
                 self._paint_node(p, cx, cy, node)
 
         # ring3 drill children
@@ -2043,6 +2228,7 @@ class RadialOverlay(QWidget):
         p.drawEllipse(QPointF(cx, cy), self.r_hub, self.r_hub)
         self._paint_hub_ticks(p, cx, cy)
         self._paint_info_card(p, cx, cy)
+        # (Mail badge moved to a dedicated ring-2 segment -- see _build_windows)
 
     def _paint_hub_ticks(self, p, cx, cy) -> None:
         # 20px ticks at the trigger-zone boundaries, starting at the hub edge and
@@ -2255,6 +2441,8 @@ class RadialOverlay(QWidget):
         a1 = node.angle + hw
         # dark segment background (interpolates lighter on hover)
         t = node.hover_t
+        if node.kind == IT_MAIL and getattr(self, "_mail_blink_state", 0) in (1, 3, 5, 7):
+            t = 1.0
         col = QColor(
             int(SEG_BASE.red() + (SEG_HOVER.red() - SEG_BASE.red()) * t),
             int(SEG_BASE.green() + (SEG_HOVER.green() - SEG_BASE.green()) * t),
@@ -2315,11 +2503,7 @@ class RadialOverlay(QWidget):
         if node.kind == IT_WINDOW_GROUP and node.children:
             hot = node is self.hover_node and self.hover_close_all
             self._paint_count_badge(p, cx, cy, node, hot)
-        # Tray symbol: mail badge when a tray app signals a new message; red bg
-        # on hover (release opens that app).
-        if node.kind == IT_TRAY_MENU and self._tray_attention():
-            hot = node is self.hover_node and self.hover_mail
-            self._paint_mail_badge(p, cx, cy, node, hot)
+
         # Speaker badge for any app with a live audio stream (incl. while muted,
         # so it can be un-muted); opposite side from the count badge.
         if (node.kind == IT_WINDOW_GROUP and self.audio is not None
@@ -2442,31 +2626,6 @@ class RadialOverlay(QWidget):
             n = min(99, node.count or len(node.children) + 1)
             p.drawText(QRectF(bx - br, by - br, 2 * br, 2 * br),
                        Qt.AlignmentFlag.AlignCenter, str(n))
-
-    def _paint_mail_badge(self, p, cx, cy, node, hot: bool) -> None:
-        # Same size/border as the count badge, with a black envelope; cyan at
-        # rest, red on hover (release opens the messaging app).
-        r_b, a_b, br = self._badge_geom(node)
-        bx = cx + r_b * math.cos(math.radians(a_b))
-        by = cy + r_b * math.sin(math.radians(a_b))
-        border = max(0.8, 1.5 * self.s - 1.0)
-        p.setPen(QPen(QColor(12, 16, 22), border))
-        p.setBrush(RED if hot else CYAN)
-        p.drawEllipse(QPointF(bx, by), br, br)
-        # envelope: rectangle + flap (the 'V' to the centre)
-        black = QColor(8, 10, 14)
-        ew, eh = br * 1.02, br * 0.72
-        rect = QRectF(bx - ew / 2, by - eh / 2, ew, eh)
-        p.setBrush(Qt.BrushStyle.NoBrush)
-        pen = QPen(black, max(0.9, 1.1 * self.s))
-        pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
-        p.setPen(pen)
-        p.drawRect(rect)
-        p.drawPolyline(QPolygonF([
-            QPointF(rect.left(), rect.top()),
-            QPointF(bx, by + eh * 0.12),
-            QPointF(rect.right(), rect.top()),
-        ]))
 
     def _paint_bar(self, p, cx, cy, node, r_edge, color, faint=False,
                    framed=False) -> None:

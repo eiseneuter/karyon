@@ -443,6 +443,26 @@ def _g_weather(p) -> None:
         p.drawEllipse(QPointF(cx, cy), r, r)
 
 
+    p.setBrush(QBrush(GLYPH))
+    for cx, cy, r in ((32, 40, 9), (42, 42, 7), (24, 42, 6)):
+        p.drawEllipse(QPointF(cx, cy), r, r)
+
+
+def _g_mail(p) -> None:
+    # Envelope: rectangle + V-flap, stroke-only (matches the tray mail badge
+    # style but as a full-size glyph).
+    pen = _pen(5.0)
+    p.setPen(pen)
+    p.setBrush(Qt.BrushStyle.NoBrush)
+    rect = QRectF(12, 20, 40, 26)
+    p.drawRect(rect)
+    p.drawPolyline(QPolygonF([
+        QPointF(rect.left(), rect.top()),
+        QPointF(32, 33),
+        QPointF(rect.right(), rect.top()),
+    ]))
+
+
 _GLYPHS = {
     "hamburger": _hamburger,
     "star": _star,
@@ -483,4 +503,5 @@ _GLYPHS = {
     "lockkeys": _g_lockkeys,
     "inputmethod": _g_inputmethod,
     "weather": _g_weather,
+    "mail": _g_mail,
 }

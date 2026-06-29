@@ -59,6 +59,11 @@ DEFAULTS: dict = {
     "gesture_min_speed": 1300,
     "gesture_diagonal_size": 51,
     "gesture_time_window": 200,
+    "game_inhibit_apps": [
+        "steam_app_", "wine", "retroarch", "gzdoom", "dosbox", "scummvm",
+        "minecraft", "ryujinx", "yuzu", "dolphin-emu", "pcsx2", "rpcs3",
+        "citra", "cemu", ".exe"
+    ],
 }
 
 
@@ -111,6 +116,9 @@ class Config:
             elif isinstance(default, dict):
                 if isinstance(value, dict):
                     self._data[key] = dict(value)
+            elif isinstance(default, list):
+                if isinstance(value, list):
+                    self._data[key] = list(value)
         # Keyboard triggering was removed -> migrate legacy custom_key to a mouse
         # button so such configs keep working.
         if self._data.get("trigger_button") == "custom_key":

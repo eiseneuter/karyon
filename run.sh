@@ -17,4 +17,8 @@ if [[ -f "$LOCK" ]] && ! pgrep -f '^python3? -m karyon' >/dev/null 2>&1; then
     rm -f "$LOCK"
 fi
 
+# Force QT_QPA_PLATFORM=xcb to run via XWayland/X11. This allows KWin to stack
+# the overlay window above fullscreen windows (which is blocked by native Wayland
+# security/layering rules).
+export QT_QPA_PLATFORM=xcb
 exec python3 -m karyon "$@"

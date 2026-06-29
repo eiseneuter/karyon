@@ -78,6 +78,11 @@ def _ensure_kwin_taskbar_rule() -> None:
         w("skipswitcherrule", "2")
         w("above", "true")
         w("aboverule", "2")
+        # Force into KWin's OnScreenDisplay layer (8) which is above the
+        # fullscreen/active layer, so the overlay renders over any fullscreen
+        # window (video player, image viewer, browser fullscreen, etc.).
+        w("layer", "8")
+        w("layerrule", "2")
         subprocess.run(["kwriteconfig6", "--file", "kwinrulesrc",
                         "--group", "General", "--key", "count",
                         str(len(new_rules.split(",")))], env=child_env())
@@ -225,6 +230,17 @@ class Launcher:
         self.proxy.start()
         self.executor = GestureExecutor(self.proxy, self.config)
         self.settings.bind_proxy(self.proxy)
+
+        # Start persistent KWin fullscreen monitor daemon script.
+        def on_fullscreen(payload: dict) -> None:
+            is_fs = bool(payload.get("fullscreen", False))
+            rc = str(payload.get("rc", "")).lower()
+            games = self.config.get("game_inhibit_apps", [])
+            inhibit = is_fs and any(g.lower() in rc for g in games)
+            if self.proxy.inhibit != inhibit:
+                log.info("Vollbild-Inhibit (rc=%s): %s", rc, inhibit)
+            self.proxy.set_inhibit(inhibit)
+        self.kwin.start_fullscreen_daemon(on_fullscreen)
 
     # -- wiring -------------------------------------------------------------
     def _wire_overlay(self) -> None:
@@ -459,6 +475,10 @@ class Launcher:
     # -- lifecycle ----------------------------------------------------------
     def quit(self) -> None:
         try:
+            self.kwin.stop_fullscreen_daemon()
+        except Exception:  # noqa: BLE001
+            pass
+        try:
             self.proxy.stop()
         except Exception:  # noqa: BLE001
             pass
@@ -507,6 +527,7 @@ def _prompt_input_setup(app: QApplication, force: bool = False) -> None:
 def main() -> int:
     _sanitize_environment()
     _ensure_kwin_taskbar_rule()
+    _ensure_overlay_focus_rule()
     _ensure_focus_stealing_off()
 
     debug = ("--debug" in sys.argv
