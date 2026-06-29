@@ -36,5 +36,5 @@ window / taskbar / tray and rendered into the AppImage thumbnail at build time.
 * **Icon fallbacks:** Not all window icons are guaranteed to display; missing ones are replaced by text titles.
 * **Window interactions:** Grabbing or resizing a window while Karyon is starting up can result in faulty behavior.
 * **System tray recommendation:** Completely removing the system tray from your taskbar can limit some KDE functions (like the Klipper clipboard). If you need Klipper, I recommend keeping the system tray active somewhere on the destop and hide all elements.
-* **Accessing settings:** To configure Karyon while the overlay is closed, open the settings via the system tray icon.
+* **Accessing settings:** To configure Karyon while the overlay is closed, open the settings via the system tray.
 * **Volume control:** If enabled in the settings, you can quickly scroll to increase/decrease system volume inside the overlay, and middle-click to mute.
