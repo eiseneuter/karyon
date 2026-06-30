@@ -2,6 +2,27 @@
 
 Radial overlay launcher for KDE Plasma 6 (Wayland **and** X11). Hold the mouse trigger button to open a radial menu (Windows / Apps / Files + Tray, Session, Favorites, Gestures); hold and flick for a mouse gesture.
 
+## Features
+
+### Navigation & Control
+* **Customizable Triggers:** Bind separate mouse buttons for triggering and cancelling the radial overlay, and adjust the trigger hold duration to your preference.
+* **Smart Window Management:** Switch between windows with minimal movement, toggle show-desktop, close individual windows or entire application groups directly, toggle-mute individual application audio streams, and control whether the window-switcher automatically grabs focus.
+* **Mouse Gestures:** Flick in any of the 8 directions while holding the trigger button to invoke gestures (like *copy*, *paste*, *maximize*, or custom keys).
+
+### UI Customization & Aesthetics
+* **Visual Styling:** Personalize the menu's appearance with custom accent colors, overlay scale, and adjusting background transparency.
+* **Modular Layout Elements:** Dynamically toggle individual segments (showing/hiding active windows, recent apps, recent files, favorites, tray, or session controls) to keep the interface minimal or fully loaded.
+
+### Embedded Utilities
+* **System Tray & Notifications:** Access your system's tray operations and receive dedicated overlay notifications for new messages.
+* **System Hub:** Real-time clock, date, battery status, and CPU/RAM system monitor embedded directly inside the central hub.
+* **Volume & Task Progress:** Adjust system-wide volume instantly by scrolling the mouse wheel inside the overlay (middle-click to mute/unmute system volume), and view active file transfers or download operations via a visual progress ring.
+
+### Performance & Integration
+* **Game Mode:** Automatically suspends Karyon's input capture when a running game is detected, forwarding mouse inputs 1:1.
+* **Performance Mode:** Minimizes rendering overhead (e.g. disabling antialiasing and halve fps) for lower-end hardware.
+
+
 ## Run (from source)
     ./run.sh [--debug]
     # or: python3 -m karyon [--debug]
@@ -36,6 +57,5 @@ window / taskbar / tray and rendered into the AppImage thumbnail at build time.
 * **Drag & drop:** Dropping files in an other window is faster than before. Grab file, call up destination window with Karyon, drop file.
 * **Icon fallbacks:** Not all window icons are guaranteed to display; missing ones are replaced by text titles.
 * **Window interactions:** Grabbing or resizing a window while Karyon is starting up can result in faulty behavior.
-* **System tray recommendation:** Completely removing the system tray from your taskbar can limit some KDE functions (like the Klipper clipboard). If you need Klipper, I recommend keeping the system tray active somewhere on the destop and hide all elements.
+* **System tray recommendation:** Completely removing the system tray from your taskbar can limit some KDE functions (like the clipboard). If you need Klipper, I recommend keeping the system tray active somewhere on the desktop and hide all elements.
 * **Accessing settings:** To configure Karyon while the overlay is closed, open the settings via the system tray.
-* **Volume control:** If enabled in the settings, you can quickly scroll to increase/decrease system volume inside the overlay, and middle-click to mute.
