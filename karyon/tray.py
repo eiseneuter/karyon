@@ -304,8 +304,9 @@ class _SniWorker(QThread):
         icon_name = (icon_name_prop or {}).get("data", "") if icon_name_prop else ""
         # ALWAYS read the pixmap: many messengers (e.g. Rambox) expose NO icon
         # name and signal a new message ONLY by swapping their IconPixmap.
+        # Furthermore, the theme might not have the IconName, so we need the pixmap as fallback.
         px = prop("IconPixmap")
-        qicon = self._pixmap_icon(px) if not icon_name else None
+        qicon = self._pixmap_icon(px)
         # Icon fingerprint for change-detection.
         import hashlib
         parts = [icon_name or "", strprop("AttentionIconName")]

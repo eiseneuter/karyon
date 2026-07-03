@@ -594,24 +594,28 @@ class RadialOverlay(QWidget):
         cfg = self.config
         ignore = {"karyon", "python3", "plasmashell", "org.kde.plasmashell", "xembedsniproxy"}
         nodes: list[Node] = []
-        # group windows by resourceClass; order by stacking (most-recently-used
+        # group windows by desktop_file or resourceClass; order by stacking (most-recently-used
         # first), since workspace.windowList() is NOT in MRU order.
         groups_dict: dict[str, list] = {}
         for w in windows:
             rc = w["rc"]
+            df = w.get("desktop_file", "")
             if rc in ignore or not rc:
                 continue
             if w["active"]:
                 self._active_window_id = w["id"]
-            groups_dict.setdefault(rc, []).append(w)
-        for rc in groups_dict:
-            groups_dict[rc].sort(key=lambda w: w.get("stack", -1), reverse=True)
-        order = sorted(groups_dict, key=lambda rc: groups_dict[rc][0].get("stack", -1),
+            
+            group_key = df.replace(".desktop", "") if df else rc
+            groups_dict.setdefault(group_key, []).append(w)
+        for k in groups_dict:
+            groups_dict[k].sort(key=lambda w: w.get("stack", -1), reverse=True)
+        order = sorted(groups_dict, key=lambda k: groups_dict[k][0].get("stack", -1),
                        reverse=True)
         groups: list[Node] = []
-        for rc in order:
-            wins = groups_dict[rc]
-            app = self.app_index.match_window(rc, wins[0].get("desktop_file", ""),
+        for k in order:
+            wins = groups_dict[k]
+            primary_rc = wins[0]["rc"]
+            app = self.app_index.match_window(primary_rc, wins[0].get("desktop_file", ""),
                                               pid=int(wins[0].get("pid", 0) or 0))
             if app is not None:
                 self.app_index.note_seen(app.app_id)
@@ -619,8 +623,8 @@ class RadialOverlay(QWidget):
                 icon = _icon_for(app.icon)
             else:
                 # App without a .desktop (e.g. AppImage): pseudo entry from /proc.
-                label, icon = self._pseudo_from_proc(rc, wins)
-                icon = icon or _icon_for(rc)
+                label, icon = self._pseudo_from_proc(primary_rc, wins)
+                icon = icon or _icon_for(primary_rc)
             # Every group has a RED close bar on its main symbol (closes the
             # active/main window); multi-window groups additionally drill to the
             # others on hover and close ALL via the count badge.
@@ -632,9 +636,9 @@ class RadialOverlay(QWidget):
                         sector=SEC_WINDOWS)
             # Candidate app ids for matching LauncherEntry progress signals.
             node.progress_keys = [wins[0].get("desktop_file", ""),
-                                  (app.app_id if app is not None else ""), rc]
+                                  (app.app_id if app is not None else ""), primary_rc]
             node.app_pid = int(wins[0].get("pid", 0) or 0)
-            node.app_rc = rc
+            node.app_rc = primary_rc
             if len(wins) > 1:
                 node.sublabel = f"{len(wins)} windows"
                 node.count = len(wins)        # count badge on the group symbol
@@ -907,8 +911,13 @@ class RadialOverlay(QWidget):
             norm = "".join(ch for ch in (item.label or "").lower() if ch.isalnum())
             if "dumblauncher" in norm:
                 continue
+            ic = None
+            if item.icon_name:
+                ic = _icon_for(item.icon_name)
+            if not ic or ic.isNull():
+                ic = item.qicon
             child = Node(kind=IT_TRAY, label=item.label, data=item.data,
-                         icon=item.qicon)
+                         icon=ic)
             child.icon_name = item.icon_name
             child.icon_sig = item.icon_sig
             # The app's context menu -> drill into the symbol to fan it out.
@@ -939,8 +948,13 @@ class RadialOverlay(QWidget):
                       data=("noop", None), control="drawer")
         drawer.drawer_children = []
         for it in self.tray.hidden_tray_items():
+            ic = None
+            if it.icon_name:
+                ic = _icon_for(it.icon_name)
+            if not ic or ic.isNull():
+                ic = it.qicon
             k = Node(kind=IT_TRAY, label=it.label, data=it.data,
-                     glyph=it.glyph or "", icon=it.qicon)
+                     glyph=it.glyph or "", icon=ic)
             k.icon_name = it.icon_name
             k.icon_sig = it.icon_sig
             drawer.drawer_children.append(k)
@@ -1266,6 +1280,15 @@ class RadialOverlay(QWidget):
             if d < bestd:
                 best, bestd = sec, d
         return best
+        
+    def _has_progress(self, node) -> bool:
+        if self.progress is None or getattr(node, "kind", None) != IT_WINDOW_GROUP:
+            return False
+        keys = getattr(node, "progress_keys", ())
+        if not keys:
+            return False
+        frac = self.progress.get(*keys)
+        return frac is not None and frac > 0.001
 
     def _ring_gap(self, ring: int) -> int:
         """Empty segments left before a row wraps outward, per absolute ring:
@@ -1720,8 +1743,8 @@ class RadialOverlay(QWidget):
 
         # Control submenu has its own captured state.
         if self._ctrl_node is not None:
-            self._hover_control(r, a)
-            return
+            if self._hover_control(r, a):
+                return
 
         # In the Apps category stage, ring 1 (the band below ring 2) is the way
         # back: touching it morphs the row back to the recent apps.
@@ -1820,10 +1843,6 @@ class RadialOverlay(QWidget):
                     self.open_group = node
                     self._drill_armed = False
                     self._layout_children(node)
-            elif self.open_group is not node:
-                self.open_group = None
-        else:
-            self.open_group = None
 
     def _hover_open_group_children(self, a: float) -> None:
         r, _a = self._pointer_polar()
@@ -1944,10 +1963,10 @@ class RadialOverlay(QWidget):
                        radius=self.r4c, half_deg=(slot - gap) / 2)
             node.children_ctrl.append(btn)
 
-    def _hover_control(self, r: float, a: float) -> None:
+    def _hover_control(self, r: float, a: float) -> bool:
         node = self._ctrl_node
         if node is None:
-            return
+            return False
         depth = self.seg3_depth
         band = self.r4c
         buttons = getattr(node, "children_ctrl", [])
@@ -1965,7 +1984,7 @@ class RadialOverlay(QWidget):
             # when the pointer is really ON the segment, not merely nearest.
             self._ctrl_on_button = (bestd <= best.half_deg
                                     and abs(r - band) <= depth / 2)
-            return  # the repeat itself is driven from _tick (fires while still)
+            return True  # the repeat itself is driven from _tick (fires while still)
         # Not on a control button: keep this control open ONLY while its owning
         # symbol is still the nearest ring-3 item.  Sliding onto a different
         # drilldown sibling drops it, so that sibling opens its own next frame.
@@ -1975,10 +1994,10 @@ class RadialOverlay(QWidget):
             nearest = min(sibs, key=lambda n: _ang_dist(a, n.angle), default=node)
             if nearest is node and _ang_dist(a, node.angle) <= node.half_deg + 14:
                 self.hover_node = node     # still on the owning symbol
-                return
-        # Moved off (toward the hub or onto another drilldown): drop the control.
-        self._ctrl_node = None
-        self.hover_node = None
+                return True
+        # Moved off (toward the hub or onto another drilldown). 
+        # Do NOT drop the control, so it stays visible while hovering other items.
+        return False
 
     # -- release / activate -------------------------------------------------
     def on_release(self) -> None:
@@ -2401,7 +2420,10 @@ class RadialOverlay(QWidget):
         trans = self.config.get("transparency", 10) / 100.0
         p.setOpacity(1.0 - trans * 0.5)
 
-        current_state = (self.open_sector, id(self.open_group), id(self._ctrl_node), self.size().width())
+        active_progress_nodes = frozenset(
+            id(node) for node in self.ring2.get(self.open_sector, []) if self._has_progress(node)
+        )
+        current_state = (self.open_sector, id(self.open_group), id(self._ctrl_node), self.size().width(), active_progress_nodes)
         if not getattr(self, "_static_frame_cache", None) or getattr(self, "_cache_state", None) != current_state:
             from PyQt6.QtGui import QPixmap
             self._static_frame_cache = QPixmap(self.size())
@@ -2428,6 +2450,8 @@ class RadialOverlay(QWidget):
                     if active_in_ring2 and node.radius > self.r2c + 0.1:
                         if node is not self.open_group and node is not self._ctrl_node:
                             continue
+                    if self._has_progress(node):
+                        continue
                     old_h = node.hover_t; node.hover_t = 0.0
                     self._paint_node(cp, cx, cy, node)
                     node.hover_t = old_h
@@ -2465,6 +2489,22 @@ class RadialOverlay(QWidget):
                     (self._ctrl_node is not None and self.hover_node in getattr(self._ctrl_node, "children_ctrl", []))
             self._paint_node(tp, cx, cy, self.hover_node, ring3=ring3)
             
+        # LIVE nodes: nodes with progress animate independently of hover, so we
+        # bypass the static cache and draw them here.
+        if self.open_sector != -1:
+            active_in_ring2 = (
+                (self.open_group is not None and self.open_group.radius <= self.r2c + 0.1)
+                or (self._ctrl_node is not None and self._ctrl_node.radius <= self.r2c + 0.1)
+            )
+            for node in self.ring2.get(self.open_sector, []):
+                if node is self.hover_node:  # Already drawn above
+                    continue
+                if self._has_progress(node):
+                    if active_in_ring2 and node.radius > self.r2c + 0.1:
+                        if node is not self.open_group and node is not self._ctrl_node:
+                            continue
+                    self._paint_node(tp, cx, cy, node)
+                    
         tp.end()
         
         p.drawPixmap(0, 0, self._current_frame)
