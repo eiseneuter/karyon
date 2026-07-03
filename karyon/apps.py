@@ -340,16 +340,32 @@ class AppIndex:
 
     def frequent(self, n: int, exclude: set | None = None) -> list[App]:
         exclude = exclude or set()
+        resolved_exclude = set(exclude)
+        for x in exclude:
+            if x.startswith("pseudo:"):
+                real = self.match_window(x[7:])
+                if real:
+                    resolved_exclude.add(real.app_id)
+            else:
+                resolved_exclude.add(f"pseudo:{x}")
+
         scored = []
         for app_id in self._usage:
-            if app_id in exclude:
+            if app_id in resolved_exclude:
                 continue
             app = self.apps.get(app_id) or self._pseudo.get(app_id)
             if app is None or (app.no_display and not app.pseudo):
                 continue
-            scored.append((self._recency(app_id), app))
-        scored.sort(key=lambda t: t[0], reverse=True)
-        return [app for _, app in scored[:n]]
+            # If this is a pseudo app but we now have a real app matching its name,
+            # skip the pseudo app so we don't get duplicates.
+            if app_id.startswith("pseudo:"):
+                real_app = self.match_window(app_id[7:])
+                if real_app and not real_app.pseudo:
+                    continue
+            scored.append((self._usage_count(app_id), self._recency(app_id), app))
+        # Sort by usage count first, then by recency (both descending)
+        scored.sort(key=lambda t: (t[0], t[1]), reverse=True)
+        return [app for _, _, app in scored[:n]]
 
     def add_pseudo(self, app_id: str, name: str, exec_line: str, icon: str) -> None:
         self._pseudo[app_id] = App(app_id=app_id, name=name, exec_line=exec_line,
@@ -358,6 +374,29 @@ class AppIndex:
     # -- window matching ----------------------------------------------------
     def match_window(self, rc: str, desktop_file: str = "", pid: int = 0) -> App | None:
         rc_low = (rc or "").lower()
+        if rc_low in ("soffice", "soffice.bin") and pid:
+            try:
+                with open(f"/proc/{pid}/cmdline", "rb") as f:
+                    cmdline = f.read().decode("utf-8", errors="ignore").lower()
+                for key, app_id in (
+                    ("writer", "libreoffice-writer"),
+                    ("calc", "libreoffice-calc"),
+                    ("impress", "libreoffice-impress"),
+                    ("draw", "libreoffice-draw"),
+                    ("math", "libreoffice-math"),
+                    ("global", "libreoffice-writer"),
+                    ("web", "libreoffice-writer"),
+                ):
+                    if key in cmdline:
+                        app = self._find_app(app_id)
+                        if app:
+                            return app
+                app = self._find_app("libreoffice-startcenter") or self._find_app("libreoffice")
+                if app:
+                    return app
+            except Exception:
+                pass
+
         if desktop_file:
             df = desktop_file.replace(".desktop", "").replace("/", "-")
             app = self._find_app(df)
@@ -460,6 +499,11 @@ class AppIndex:
                     return app
             for aid, app in self.apps.items():
                 if aid.lower().endswith("." + rc_low) or aid.lower().endswith("-" + rc_low):
+                    return app
+            # Substring/prefix match for resource class (e.g. "brave" -> "brave-browser", "antigravity" -> "antigravity-ide")
+            for aid, app in self.apps.items():
+                aid_low = aid.lower().replace(".desktop", "")
+                if len(rc_low) >= 3 and (rc_low in aid_low or aid_low in rc_low):
                     return app
         return None
 

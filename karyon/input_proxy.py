@@ -416,8 +416,10 @@ class InputProxy:
         log.info("Touchpad erfasst: %s (Navigation)", dev.name)
 
     def _reconcile(self, seen_mice: set, seen_kb: set, seen_tp: set) -> None:
+        disconnected = False
         for path in list(self._touchpads):
             if path not in seen_tp:
+                disconnected = True
                 tp = self._touchpads.pop(path)
                 self._tp_scale.pop(path, None)
                 self._tp_last.pop(path, None)
@@ -437,6 +439,7 @@ class InputProxy:
                         pass
         for path in list(self._devices):
             if path not in seen_mice:
+                disconnected = True
                 dev = self._devices.pop(path)
                 try:
                     dev.ungrab()
@@ -455,11 +458,14 @@ class InputProxy:
                 log.info("Maus entfernt: %s", path)
         for path in list(self._keyboards):
             if path not in seen_kb:
+                disconnected = True
                 kb = self._keyboards.pop(path)
                 try:
-                    kb.close()
+                    kb.ungrab()
                 except Exception:  # noqa: BLE001
                     pass
+        if disconnected and self.state != IDLE:
+            self._on_trigger_release()
 
     def _ensure_injection_devices(self) -> None:
         if self._ui_keys is None:
@@ -605,6 +611,14 @@ class InputProxy:
             pass
 
     def _handle_mouse_event(self, ev, path: str) -> None:
+        # Kernel buffer overflowed and dropped events. Force a release to prevent
+        # getting permanently stuck if the ButtonRelease was among the dropped events.
+        if ev.type == ecodes.EV_SYN and ev.code == ecodes.SYN_DROPPED:
+            if self.state != IDLE:
+                log.warning("SYN_DROPPED detected! Forcing trigger release.")
+                self._on_trigger_release()
+            return
+
         # When inhibited (fullscreen game active) forward everything 1:1 so the
         # game keeps exclusive mouse control.
         if self.inhibit:
@@ -691,6 +705,12 @@ class InputProxy:
                 self._forward(ev, path)
 
     def _handle_kb_event(self, ev) -> None:
+        if ev.type == ecodes.EV_SYN and ev.code == ecodes.SYN_DROPPED:
+            if self.state != IDLE:
+                log.warning("SYN_DROPPED detected on keyboard! Forcing trigger release.")
+                self._on_trigger_release()
+            return
+            
         if ev.type != ecodes.EV_KEY:
             return
         if self.capture_key and ev.value == 1:

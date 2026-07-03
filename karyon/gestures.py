@@ -5,7 +5,7 @@ import logging
 import subprocess
 
 from .input_proxy import classify_direction  # re-exported for callers
-from .procenv import child_env
+from .procenv import child_env, run_detached
 
 log = logging.getLogger(__name__)
 
@@ -129,7 +129,7 @@ def invoke_kwin_shortcut(name: str) -> None:
     cmd = ["qdbus6", "org.kde.kglobalaccel", "/component/kwin",
            "org.kde.kglobalaccel.Component.invokeShortcut", name]
     try:
-        subprocess.Popen(cmd, env=child_env())
+        run_detached(cmd)
     except Exception:  # noqa: BLE001
         log.exception("kglobalaccel-Shortcut fehlgeschlagen: %s", name)
 
@@ -161,8 +161,7 @@ class GestureExecutor:
             # /klipper's popup method is unavailable without a panel applet;
             # open the clipboard plasmoid in a window (same history list).
             try:
-                subprocess.Popen(["plasmawindowed", "org.kde.plasma.clipboard"],
-                                 env=child_env())
+                run_detached(["plasmawindowed", "org.kde.plasma.clipboard"])
             except Exception:  # noqa: BLE001
                 log.exception("Clipboard-Geste fehlgeschlagen")
         elif action == "custom_app":
@@ -181,13 +180,13 @@ class GestureExecutor:
         try:
             import shlex
             parts = [p for p in shlex.split(exec_line) if not p.startswith("%")]
-            subprocess.Popen(parts, start_new_session=True, env=child_env())
+            run_detached(parts)
         except Exception:  # noqa: BLE001
             log.exception("Custom-App-Geste fehlgeschlagen")
 
     @staticmethod
     def _dbus(service: str, path: str, method: str) -> None:
         try:
-            subprocess.Popen(["qdbus6", service, path, method], env=child_env())
+            run_detached(["qdbus6", service, path, method])
         except Exception:  # noqa: BLE001
             log.exception("Gesten-DBus fehlgeschlagen: %s", method)

@@ -22,13 +22,11 @@ ACCENTS = [
 TRIGGERS = [
     ("Middle", "middle"), ("Right", "right"), ("Forward", "forward"),
     ("Backward", "backward"),
-    ("Touchpad Left", "tp_left"), ("Touchpad Right", "tp_right"),
 ]
 
 CANCELS = [
     ("Left", "left"), ("Right", "right"), ("Middle", "middle"),
     ("Forward", "forward"), ("Backward", "backward"),
-    ("Touchpad Left", "tp_left"), ("Touchpad Right", "tp_right"),
 ]
 
 PANEL_STYLE = """
@@ -134,9 +132,6 @@ class SettingsPanel(QFrame):
         # else the gesture direction whose "Custom Key" item is capturing.
         self._gesture_keys = dict(config.get("gesture_custom_keys", {}) or {})
         self._capture_target = None
-        # Full config snapshot taken when Touchpad Mode is switched on (restored
-        # verbatim when it is switched off).
-        self._tp_backup = dict(config.get("tp_mode_backup", {}) or {})
         self.setObjectName("panel")
         self.setWindowFlags(Qt.WindowType.Tool)
         self.setWindowTitle("Karyon Settings")
@@ -167,7 +162,7 @@ class SettingsPanel(QFrame):
         scroll.setWidget(inner)
         outer.addWidget(scroll)
 
-        title = QLabel("Karyon 1.1")
+        title = QLabel("Karyon 1.5")
         title.setObjectName("title")
         self._lay.addWidget(title)
 
@@ -201,31 +196,30 @@ class SettingsPanel(QFrame):
         self.combos["cancel_button"].currentIndexChanged.connect(
             self._enforce_trigger_cancel_distinct)
         self._enforce_trigger_cancel_distinct()
+        self._add_combo("overlay_cursor", "Overlay Cursor", [("Ring", "ring"), ("Cross", "cross")])
         self._add_combo("accent", "Accent color",
                         [(n, v) for n, v in ACCENTS], by_value=True)
         # Directly under Accent, spanning the grid so it isn't pushed to the bottom.
-        self._grid.addWidget(self._make_check(
-            "performance_mode", "Performance Mode"),
-            self._grow, 0, 1, 4)
-        self._grow += 1
-        self._grid.addWidget(self._make_check("touchpad_mode", "Touchpad Mode"),
+        self._grid.addWidget(self._make_check("game_mode", "Game Mode (auto-disable overlay in games)"),
                              self._grow, 0, 1, 4)
         self._grow += 1
-        self.checks["touchpad_mode"].toggled.connect(self._on_touchpad_mode)
-
-        # All sliders except the gesture window.  Units live on the value, not
-        # the title.
-        self._add_slider("hold_ms", "Hold", 50, 800, 1, unit=" ms")
-        self._add_slider("mouse_speed", "Mouse speed", -100, 100, 0.01)
-        self._add_slider("scale", "Scale", 10, 25, 0.1)   # menu scale 1.0 - 2.5
-        self._add_slider("transparency", "Transparency", 0, 50, 1, unit=" %")
-        self._add_slider("max_recent_apps", "Max recent apps", 1, 15, 1)
-        self._add_slider("max_recent_files", "Max recent files", 1, 15, 1)
+        self._grid.addWidget(self._make_check("performance_mode", "Performance Mode (Limit FPS to 30)"),
+                             self._grow, 0, 1, 4)
+        self._grow += 1
         self._grid.addWidget(self._make_check(
             "adjust_volume_with_trigger_wheel",
             "Volume: Trigger + Mouse Wheel / Mute: Trigger + Middle Mouse"),
             self._grow, 0, 1, 4)
         self._grow += 1
+
+        # All sliders except the gesture window.  Units live on the value, not
+        # the title.
+        self._add_slider("hold_ms", "Trigger Hold", 50, 800, 1, unit=" ms")
+        self._add_slider("mouse_speed", "Overlay mouse speed", -100, 100, 0.01)
+        self._add_slider("scale", "Overlay scale", 10, 25, 0.1)   # menu scale 1.0 - 2.5
+        self._add_slider("transparency", "Overlay transparency", 0, 50, 1, unit=" %")
+        self._add_slider("max_recent_apps", "Max recent apps", 1, 15, 1)
+        self._add_slider("max_recent_files", "Max recent files", 1, 15, 1)
         self._add_slider("volume_steps", "Volume steps", 1, 10, 1, unit=" %")
 
         # Checkboxes, two columns.  Left: the Show toggles + Dim area + Focus.
@@ -566,31 +560,11 @@ class SettingsPanel(QFrame):
                 s.setValue(int(round(float(v) / step)))
             elif k in self.spins:
                 self.spins[k].setValue(int(v))
-            elif k in self.checks and k != "touchpad_mode":
+            elif k in self.checks:
                 self.checks[k].blockSignals(True)
                 self.checks[k].setChecked(bool(v))
                 self.checks[k].blockSignals(False)
         self._deps()
-
-    # Only these are preset/restored by Touchpad Mode -- nothing else is touched.
-    _TP_KEYS = ("trigger_button", "cancel_button", "mouse_speed",
-                "gesture_time_window")
-
-    def _on_touchpad_mode(self, checked: bool) -> None:
-        if checked:
-            cur = self._collect_values()
-            self._tp_backup = {k: cur[k] for k in self._TP_KEYS if k in cur}
-            self._apply_values({
-                "trigger_button": "tp_right",
-                "cancel_button": "tp_left",
-                "mouse_speed": -0.5,
-                "gesture_time_window": 450,
-            })
-        else:
-            if self._tp_backup:
-                self._apply_values({k: v for k, v in self._tp_backup.items()
-                                    if k in self._TP_KEYS})
-            self._tp_backup = {}
 
     def _make_check(self, key, label) -> QCheckBox:
         cb = QCheckBox(label)
@@ -681,8 +655,6 @@ class SettingsPanel(QFrame):
             self.config[f"gesture_{direction}"] = c.currentData()
         self.config["gesture_custom_keys"] = dict(self._gesture_keys)
         self.config["trigger_key"] = self._captured_key
-        # Persist the Touchpad-Mode backup so a later toggle-off can restore it.
-        self.config["tp_mode_backup"] = dict(self._tp_backup)
         # enforce: show_apps and recent_files not both off
         if not self.config["show_apps"] and not self.config["show_recent_files"]:
             self.config["show_apps"] = True

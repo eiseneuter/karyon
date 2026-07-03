@@ -28,20 +28,7 @@ def _pen(width: float) -> QPen:
     return pen
 
 
-def _draw_glow(p) -> None:
-    g = QRadialGradient(32, 32, 30)
-    c0 = QColor(_ACCENT); c0.setAlpha(80)
-    c1 = QColor(_ACCENT); c1.setAlpha(0)
-    g.setColorAt(0.0, c0)
-    g.setColorAt(1.0, c1)
-    p.setPen(Qt.PenStyle.NoPen)
-    p.setBrush(g)
-    p.drawEllipse(QPointF(32, 32), 30, 30)
-
-
 def draw(p, name: str) -> None:
-    # Soft accent glow behind every self-drawn glyph.
-    _draw_glow(p)
     # Reset the brush so stroke-only glyphs don't inherit the (dark) segment
     # fill from the caller; filled glyphs set their own brush explicitly.
     p.setBrush(Qt.BrushStyle.NoBrush)

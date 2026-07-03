@@ -21,7 +21,7 @@ from .input_proxy import InputProxy
 from .kwin import KWinBridge
 from .overlay import RadialOverlay
 from .perf import timed
-from .procenv import child_env
+from .procenv import child_env, run_detached
 from .recent_files import RecentFiles
 from .tray import TrayManager
 
@@ -190,6 +190,7 @@ class Launcher:
             self.settings.closed.connect(self._on_settings_closed)
 
         self._gesture_win_id = ""
+        self._last_fs_payload = None
         self._fresh_snap_pending = False
         self._press_time = 0.0
         self._wire_overlay()
@@ -233,13 +234,8 @@ class Launcher:
 
         # Start persistent KWin fullscreen monitor daemon script.
         def on_fullscreen(payload: dict) -> None:
-            is_fs = bool(payload.get("fullscreen", False))
-            rc = str(payload.get("rc", "")).lower()
-            games = self.config.get("game_inhibit_apps", [])
-            inhibit = is_fs and any(g.lower() in rc for g in games)
-            if self.proxy.inhibit != inhibit:
-                log.info("Vollbild-Inhibit (rc=%s): %s", rc, inhibit)
-            self.proxy.set_inhibit(inhibit)
+            self._last_fs_payload = payload
+            self._trigger_fs_check(payload)
         self.kwin.start_fullscreen_daemon(on_fullscreen)
 
     # -- wiring -------------------------------------------------------------
@@ -341,9 +337,9 @@ class Launcher:
 
     def _run_gesture(self, direction: str) -> None:
         # Close the menu first so no highlighted symbol is activated.
-        menu_was_open = self.overlay.isVisible()
-        if menu_was_open:
+        if self.overlay.isVisible():
             self.overlay.close_menu()
+        
         # A flick gesture can fire without the menu ever opening, so refresh the
         # focus target from the live snapshot -- a stale id would re-activate the
         # WRONG window and break copy/paste (and clear the selection).
@@ -357,44 +353,19 @@ class Launcher:
         rel = getattr(self.proxy, "_last_gesture_rel", (0.0, 0.0))
 
         # Flash immediately (no snapshot round-trip, so it always shows).
-        path, geo = self._gesture_flash_path(rel, menu_was_open)
+        path, geo = self._gesture_flash_path(rel)
         self.flash.play(path, accent, geo)
 
-        if action in ("none", ""):
-            return
-        win_id = self._gesture_win_id
+        self.executor.execute(action, direction)
 
-        is_clip = action in ("copy", "cut", "paste", "select_all")
-
-        def do():
-            # EVERY focus action (key injection AND kglobalaccel minimize/maximize/
-            # close) acts on the focused/active window, so the focus must settle
-            # first.  Restore it when the menu stole it -- gently for clipboard
-            # (keeps the selection), normally otherwise -- then run AFTER a settle
-            # delay so the activation has landed.  This makes them all reliable.
-            if menu_was_open and win_id and action in FOCUS_ACTIONS:
-                if is_clip:
-                    self.kwin.focus_window(win_id)
-                else:
-                    self.kwin.activate(win_id)
-            if action in FOCUS_ACTIONS:
-                QTimer.singleShot(160, lambda: self.executor.execute(action, direction))
-                return
-            self.executor.execute(action, direction)
-
-        QTimer.singleShot(120, do)
-
-    def _gesture_flash_path(self, rel, menu_was_open: bool):
+    def _gesture_flash_path(self, rel):
         """Light-streak along the gesture travel, in coordinates local to the
         screen.  ``rel`` is the raw flick delta (screen px, forwarded 1:1)."""
         cursor = (self.kwin.cached_snapshot or {}).get("cursor")
         screen = self.overlay._screen_for_cursor(cursor)
         geo = screen.geometry()
-        if menu_was_open:
-            # Menu opened at the press position -> use its centre as the start.
-            cx, cy = self.overlay._center.x(), self.overlay._center.y()
-            sx, sy, ex, ey = cx, cy, cx + rel[0], cy + rel[1]
-        elif cursor:
+        
+        if cursor:
             # Pure flick: the cursor moved 1:1, so it is now at the END.
             cx, cy = cursor[0] - geo.x(), cursor[1] - geo.y()
             sx, sy, ex, ey = cx - rel[0], cy - rel[1], cx, cy
@@ -402,6 +373,7 @@ class Launcher:
             # No cursor known: fall back to the screen centre.
             cx, cy = geo.width() // 2, geo.height() // 2
             sx, sy, ex, ey = cx - rel[0], cy - rel[1], cx, cy
+            
         # Shift the whole streak 200px further along the gesture direction.
         import math
         dist = math.hypot(rel[0], rel[1])
@@ -422,11 +394,8 @@ class Launcher:
         suffix = "+" if direction > 0 else "-"
         amount = step * max(1, abs(int(direction)))
         try:
-            subprocess.Popen(
-                ["wpctl", "set-volume", "@DEFAULT_AUDIO_SINK@", f"{amount}%{suffix}"],
-                env=child_env(),
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
+            run_detached(
+                ["wpctl", "set-volume", "@DEFAULT_AUDIO_SINK@", f"{amount}%{suffix}"]
             )
         except Exception:  # noqa: BLE001
             log.debug("Lautstärke konnte nicht per Mausrad geändert werden",
@@ -434,11 +403,8 @@ class Launcher:
 
     def _on_trigger_mute(self) -> None:
         try:
-            subprocess.Popen(
-                ["wpctl", "set-mute", "@DEFAULT_AUDIO_SINK@", "toggle"],
-                env=child_env(),
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
+            run_detached(
+                ["wpctl", "set-mute", "@DEFAULT_AUDIO_SINK@", "toggle"]
             )
         except Exception:  # noqa: BLE001
             log.debug("Mute konnte nicht per Maus-Trigger geändert werden",
@@ -468,6 +434,44 @@ class Launcher:
 
     def _on_settings_closed(self) -> None:
         self.overlay._compute_geometry()
+        if self._last_fs_payload is not None:
+            self._trigger_fs_check(self._last_fs_payload)
+        else:
+            self.proxy.set_inhibit(False)
+
+    def _trigger_fs_check(self, payload: dict) -> None:
+        if not self.config.get("game_mode", True):
+            self._set_game_mode(False)
+            return
+            
+        rc = str(payload.get("rc", "")).lower()
+        inhibit = False
+        
+        if rc:
+            # 1. Fallback: manual inhibit list
+            games = self.config.get("game_inhibit_apps", [])
+            inhibit = any(g.lower() in rc for g in games)
+            
+            # 2. Smart detection: .desktop category
+            if not inhibit:
+                app = self.app_index.match_window(rc)
+                if app and "Game" in getattr(app, "categories", set()):
+                    inhibit = True
+                    
+        self._set_game_mode(inhibit, rc)
+
+    def _set_game_mode(self, active: bool, rc: str = "") -> None:
+        if self.proxy.inhibit == active:
+            return
+            
+        log.info("Game Mode (rc=%s): %s", rc, active)
+        self.proxy.set_inhibit(active)
+        
+        # Deep Sleep: freeze background polling while playing a game
+        if active:
+            self.tray._notif_timer.stop()
+        else:
+            self.tray._notif_timer.start()
 
     def _setup_input(self) -> None:
         _prompt_input_setup(self.app, force=True)

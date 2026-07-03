@@ -16,7 +16,7 @@ from PyQt6.QtCore import Qt, QObject, QThread, QTimer, pyqtSignal, pyqtSlot
 from PyQt6.QtDBus import QDBusConnection, QDBusInterface, QDBusMessage
 from PyQt6.QtGui import QIcon, QImage, QPixmap
 
-from .procenv import child_env
+from .procenv import child_env, run_detached
 
 log = logging.getLogger(__name__)
 
@@ -401,7 +401,7 @@ class NotificationMonitor:
             try:
                 self._proc = subprocess.Popen(
                     ["dbus-monitor", "--session", rule],
-                    stdout=subprocess.PIPE, text=True, env=child_env())
+                    stdout=subprocess.PIPE, text=True, bufsize=1, env=child_env())
                 expect = False
                 for line in self._proc.stdout:
                     if self._stop.is_set():
@@ -627,6 +627,6 @@ class TrayManager(QObject):
         if not argv:
             return
         try:
-            subprocess.Popen(list(argv), start_new_session=True, env=child_env())
+            run_detached(list(argv))
         except Exception:  # noqa: BLE001
             log.exception("run_builtin fehlgeschlagen: %s", argv)

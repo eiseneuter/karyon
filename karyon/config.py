@@ -21,10 +21,8 @@ DEFAULTS: dict = {
     "mouse_speed": 0.0,
     "scale": 1.7,
     "accent": "#37d0ff",
-    "performance_mode": False,   # only toggles antialiasing now (flat glow/dim,
-                                 # snapped animation and 30 fps are always on)
-    "touchpad_mode": False,
-    "tp_mode_backup": {},   # full config snapshot from before Touchpad Mode
+    "game_mode": True,
+    "performance_mode": False,
     "max_recent_apps": 7,
     "max_recent_files": 12,
     "adjust_volume_with_trigger_wheel": True,
@@ -64,6 +62,7 @@ DEFAULTS: dict = {
         "minecraft", "ryujinx", "yuzu", "dolphin-emu", "pcsx2", "rpcs3",
         "citra", "cemu", ".exe"
     ],
+    "overlay_cursor": "ring",
 }
 
 

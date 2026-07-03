@@ -40,6 +40,7 @@ Karyon is built to never get in your way when gaming.
 ## Configuration & Customization
 Karyon features a dedicated settings panel accessible via the system tray icon (which can also be reached directly through the overlay itself). Here you can:
 * **Customize Triggers:** Bind different mouse buttons for triggering the overlay or gestures, and adjust the exact hold-time duration required to invoke the overlay or firing a gesture.
+* **Performance Mode:** For laptops or older hardware without dedicated graphics, Karyon includes a Performance Mode that halves the animation framerate (from 60 to 30 FPS) to drastically cut CPU usage while maintaining full visual quality.
 * **Adjust Aesthetics:** Change the global accent color, overlay scale, and transparency to match your Plasma theme perfectly.
 * **Tweak Layout:** Toggle individual segments and rings on or off to keep the overlay minimal or fully loaded.
 

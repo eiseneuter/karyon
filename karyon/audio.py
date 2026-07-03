@@ -24,6 +24,7 @@ class AudioMonitor:
         self._overlay_active = False
         self._on_change = None
         self._stop = threading.Event()
+        self._wake = threading.Event()
         self._thread: threading.Thread | None = None
         self._sub_thread: threading.Thread | None = None
         self._sub_proc = None
@@ -45,6 +46,7 @@ class AudioMonitor:
 
     def stop(self) -> None:
         self._stop.set()
+        self._wake.set()
         proc = self._sub_proc
         if proc is not None:
             try:
@@ -55,6 +57,7 @@ class AudioMonitor:
     def request(self) -> None:
         """Mark the data as wanted now (overlay open) -> poll fast + honour events."""
         self._last_request = time.monotonic()
+        self._wake.set()
 
     def set_overlay_active(self, active: bool) -> None:
         self._overlay_active = bool(active)
@@ -73,9 +76,15 @@ class AudioMonitor:
         while True:
             active = self._active()
             wait = self._ACTIVE_INTERVAL if active else self._IDLE_INTERVAL
-            if self._stop.wait(wait):
+            
+            # Wait for either the timeout or an explicit wake/stop signal
+            self._wake.wait(wait)
+            self._wake.clear()
+            
+            if self._stop.is_set():
                 return
-            if active:
+                
+            if self._active():
                 try:
                     self._poll()
                 except Exception:  # noqa: BLE001
@@ -87,7 +96,7 @@ class AudioMonitor:
         while not self._stop.is_set():
             try:
                 self._sub_proc = subprocess.Popen(
-                    ["pactl", "subscribe"], stdout=subprocess.PIPE, text=True,
+                    ["pactl", "subscribe"], stdout=subprocess.PIPE, text=True, bufsize=1,
                     env=child_env())
                 for line in self._sub_proc.stdout:
                     if self._stop.is_set():
@@ -95,10 +104,9 @@ class AudioMonitor:
                     if "sink-input" not in line:
                         continue
                     if self._active():
-                        try:
-                            self._poll()
-                        except Exception:  # noqa: BLE001
-                            pass
+                        # Signal the main polling loop to fetch the new state immediately,
+                        # naturally debouncing rapid bursts of subscribe events.
+                        self._wake.set()
             except Exception:  # noqa: BLE001
                 pass
             if self._stop.wait(2.0):
