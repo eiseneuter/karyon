@@ -248,6 +248,11 @@ class RadialOverlay(QWidget):
         self._mail_blink_timer.timeout.connect(self._on_mail_blink_timeout)
         self._mail_blink_state = 0
 
+        self._intro_stage = -1
+        self._intro_word = "KARYON"
+        self._intro_timer = QTimer(self)
+        self._intro_timer.timeout.connect(self._intro_tick)
+
         self._glyph_cache: dict = {}
         self._icon_pixmap_cache: dict = {}
         self._path_cache: dict = {}
@@ -345,6 +350,40 @@ class RadialOverlay(QWidget):
             if s is not None:
                 return s
         return QGuiApplication.primaryScreen()
+
+    def play_intro(self) -> None:
+        self._intro_stage = 0
+        self._compute_geometry()
+        
+        screen = QGuiApplication.primaryScreen()
+        geo = screen.geometry()
+        self.setGeometry(geo.x(), geo.y(), geo.width() - 1, geo.height() - 1)
+        self.winId()
+        wh = self.windowHandle()
+        if wh is not None:
+            wh.setScreen(screen)
+            
+        self._origin = QPointF(geo.x(), geo.y())
+        self._center = QPointF(geo.width() / 2, geo.height() / 2)
+        
+        self._intro_timer.setSingleShot(False)
+        self._intro_timer.start(300)
+        
+        self.setWindowOpacity(1.0)
+        self.show()
+        self.raise_()
+        self.update()
+
+    def _intro_tick(self) -> None:
+        self._intro_stage += 1
+        self.update()
+        if self._intro_stage == len(self._intro_word) - 1:
+            self._intro_timer.stop()
+            self._intro_timer.setSingleShot(True)
+            self._intro_timer.start(500)
+        elif self._intro_stage >= len(self._intro_word):
+            self.hide()
+            self._intro_stage = -1
 
     def open(self, snapshot: dict) -> None:
         self._reset_state()
@@ -2435,6 +2474,72 @@ class RadialOverlay(QWidget):
         p.fillRect(event.rect(), Qt.GlobalColor.transparent)
         p.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceOver)
         cx, cy = self._center.x(), self._center.y()
+
+        if getattr(self, "_intro_stage", -1) >= 0:
+            # Filigree Azonix-style vector font (100x100 grid) with perfect uniform line width
+            H = self.seg_depth * 0.5
+            W = self.seg_depth * 0.6
+            
+            custom_font = {
+                'K': {'outer': [(0,0), (10,0), (10,40), (80,0), (101,0), (14,50), (101,100), (80,100), (10,60), (10,100), (0,100)]},
+                'A': {'outer': [(0,100), (45,0), (55,0), (100,100), (85,100), (50, 22.2), (15,100)]},
+                'R': {'outer': [(0,0), (80,0), (100,20), (100,40), (80,60), (65,60), (100,100), (85,100), (50,60), (10,60), (10,100), (0,100)],
+                      'hole': [(10,10), (75,10), (90,25), (90,35), (75,50), (10,50)]},
+                'Y': {'outer': [(0,0), (15,0), (50,42), (85,0), (100,0), (55,54), (55,100), (45,100), (45,54)]},
+                'O': {'outer': [(20,0), (80,0), (100,20), (100,80), (80,100), (20,100), (0,80), (0,20)],
+                      'hole': [(25,10), (75,10), (90,25), (90,75), (75,90), (25,90), (10,75), (10,25)]},
+                'N': {'outer': [(0,0), (10,0), (90,90), (90,0), (100,0), (100,100), (90,100), (10,10), (10,100), (0,100)]}
+            }
+            
+            num_letters = len(self._intro_word)
+            spacing = W * 0.4
+            total_width = num_letters * W + (num_letters - 1) * spacing
+            start_x = cx - total_width / 2.0 + W / 2.0
+            
+            from PyQt6.QtGui import QPainterPath, QPainterPathStroker
+            
+            stroker = QPainterPathStroker()
+            # Very slight rounding to soften the sharp geometric edges without bloating the thin lines
+            stroker.setWidth(H * 0.05)
+            stroker.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+            stroker.setCapStyle(Qt.PenCapStyle.RoundCap)
+            
+            for i in range(min(self._intro_stage + 1, num_letters)):
+                x = start_x + i * (W + spacing)
+                y = cy
+                
+                p.save()
+                p.translate(x, y)
+                
+                letter = self._intro_word[i]
+                data = custom_font.get(letter, {'outer': []})
+                
+                path = QPainterPath()
+                path.setFillRule(Qt.FillRule.OddEvenFill)
+                
+                for k in ('outer', 'hole'):
+                    pts = data.get(k, [])
+                    if not pts: continue
+                    for j, pt in enumerate(pts):
+                        px = (pt[0] / 100.0) * W - W/2
+                        py = (pt[1] / 100.0) * H - H/2
+                        if j == 0: path.moveTo(px, py)
+                        else: path.lineTo(px, py)
+                    path.closeSubpath()
+                
+                # Apply slight rounding
+                stroked = stroker.createStroke(path)
+                rounded_path = path.united(stroked)
+                
+                # Black-blue fill with ~25% transparency (alpha ~190)
+                p.setBrush(QColor(10, 30, 80, 190))
+                # Thin cyan outer border
+                p.setPen(QPen(QColor(0, 255, 255, 255), 1.0))
+                p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+                
+                p.drawPath(rounded_path)
+                p.restore()
+            return
 
         # global transparency
         trans = self.config.get("transparency", 10) / 100.0

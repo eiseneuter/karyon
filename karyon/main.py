@@ -590,6 +590,7 @@ def main() -> int:
         _prompt_input_setup(app)
 
     launcher = Launcher(app)
+    launcher.overlay.play_intro()
 
     signal.signal(signal.SIGINT, lambda *a: launcher.quit())
     signal.signal(signal.SIGTERM, lambda *a: launcher.quit())
