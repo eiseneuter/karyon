@@ -566,11 +566,21 @@ def main() -> int:
     QIcon.setThemeName(QIcon.themeName() or "breeze-dark")
     app.setWindowIcon(app_icon())
 
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    lock = QLockFile(str(DATA_DIR / "instance.lock"))
-    lock.setStaleLockTime(0)
-    if not lock.tryLock(100):
-        print("Karyon laeuft bereits.")
+    from PyQt6.QtDBus import QDBusConnection, QDBusConnectionInterface
+    reply = QDBusConnection.sessionBus().interface().registerService(
+        "org.eisen.karyon.instance",
+        QDBusConnectionInterface.ServiceQueueOptions.DontQueueService,
+        QDBusConnectionInterface.ServiceReplacementOptions.DontAllowReplacement
+    )
+    if reply.value() != QDBusConnectionInterface.RegisterServiceReply.ServiceRegistered:
+        from PyQt6.QtWidgets import QMessageBox
+        box = QMessageBox()
+        box.setWindowTitle("Karyon")
+        box.setIcon(QMessageBox.Icon.Information)
+        box.setText("Karyon is already running.")
+        box.setInformativeText("Only one instance of Karyon can run at a time.")
+        box.addButton(QMessageBox.StandardButton.Ok)
+        box.exec()
         return 1
 
     _access = permissions.has_input_access()
@@ -589,4 +599,5 @@ def main() -> int:
 
     log.info("Karyon ready - hold %s trigger for %d ms.",
              launcher.config.get("trigger_button", "right"), launcher.config["hold_ms"])
-    return app.exec()
+    res = app.exec()
+    os._exit(res)

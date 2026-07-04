@@ -761,7 +761,10 @@ class RadialOverlay(QWidget):
         # windows row, shown only when a tray app signals a new message.  It
         # carries the first attention item's data so releasing on it activates
         # that app.  Pinned to ring 2 (never wraps to ring 3) by the layout.
-        att = self._tray_attention()
+        if self.config.get("mail_notification", True):
+            att = self._tray_attention()
+        else:
+            att = []
         if att:
             mail_node = Node(kind=IT_MAIL, label="Neue Nachricht",
                              passive=True, glow=True, glyph="mail",
@@ -769,6 +772,8 @@ class RadialOverlay(QWidget):
             nodes.append(mail_node)
         self.ring2[SEC_WINDOWS] = nodes
         self._ring2_base[SEC_WINDOWS] = list(nodes)
+        if att:
+            self._check_start_mail_blink()
 
     # Untitled / unsaved-document markers across common apps and locales.
     _UNSAVED_MARKERS = ("unsaved", "untitled", "no name", "new document",
@@ -1458,6 +1463,7 @@ class RadialOverlay(QWidget):
         the usual per-ring gaps."""
         sd = next((n for n in nodes if n.kind == IT_SHOW_DESKTOP), None)
         tray = next((n for n in nodes if n.kind == IT_TRAY_MENU), None)
+        mail = next((n for n in nodes if n.kind == IT_MAIL), None)
         
         # Split groups into closed pinned nodes and open window groups
         closed_pinned = [n for n in nodes if n.kind == IT_WINDOW_GROUP and n.pinned and n.data is None]
@@ -1476,7 +1482,7 @@ class RadialOverlay(QWidget):
         gap = math.degrees(self._gap_phys / r_out)
         cap = max(1, int(360.0 / slot) - self._ring_gap(2))
 
-        reserved = (1 if sd else 0) + (1 if tray else 0)
+        reserved = (1 if sd else 0) + (1 if tray else 0) + (1 if mail else 0)
         group_cap = max(0, cap - reserved)
         
         groups_fitted = (closed_pinned + open_groups)[:group_cap]
@@ -1502,7 +1508,7 @@ class RadialOverlay(QWidget):
         else:
             active_segments = list(on_ring2_open)
 
-        # Compose row 0: [closed pinned] [Show Desktop] [active segments] [Tray]
+        # Compose row 0: [closed pinned] [Show Desktop] [active segments] [Tray] [Mail]
         row0 = []
         row0.extend(on_ring2_closed)
         if sd is not None:
@@ -1510,6 +1516,8 @@ class RadialOverlay(QWidget):
         row0.extend(active_segments)
         if tray is not None:
             row0.append(tray)
+        if mail is not None:
+            row0.append(mail)
 
         # Find the index of the first active segment in row0
         idx_active_start = next((i for i, n in enumerate(row0) if n in active_segments), -1)
@@ -2268,7 +2276,7 @@ class RadialOverlay(QWidget):
     def _check_start_mail_blink(self) -> None:
         """Start the mail blink animation whenever the overlay opens with a
         mail badge present, as long as a blink is not already running."""
-        if self.open_sector == -1 or self._mail_blink_state != 0:
+        if self._mail_blink_state != 0:
             return
         nodes = self.ring2.get(SEC_WINDOWS, [])
         has_mail = any(n.kind == IT_MAIL for n in nodes)
@@ -2435,7 +2443,7 @@ class RadialOverlay(QWidget):
         active_progress_nodes = frozenset(
             id(node) for node in self.ring2.get(self.open_sector, []) if self._has_progress(node)
         )
-        current_state = (self.open_sector, id(self.open_group), id(self._ctrl_node), self.size().width(), active_progress_nodes)
+        current_state = (self.open_sector, id(self.open_group), id(self._ctrl_node), self.size().width(), active_progress_nodes, getattr(self, "_mail_blink_state", 0))
         if not getattr(self, "_static_frame_cache", None) or getattr(self, "_cache_state", None) != current_state:
             from PyQt6.QtGui import QPixmap
             self._static_frame_cache = QPixmap(self.size())
@@ -2448,8 +2456,6 @@ class RadialOverlay(QWidget):
             old_hover_node = self.hover_node
             self.hover_node = None
             
-            if self.config.get("darken_area", True):
-                self._paint_darken(cp, cx, cy)
             self._paint_hub(cp, cx, cy)
             self._paint_sectors(cp, cx, cy)
             
@@ -2629,11 +2635,6 @@ class RadialOverlay(QWidget):
             
         p.setRenderHint(QPainter.RenderHint.Antialiasing, bool(old_aa))
 
-    def _paint_darken(self, p, cx, cy) -> None:
-        p.setPen(Qt.PenStyle.NoPen)
-        # Flat dim instead of a per-pixel radial gradient for instant rendering.
-        p.setBrush(QColor(0, 0, 0, 100))
-        p.drawRect(self.rect())
 
     def _paint_hub(self, p, cx, cy) -> None:
         # Plain disc; the trigger thirds/quarters are invisible hit zones.
@@ -2846,6 +2847,8 @@ class RadialOverlay(QWidget):
         # dark segment background (interpolates lighter on hover)
         t = node.hover_t
         if node.kind == IT_MAIL and getattr(self, "_mail_blink_state", 0) in (1, 3, 5, 7):
+            t = 1.0
+        if node is getattr(self, "open_group", None) or node is getattr(self, "_ctrl_node", None):
             t = 1.0
         col = QColor(
             int(SEG_BASE.red() + (SEG_HOVER.red() - SEG_BASE.red()) * t),

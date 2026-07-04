@@ -40,7 +40,7 @@ DEFAULTS: dict = {
     "hub_show_date": False,
     "hub_show_charge": False,
     "hub_show_monitor": True,
-    "darken_area": False,
+    "mail_notification": True,
     "transparency": 20,
     "category_anim": True,
     "gestures_enabled": True,

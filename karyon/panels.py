@@ -230,8 +230,8 @@ class SettingsPanel(QFrame):
             ("show_recent_files", "Show Recent Files"),
             ("show_recent_apps", "Show Recent Apps"),
             ("show_apps", "Show Apps"),
-            ("darken_area", "Dim area"),
             ("focus_window_switcher", "Focus Window-Switcher"),
+            ("mail_notification", "Icon Letter Notification"),
         ]
         right = [
             ("show_tray", "Icon Tray"),
