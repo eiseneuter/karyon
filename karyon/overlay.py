@@ -605,6 +605,15 @@ class RadialOverlay(QWidget):
             if w["active"]:
                 self._active_window_id = w["id"]
             
+            # Fix KWin bug: apps launched from file managers/terminals sometimes inherit
+            # their desktop file via startup_id, causing them to be grouped together.
+            if df:
+                df_name = df.replace(".desktop", "").lower()
+                rc_low = rc.lower()
+                if df_name in ("org.kde.dolphin", "dolphin", "org.kde.konsole", "konsole"):
+                    if df_name.split(".")[-1] not in rc_low:
+                        df = ""
+            
             group_key = df.replace(".desktop", "") if df else rc
             groups_dict.setdefault(group_key, []).append(w)
         for k in groups_dict:
@@ -1751,6 +1760,7 @@ class RadialOverlay(QWidget):
         if (sec == SEC_APPS and self._apps_stage == 1 and r < self.r2_in):
             self._apps_stage = 0
             self.open_group = None
+            self._ctrl_node = None
             self._rebuild_apps_stage()
             self._layout_sectors()
             self.hover_node = None
@@ -1798,6 +1808,7 @@ class RadialOverlay(QWidget):
         if node.kind == IT_MENU and in_outer:
             if self._apps_stage != 1:
                 self._apps_stage = 1
+                self._ctrl_node = None
                 self._rebuild_apps_stage()
                 self._layout_sectors()
                 self._apps_morph_t = 0.0 if self.config.get("category_anim", True) else 1.0
@@ -1841,6 +1852,7 @@ class RadialOverlay(QWidget):
             if self._opens_on_hover(node) or (self._needs_bar(node) and in_outer):
                 if self.open_group is not node:
                     self.open_group = node
+                    self._ctrl_node = None
                     self._drill_armed = False
                     self._layout_children(node)
 
@@ -2931,8 +2943,8 @@ class RadialOverlay(QWidget):
     def _pin_geom(self, node):
         br = 6.5 * self.s
         rin = node.radius - self.seg_depth / 2
-        # Tucked closer to the inner edge on the left side, slightly inwards
-        r_b = rin + br + 1.0 * self.s
+        # Tucked closer to the inner edge on the left side
+        r_b = rin + br - 1.5 * self.s
         a_b = node.angle - node.half_deg * 0.45
         return r_b, a_b, br
 
@@ -2940,17 +2952,17 @@ class RadialOverlay(QWidget):
         r_b, a_b, br = self._pin_geom(node)
         px, py = r * math.cos(math.radians(a)), r * math.sin(math.radians(a))
         bx, by = r_b * math.cos(math.radians(a_b)), r_b * math.sin(math.radians(a_b))
-        return math.hypot(px - bx, py - by) <= br + 4 * self.s
+        # Trigger area slightly smaller than the visual badge
+        return math.hypot(px - bx, py - by) <= br - 1.5 * self.s
 
     def _paint_pin_badge(self, p, cx, cy, node, state: str) -> None:
         r_b, a_b, br = self._pin_geom(node)
         bx = cx + r_b * math.cos(math.radians(a_b))
         by = cy + r_b * math.sin(math.radians(a_b))
-        
         if state == "hint":
-            opacity = 153
+            opacity = 64
         elif state == "pinned":
-            opacity = 255 if node is self.hover_node else 153
+            opacity = 255 if node is self.hover_node else 64
         else:
             opacity = 255
         
@@ -3019,8 +3031,8 @@ class RadialOverlay(QWidget):
     def _speaker_geom(self, node):
         br = 8.0 * self.s
         rin = node.radius - self.seg_depth / 2
-        # Tucked closer to the inner edge on the right side, slightly inwards
-        r_b = rin + br + 1.0 * self.s
+        # Tucked closer to the inner edge on the right side
+        r_b = rin + br - 1.5 * self.s
         a_b = node.angle + node.half_deg * 0.45
         return r_b, a_b, br
 
@@ -3028,7 +3040,8 @@ class RadialOverlay(QWidget):
         r_b, a_b, br = self._speaker_geom(node)
         px, py = r * math.cos(math.radians(a)), r * math.sin(math.radians(a))
         bx, by = r_b * math.cos(math.radians(a_b)), r_b * math.sin(math.radians(a_b))
-        return math.hypot(px - bx, py - by) <= br + 4 * self.s
+        # Trigger area slightly smaller than the visual badge
+        return math.hypot(px - bx, py - by) <= br - 1.5 * self.s
 
     def _paint_speaker_badge(self, p, cx, cy, node, muted: bool, hovering: bool) -> None:
         # Same size/border as the count badge, with a black speaker symbol.  The
@@ -3066,10 +3079,10 @@ class RadialOverlay(QWidget):
         p.setPen(QPen(symbol_color, max(0.8, 0.9 * self.s)))
         p.drawArc(QRectF(bx + 0.06 * s, by - 0.30 * s, 0.5 * s, 0.6 * s),
                   -55 * 16, 110 * 16)
-                  
-        if muted:
+        is_muted_visual = (not hovering) if muted else hovering
+        if is_muted_visual:
             # white strikethrough line
-            p.setPen(QPen(QColor(255, 255, 255, opacity), 1.5 * self.s, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+            p.setPen(QPen(QColor(255, 255, 255, opacity), max(1.0, 1.5 * self.s - 1.0), Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
             p.drawLine(QPointF(bx - 0.45 * s, by - 0.45 * s), QPointF(bx + 0.45 * s, by + 0.45 * s))
 
     def _paint_count_badge(self, p, cx, cy, node, hot: bool) -> None:
@@ -3163,13 +3176,15 @@ class RadialOverlay(QWidget):
                     text_angle = a0 + 2.5
                     rad = math.radians(text_angle)
                     tx = cx + rc * math.cos(rad)
-                    ty = cy + rc * math.sin(rad)
+                    ty = cy + rc * math.sin(rad) + 1.0  # +1px down
                     
                     # Tangent rotation angle along the arc, normalized and flipped to prevent upside-down text
                     rot_deg = text_angle + 90
                     rot_deg = (rot_deg + 180) % 360 - 180
                     if rot_deg > 90 or rot_deg < -90:
                         rot_deg += 180
+                        
+                    rot_deg += 4  # tilt +4 degrees as requested (was +2)
                         
                     p.save()
                     p.translate(tx, ty)
