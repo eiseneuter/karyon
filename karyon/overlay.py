@@ -807,7 +807,8 @@ class RadialOverlay(QWidget):
         if att:
             mail_node = Node(kind=IT_MAIL, label="Neue Nachricht",
                              passive=True, glow=True, glyph="mail",
-                             data=att[0].data)
+                             data=att[0].data, closable=True)
+            mail_node.tray_item = att[0]
             nodes.append(mail_node)
         self.ring2[SEC_WINDOWS] = nodes
         self._ring2_base[SEC_WINDOWS] = list(nodes)
@@ -1873,7 +1874,8 @@ class RadialOverlay(QWidget):
         # ONLY a close trigger -- never a drilldown trigger.  Ring 3 is opened by
         # highlighting the symbol body (below); here we just keep it open so the
         # close bar does not block reaching the other windows.
-        if node.kind in (IT_WINDOW_GROUP, IT_WINDOW) and node.closable and in_outer:
+        # Only window groups, single windows, and mail segments support close buttons.
+        if node.kind in (IT_WINDOW_GROUP, IT_WINDOW, IT_MAIL) and node.closable and in_outer:
             self.hover_close = True
             if not node.children:
                 self.open_group = None
@@ -2121,7 +2123,12 @@ class RadialOverlay(QWidget):
         kind = node.kind
         if kind == IT_MAIL:
             self.close_menu()
-            self._activate_tray(node)
+            if close_one:
+                it = getattr(node, "tray_item", None)
+                if it:
+                    self.tray.mute_attention(it.service, it.icon_sig)
+            else:
+                self._activate_tray(node)
             return
         if kind in (IT_WINDOW_GROUP, IT_WINDOW):
             if kind == IT_WINDOW_GROUP and node.data is None:
@@ -2998,7 +3005,7 @@ class RadialOverlay(QWidget):
         # on its main symbol -- it opens on hover and is closed via its badge.
         if self._is_drillable(node) and node.kind != IT_WINDOW_GROUP:
             self._paint_bar(p, cx, cy, node, rout, CYAN)
-        if node.closable and node.kind in (IT_WINDOW_GROUP, IT_WINDOW):
+        if node.closable and node.kind in (IT_WINDOW_GROUP, IT_WINDOW, IT_MAIL):
             framed = node is self.hover_node and self.hover_close
             self._paint_bar(p, cx, cy, node, rout, RED, framed=framed)
         # Count / mail / speaker badges.  Drawn last here AND re-drawn on top of

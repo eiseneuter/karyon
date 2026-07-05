@@ -444,6 +444,7 @@ class TrayManager(QObject):
         # Unread tracking: a notification arms an app; we remember the app's
         # "unread" icon and keep the mail badge until that icon changes (= read).
         self._unread: dict[str, str] = {}           # service -> unread icon sig
+        self._muted: dict[str, str] = {}            # service -> muted icon sig
         self._pending_notif: set[str] = set()       # norm app names awaiting capture
         self._notif = NotificationMonitor()
         self._notif.start()
@@ -542,19 +543,33 @@ class TrayManager(QObject):
                 # Capture the current (unread) icon as the reference for this app.
                 self._pending_notif.discard(matched)
                 self._unread[it.service] = it.icon_sig
+                self._muted.pop(it.service, None)
             elif it.service in self._unread and it.icon_sig != self._unread[it.service]:
                 # The app changed its icon back -> messages were read.
                 self._unread.pop(it.service, None)
+        
         live = {it.service for it in items}
         for svc in list(self._unread):
             if svc not in live:
                 self._unread.pop(svc, None)
+                self._muted.pop(svc, None)
+                
+        for it in items:
+            # If an item is neither natively requesting attention nor artificially unread,
+            # it means there are no unread messages. Clear any previous mute.
+            if not it.attention and it.service not in self._unread:
+                self._muted.pop(it.service, None)
+
         self.sni_items = [it for it in items if not it.hidden]
         self.hidden_sni_items = [it for it in items if it.hidden]
         # Watch each item's NewStatus / NewIcon so reads (icon revert) and
         # NeedsAttention changes are picked up promptly.
         for it in items:
             self._watch_status(it.service)
+        self.changed.emit()
+
+    def mute_attention(self, service: str, icon_sig: str) -> None:
+        self._muted[service] = icon_sig
         self.changed.emit()
 
     def _watch_status(self, service: str) -> None:
@@ -576,7 +591,8 @@ class TrayManager(QObject):
         badge stays until the app's icon reverts (= read) -- not when merely
         opened."""
         return [it for it in (self.sni_items + self.hidden_sni_items)
-                if it.attention or it.service in self._unread]
+                if (it.attention or it.service in self._unread) and
+                   self._muted.get(it.service) != it.icon_sig]
 
     def refresh_now(self) -> None:
         """Force a fresh SNI read (e.g. when the overlay opens) so attention
