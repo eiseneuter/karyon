@@ -2757,17 +2757,7 @@ class RadialOverlay(QWidget):
         p.setPen(Qt.PenStyle.NoPen)
         p.setBrush(SEG_BASE)
         p.drawEllipse(QPointF(cx, cy), self.r_hub, self.r_hub)
-        # 2px accent ring around the hub.
-        p.setBrush(Qt.BrushStyle.NoBrush)
-        p.setPen(QPen(QColor(self.config.get("accent", "#37d0ff")), 2.0))
-        if self.open_sector == -1:
-            p.drawEllipse(QPointF(cx, cy), self.r_hub, self.r_hub)
-        else:
-            # The open sector spans from a0 to a1 (usually 180 degrees).
-            # The closed portion is from a1 to a0 + 360.
-            a0, a1 = self._sector_arc.get(self.open_sector, (0.0, 180.0))
-            path = self._arc_path(cx, cy, self.r_hub, a1, a0 + 360.0)
-            p.drawPath(path)
+
         self._paint_hub_ticks(p, cx, cy)
         self._paint_info_card(p, cx, cy)
         # (Mail badge moved to a dedicated ring-2 segment -- see _build_windows)
