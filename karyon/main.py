@@ -356,7 +356,7 @@ class Launcher:
         path, geo = self._gesture_flash_path(rel)
         self.flash.play(path, accent, geo)
 
-        self.executor.execute(action, direction)
+        QTimer.singleShot(100, lambda: self.executor.execute(action, direction))
 
     def _gesture_flash_path(self, rel):
         """Light-streak along the gesture travel, in coordinates local to the

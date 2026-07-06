@@ -44,7 +44,7 @@ PLASMA_ITEMS: dict[str, tuple] = {
     "org.kde.plasma.clipboard": ("clipboard", "Clipboard",
                               ("klipper", None), "klipper", None),
     "org.kde.plasma.notifications": ("notifications", "Notifications",
-                              ("builtin", ["plasmawindowed", "org.kde.plasma.notifications"]),
+                              ("builtin", ["busctl", "--user", "call", "org.kde.kglobalaccel", "/component/plasmashell", "org.kde.kglobalaccel.Component", "invokeShortcut", "s", "show widget org.kde.plasma.notifications"]),
                               "preferences-desktop-notification", None),
     "org.kde.plasma.battery": ("battery", "Battery & Brightness",
                               ("builtin", ["plasmawindowed", "org.kde.plasma.battery"]),
@@ -192,7 +192,6 @@ def _hw_present(item_id: str) -> bool:
     return True
 
 
-# Never offered anywhere (main fan nor popup drawer).
 _EXCLUDE = {
     "org.kde.plasma.keyboardindicator",
     "org.kde.plasma.notifications",
