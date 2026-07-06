@@ -216,7 +216,7 @@ class SettingsPanel(QFrame):
         # the title.
         self._add_slider("hold_ms", "Trigger Hold", 50, 800, 1, unit=" ms")
         self._add_slider("mouse_speed", "Overlay mouse speed", -100, 100, 0.01)
-        self._add_slider("scale", "Overlay scale", 10, 25, 0.1)   # menu scale 1.0 - 2.5
+        self._add_slider("scale", "Overlay scale", 10, 20, 0.1)   # menu scale 1.0 - 2.0
         self._add_slider("transparency", "Overlay transparency", 0, 50, 1, unit=" %")
         self._add_slider("max_recent_apps", "Max recent apps", 1, 15, 1)
         self._add_slider("max_recent_files", "Max recent files", 1, 15, 1)
@@ -422,7 +422,7 @@ class SettingsPanel(QFrame):
             s.setValue(maxv)
 
     def _key_text(self) -> str:
-        return self._key_name(self.config.get("trigger_key", 0))
+        return self._key_name(getattr(self, "_captured_key", 0))
 
     @staticmethod
     def _key_name(code) -> str:
@@ -636,10 +636,39 @@ class SettingsPanel(QFrame):
             self._refresh_gesture_custom(tgt)
             return
         self._captured_key = code
-        self.config["trigger_key"] = code
         self._refresh_custom_item()
 
-    # -- save/cancel --------------------------------------------------------
+    # -- save/cancel/load ---------------------------------------------------
+    def _load(self) -> None:
+        for key, (s, step) in self.sliders.items():
+            s.setValue(int(round(self.config.get(key, DEFAULTS[key]) / step)))
+            # The value label is updated by the valueChanged signal.
+        for key, c in self.combos.items():
+            cur = self.config.get(key)
+            for i in range(c.count()):
+                if c.itemData(i) == cur:
+                    c.setCurrentIndex(i)
+                    break
+        for key, sp in self.spins.items():
+            sp.setValue(int(self.config.get(key, DEFAULTS[key])))
+        for key, cb in self.checks.items():
+            cb.setChecked(bool(self.config.get(key, DEFAULTS.get(key, False))))
+        for direction, c in self.gesture_combos.items():
+            cur = self.config.get(f"gesture_{direction}", "none")
+            for i in range(c.count()):
+                if c.itemData(i) == cur:
+                    c.setCurrentIndex(i)
+                    break
+        self._gesture_keys = dict(self.config.get("gesture_custom_keys", {}))
+        self._captured_key = int(self.config.get("trigger_key", 0) or 0)
+        self._refresh_custom_item()
+        for direction in self.gesture_combos:
+            self._refresh_gesture_custom(direction)
+
+    def showEvent(self, event):  # noqa: N802
+        super().showEvent(event)
+        self._load()
+
     def _save(self) -> None:
         for key, (s, step) in self.sliders.items():
             val = round(s.value() * step, 4)   # kill float noise (-0.70000001)

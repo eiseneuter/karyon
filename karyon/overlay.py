@@ -271,16 +271,15 @@ class RadialOverlay(QWidget):
     def _compute_geometry(self) -> None:
         self._static_frame_cache = None
         self._current_frame = None
-        s = float(self.config["scale"])
+        # Scale adjusted: user requested that the new 1.0 = old 1.5.
+        s = float(self.config["scale"]) * 1.5
         self.s = s
         gap = 2 * s                       # uniform gap between ALL rings
         self.r_neutral = (2.5 / 1.5) * s  # 5px-diameter neutral centre at s=1.5
         self.r_hub = 46 * s
-        self.r1_in = self.r_hub + gap
-        self.r1_out = self.r1_in + 24 * s  # ring-1 band 20% thinner (was 30*s)
-        self.seg_depth = 54 * s
-        self.seg3_depth = 54 * s
-        self.r2_in = self.r1_out + gap
+        self.seg_depth = 45 * s
+        self.seg3_depth = 45 * s
+        self.r2_in = self.r_hub + gap
         self.r2_out = self.r2_in + self.seg_depth
         self.r2c = self.r2_in + self.seg_depth / 2
         self.r3_in = self.r2_out + gap
@@ -1762,7 +1761,7 @@ class RadialOverlay(QWidget):
         # Offset-open lock: only the Windows sector is selectable by moving; the
         # other two sectors can only be reached via the drawn hub (which unlocks).
         if self._win_lock:
-            if r <= self.r1_in:
+            if r <= self.r_hub:
                 self._win_lock = False        # reached the hub -> unlock
             else:
                 self.open_sector = SEC_WINDOWS
@@ -1771,7 +1770,7 @@ class RadialOverlay(QWidget):
 
         # Inner circle: trigger zones for switching AND a compressed selection
         # field for the active sector's symbols.
-        if r <= self.r1_in:
+        if r <= self.r_hub:
             here = self._sector_containing(a)
             if self.open_sector == -1 or here != self.open_sector:
                 self._set_open_sector(here)
@@ -2444,7 +2443,7 @@ class RadialOverlay(QWidget):
         # Optimization: If ONLY the clock/date changes (idle tick), restrict 
         # damage rect to the inner hub to prevent full-screen flickering.
         if getattr(self, "_is_idle_clock", False):
-            hr = int(self.r1_in + 4 * s)
+            hr = int(self.r_hub + 4 * s)
             return QRect(int(cx - hr), int(cy - hr), 2 * hr, 2 * hr)
             
         # Generously cover the outermost drawable: ring-4 outer edge + drill/close
@@ -2569,14 +2568,16 @@ class RadialOverlay(QWidget):
             self.hover_node = None
             
             self._paint_hub(cp, cx, cy)
-            self._paint_sectors(cp, cx, cy)
             
-            if self.open_sector != -1:
-                active_in_ring2 = (
-                    (self.open_group is not None and self.open_group.radius <= self.r2c + 0.1)
-                    or (self._ctrl_node is not None and self._ctrl_node.radius <= self.r2c + 0.1)
-                )
-                for node in self.ring2.get(self.open_sector, []):
+            active_in_ring2 = (
+                (self.open_group is not None and self.open_group.radius <= self.r2c + 0.1)
+                or (self._ctrl_node is not None and self._ctrl_node.radius <= self.r2c + 0.1)
+            )
+            for sec in self.active_sectors:
+                # If a sector is open, only draw that sector's nodes
+                if self.open_sector != -1 and sec != self.open_sector:
+                    continue
+                for node in self.ring2.get(sec, []):
                     if active_in_ring2 and node.radius > self.r2c + 0.1:
                         if node is not self.open_group and node is not self._ctrl_node:
                             continue
@@ -2621,12 +2622,14 @@ class RadialOverlay(QWidget):
             
         # LIVE nodes: nodes with progress animate independently of hover, so we
         # bypass the static cache and draw them here.
-        if self.open_sector != -1:
-            active_in_ring2 = (
-                (self.open_group is not None and self.open_group.radius <= self.r2c + 0.1)
-                or (self._ctrl_node is not None and self._ctrl_node.radius <= self.r2c + 0.1)
-            )
-            for node in self.ring2.get(self.open_sector, []):
+        active_in_ring2 = (
+            (self.open_group is not None and self.open_group.radius <= self.r2c + 0.1)
+            or (self._ctrl_node is not None and self._ctrl_node.radius <= self.r2c + 0.1)
+        )
+        for sec in self.active_sectors:
+            if self.open_sector != -1 and sec != self.open_sector:
+                continue
+            for node in self.ring2.get(sec, []):
                 if node is self.hover_node:  # Already drawn above
                     continue
                 if self._has_progress(node):
@@ -2756,7 +2759,14 @@ class RadialOverlay(QWidget):
         # 2px accent ring around the hub.
         p.setBrush(Qt.BrushStyle.NoBrush)
         p.setPen(QPen(QColor(self.config.get("accent", "#37d0ff")), 2.0))
-        p.drawEllipse(QPointF(cx, cy), self.r_hub, self.r_hub)
+        if self.open_sector == -1:
+            p.drawEllipse(QPointF(cx, cy), self.r_hub, self.r_hub)
+        else:
+            # The open sector spans from a0 to a1 (usually 180 degrees).
+            # The closed portion is from a1 to a0 + 360.
+            a0, a1 = self._sector_arc.get(self.open_sector, (0.0, 180.0))
+            path = self._arc_path(cx, cy, self.r_hub, a1, a0 + 360.0)
+            p.drawPath(path)
         self._paint_hub_ticks(p, cx, cy)
         self._paint_info_card(p, cx, cy)
         # (Mail badge moved to a dedicated ring-2 segment -- see _build_windows)
@@ -2869,52 +2879,7 @@ class RadialOverlay(QWidget):
         p.setBrush(QColor(255, 209, 48))
         p.drawPolygon(poly)
 
-    def _paint_sectors(self, p, cx, cy) -> None:
-        if self.open_sector == -1:
-            return
-            
-        # Draw every active sector's ring-1 band using its animated arc, so the
-        # transformation (thirds <-> expanded/collapsed) is smooth.
-        rin, rout = self.r1_in, self.r1_out
-        # Only the selected sector is drawn once one is chosen (others are simply
-        # gone, not animated away); the selected one animates its growth.
-        secs = [self.open_sector]
-        for sec in secs:
-            cd = self._sector_draw.get(sec)
-            if cd is None:
-                a0, a1 = self._sector_arc.get(sec, (0, 0))
-            else:
-                a0, a1 = cd[0] - cd[1], cd[0] + cd[1]
-            span = a1 - a0
-            if span <= 0.5:
-                continue
-            path = self._band_path(cx, cy, rin, rout, a0, a1)
-            p.setBrush(SEG_BASE)
-            p.setPen(Qt.PenStyle.NoPen)
-            p.drawPath(path)
-            
-            # Draw thin 3-sided accent border (left, outer, right) for Ring 1 segments
-            border_path = QPainterPath()
-            border_path.moveTo(cx + rin * math.cos(math.radians(a0)), cy + rin * math.sin(math.radians(a0)))
-            border_path.lineTo(cx + rout * math.cos(math.radians(a0)), cy + rout * math.sin(math.radians(a0)))
-            border_path.arcTo(self._arc_rect(cx, cy, rout), -a0, -(a1 - a0))
-            border_path.lineTo(cx + rin * math.cos(math.radians(a1)), cy + rin * math.sin(math.radians(a1)))
-            
-            acc = QColor(self.config.get("accent", "#37d0ff"))
-            acc.setAlpha(180)
-            p.setBrush(Qt.BrushStyle.NoBrush)
-            p.setPen(QPen(acc, max(1.0, 0.9 * self.s)))
-            p.drawPath(border_path)
-            
-            # glyph at the (straight) sector nominal -- only while wide enough.
-            if span > 26.0:
-                mid = self._nominal.get(sec, (a0 + a1) / 2)
-                gx = cx + (rin + rout) / 2 * math.cos(math.radians(mid))
-                gy = cy + (rin + rout) / 2 * math.sin(math.radians(mid))
-                scale = 0.45 * min(1.0, (span - 26.0) / 30.0 + 0.3)
-                self._paint_glyph(p, gx, gy,
-                                  {SEC_WINDOWS: "sec_windows", SEC_APPS: "sec_apps",
-                                   SEC_FILES: "sec_files"}[sec], scale)
+
 
     def _arc_rect(self, cx, cy, r) -> QRectF:
         return QRectF(cx - r, cy - r, 2 * r, 2 * r)

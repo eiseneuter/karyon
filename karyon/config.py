@@ -19,7 +19,7 @@ DEFAULTS: dict = {
     "cancel_button": "left",
     "trigger_key": 125,
     "mouse_speed": 0.0,
-    "scale": 1.7,
+    "scale": 1.5,
     "accent": "#37d0ff",
     "game_mode": True,
     "performance_mode": False,
