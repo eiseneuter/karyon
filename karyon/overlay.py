@@ -615,6 +615,7 @@ class RadialOverlay(QWidget):
 
     # -- model build --------------------------------------------------------
     def _build_model(self, snapshot: dict) -> None:
+        self._model_revision = getattr(self, "_model_revision", 0) + 1
         cfg = self.config
         windows = snapshot.get("windows", [])
         self._build_windows(windows)
@@ -2554,7 +2555,7 @@ class RadialOverlay(QWidget):
         active_progress_nodes = frozenset(
             id(node) for node in self.ring2.get(self.open_sector, []) if self._has_progress(node)
         )
-        current_state = (self.open_sector, id(self.open_group), id(self._ctrl_node), self.size().width(), active_progress_nodes, getattr(self, "_mail_blink_state", 0))
+        current_state = (self.open_sector, id(self.open_group), id(self._ctrl_node), self.size().width(), active_progress_nodes, getattr(self, "_mail_blink_state", 0), getattr(self, "_model_revision", 0))
         if not getattr(self, "_static_frame_cache", None) or getattr(self, "_cache_state", None) != current_state:
             from PyQt6.QtGui import QPixmap
             self._static_frame_cache = QPixmap(self.size())
@@ -2659,7 +2660,7 @@ class RadialOverlay(QWidget):
             return
         p.setFont(f)
         text = node.label
-        p.setPen(Qt.PenStyle.NoPen)
+        p.setPen(QPen(QColor(0, 0, 0), max(1.0, 1.0 * self.s)))
         p.setBrush(QColor(245, 247, 250))
         p.drawRoundedRect(box, 5 * self.s, 5 * self.s)
         p.setPen(QPen(QColor(16, 18, 24)))
@@ -2677,7 +2678,7 @@ class RadialOverlay(QWidget):
     def _title_box_and_font(self, node) -> tuple[QRectF, QFont]:
         text = node.label
         f = QFont()
-        f.setPointSizeF(7.0 * self.s)   # a bit smaller than before
+        f.setPointSizeF(4.5 * self.s)   # reduced from 7.0 for better proportions
         f.setBold(True)
         fm = QFontMetrics(f)
         pad = 6 * self.s
