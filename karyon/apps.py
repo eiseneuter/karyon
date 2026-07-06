@@ -363,8 +363,8 @@ class AppIndex:
                 if real_app and not real_app.pseudo:
                     continue
             scored.append((self._usage_count(app_id), self._recency(app_id), app))
-        # Sort by usage count first, then by recency (both descending)
-        scored.sort(key=lambda t: (t[0], t[1]), reverse=True)
+        # Sort by recency first, then by usage count (both descending)
+        scored.sort(key=lambda t: (t[1], t[0]), reverse=True)
         return [app for _, _, app in scored[:n]]
 
     def add_pseudo(self, app_id: str, name: str, exec_line: str, icon: str) -> None:

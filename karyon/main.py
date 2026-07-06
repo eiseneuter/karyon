@@ -458,6 +458,11 @@ class Launcher:
                 if app and "Game" in getattr(app, "categories", set()):
                     inhibit = True
                     
+            # 3. Allowlist (overrides both)
+            allowed = self.config.get("game_allow_apps", [])
+            if any(a.lower() in rc for a in allowed):
+                inhibit = False
+                    
         self._set_game_mode(inhibit, rc)
 
     def _set_game_mode(self, active: bool, rc: str = "") -> None:

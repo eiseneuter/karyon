@@ -62,6 +62,9 @@ DEFAULTS: dict = {
         "minecraft", "ryujinx", "yuzu", "dolphin-emu", "pcsx2", "rpcs3",
         "citra", "cemu", ".exe"
     ],
+    "game_allow_apps": [
+        "steam",
+    ],
     "overlay_cursor": "ring",
 }
 
