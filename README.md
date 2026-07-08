@@ -13,7 +13,7 @@ Karyon is fully capable of entirely replacing your KDE Plasma Panel (Task Manage
 * **Trigger & Select:** Hold the right mouse button to open the overlay. Hover over the desired item and let the right mouse button go to select it.
 * **Cancel:** Left-click anywhere while the overlay is open to cancel and close it without making a selection.
 * **Category Switching:** In Pie Mode, hover over the different sections of the central hub to switch categories. In Switch Mode, use your mouse wheel to switch between categories.
-* **Volume:** Scroll the mouse wheel up/down (in Pie Mode) or use your mouse Back/Forward buttons (in Switch Mode) anywhere in the overlay (except when hovering over open window segments) to adjust the system volume.
+* **Volume:** Scroll the mouse wheel up/down (in Pie Mode) anywhere in the overlay (except when hovering over open window segments) to adjust the system volume. In Switch Mode, there is a dedicated Volume Control Area at the bottom of the central hub where you can use the mouse wheel to adjust the volume.
 * **Mute Audio:** Middle-click anywhere in the overlay (except on window segments) to toggle system mute.
 * **Window Management:** Hover directly over an open window segment and scroll the mouse wheel **Up** to Maximize (or Restore) the window, and **Down** to Minimize it. Middle-click on the segment closes the window.
 
@@ -39,7 +39,7 @@ Karyon offers two distinct presentation modes for the radial menu:
 * **Central Hub:** The center of the radial menu acts as an orientation guide and information center. It prominently displays an icon indicating the currently active category (Windows, Apps, or Files), along with real-time system information (clock, date, and battery status).
 * **System Tray:** Access your system's tray icons directly within Karyon. Hovering over a tray icon and releasing the right mouse button opens its native Plasma flyout window (just like the real system tray), giving you full access to its controls.
 * **Notifications:** Completely separate from the tray, Karyon highlights unread notifications from messengers or apps, allowing you to instantly open the respective application and jump straight into the context.
-* **Volume Control:** Adjust the system volume instantly using your mouse wheel anywhere inside the overlay, or by drilling down into the volume tray icon and hovering over its internal buttons.
+* **Volume Control:** Adjust the system volume instantly using your mouse wheel anywhere inside the overlay (in Pie Mode) or inside the dedicated Volume Control Area at the bottom of the hub (in Switch Mode), or by drilling down into the volume tray icon and hovering over its internal buttons.
 
 ### 6. Smart Game Mode & Deep Sleep
 Karyon is built to never get in your way when gaming. 
