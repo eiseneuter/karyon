@@ -31,8 +31,8 @@ QCheckBox::indicator, QRadioButton::indicator {
     width: 16px; height: 16px; border-radius: 4px;
     border: 1px solid rgba(255,255,255,70); background: rgb(20,24,32);
 }
-QCheckBox::indicator:hover { border: 1px solid %(accent)s; }
-QCheckBox::indicator:checked { background: %(accent)s; border: 1px solid %(accent)s; }
+QCheckBox::indicator:hover { border: 1px solid #37d0ff; }
+QCheckBox::indicator:checked { background: #37d0ff; border: 1px solid #37d0ff; }
 QCheckBox::indicator:disabled { border: 1px solid rgba(255,255,255,25); }
 QCheckBox::indicator:checked:disabled {
     background: rgba(255,255,255,45); border: 1px solid rgba(255,255,255,45);
@@ -42,7 +42,7 @@ QPushButton {
     background: rgba(255,255,255,18); color: #f0f4fa; border: none;
     padding: 7px 14px; border-radius: 6px;
 }
-QPushButton:hover { background: %(accent)s; color: rgb(12,16,22); }
+QPushButton:hover { background: #37d0ff; color: rgb(12,16,22); }
 QComboBox, QSpinBox {
     background: rgb(58,63,71); color: #f0f4fa;
     border: 1px solid rgba(255,255,255,55);
@@ -67,9 +67,9 @@ QComboBox::down-arrow {
     border-top: 6px solid #b9c2d0;
 }
 QSlider::groove:horizontal { height: 4px; background: rgba(255,255,255,25); }
-QSlider::sub-page:horizontal { background: %(accent)s; }
+QSlider::sub-page:horizontal { background: #37d0ff; }
 QSlider::handle:horizontal {
-    background: %(accent)s; width: 14px; margin: -6px 0; border-radius: 7px;
+    background: #37d0ff; width: 14px; margin: -6px 0; border-radius: 7px;
 }
 """
 
@@ -130,7 +130,7 @@ class SettingsPanel(QFrame):
         self._build()
 
     def _apply_style(self) -> None:
-        self.setStyleSheet(PANEL_STYLE % {"accent": self.config.get("accent", "#37d0ff")})
+        self.setStyleSheet(PANEL_STYLE)
 
     # -- build --------------------------------------------------------------
     def _build(self) -> None:
@@ -151,11 +151,11 @@ class SettingsPanel(QFrame):
         scroll.setWidget(inner)
         outer.addWidget(scroll)
 
-        title = QLabel("Karyon 2.0")
+        title = QLabel("Karyon 2.1")
         title.setObjectName("title")
         self._lay.addWidget(title)
 
-        info_text = QLabel("Right mouse click to show overlay. Let right mouse go to select. Left mouse click to cancel. Middle mouse click to close window.")
+        info_text = QLabel("Hold Right mouse to show overlay. Let right mouse go to select. Left mouse click to cancel. Middle mouse click to close window. Mouse wheel up on window segments to maximize/restore. Mouse wheel down to minimize.")
         info_text.setWordWrap(True)
         info_text.setStyleSheet("color: #888; font-style: italic; margin-bottom: 10px;")
         self._lay.addWidget(info_text)
@@ -182,12 +182,10 @@ class SettingsPanel(QFrame):
         self._add_combo("overlay_mode", "Overlay Mode", [("Pie Mode", "pie"), ("Switch Mode (Mouse wheel)", "switch")])
         self.combos["overlay_mode"].currentIndexChanged.connect(self._update_volume_label)
         self.combos["overlay_mode"].currentIndexChanged.connect(self._deps)
+        self._add_combo("theme", "Theme", [("Dark", "dark"), ("Light", "light")])
 
-        # Directly under Accent, spanning the grid so it isn't pushed to the bottom.
+        # Directly under Theme, spanning the grid so it isn't pushed to the bottom.
         self._grid.addWidget(self._make_check("game_mode", "Game Mode (auto-disable overlay in games)"),
-                             self._grow, 0, 1, 4)
-        self._grow += 1
-        self._grid.addWidget(self._make_check("performance_mode", "Performance Mode (Limit FPS to 30)"),
                              self._grow, 0, 1, 4)
         self._grow += 1
         self._grid.addWidget(self._make_check(
@@ -209,8 +207,8 @@ class SettingsPanel(QFrame):
         self._add_slider("mouse_speed", "Overlay mouse speed", -100, 100, 0.01)
         self._add_slider("scale", "Overlay scale", 10, 20, 0.1)   # menu scale 1.0 - 2.0
         self._add_slider("transparency", "Overlay transparency", 0, 50, 1, unit=" %")
-        self._add_slider("max_recent_apps", "Max recent apps", 1, 15, 1)
-        self._add_slider("max_recent_files", "Max recent files", 1, 15, 1)
+        self._add_slider("max_recent_apps", "Max recent apps", 1, 30, 1)
+        self._add_slider("max_recent_files", "Max recent files", 1, 30, 1)
         self._add_slider("volume_steps", "Volume steps", 1, 10, 1, unit=" %")
 
         # Checkboxes, two columns.  Left: the Show toggles + Dim area + Focus.
@@ -355,7 +353,6 @@ class SettingsPanel(QFrame):
                 cb = self.checks.get(k)
                 if cb:
                     cb.setEnabled(wins_on)
-        self._update_recent_caps()
 
 
 
@@ -369,27 +366,7 @@ class SettingsPanel(QFrame):
 
 
 
-    def _update_recent_caps(self, *_) -> None:
-        """Each recents row holds at most 15 elements; subtract the symbols that
-        permanently reside in it (dynamic with their checkboxes)."""
-        show_apps = self.checks["show_apps"].isChecked()
-        show_all = self.checks["show_all_apps"].isChecked()
-        show_fav = self.checks["show_favorites"].isChecked()
-        show_sess = self.checks["show_session"].isChecked()
-        # Apps row: All Applications OR Favorites (mutually exclusive) + Session.
-        res_apps = (1 if (show_all or show_fav) else 0) \
-            + (1 if (show_sess and show_apps) else 0)
-        # Files row: Session relocates here when Show Apps is off.
-        res_files = 1 if (show_sess and not show_apps) else 0
-        self._set_slider_max("max_recent_apps", 15 - res_apps)
-        self._set_slider_max("max_recent_files", 15 - res_files)
 
-    def _set_slider_max(self, key, maxv) -> None:
-        s, _step = self.sliders[key]
-        maxv = max(0, maxv)
-        s.setMaximum(maxv)             # step is 1 for the recents sliders
-        if s.value() > maxv:
-            s.setValue(maxv)
 
     def _key_text(self) -> str:
         return self._key_name(getattr(self, "_captured_key", 0))

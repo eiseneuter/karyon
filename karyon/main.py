@@ -355,7 +355,8 @@ class Launcher:
                 (w["id"] for w in snap.get("windows", []) if w.get("active")),
                 self._gesture_win_id)
         action = self.executor.direction_action(direction)
-        accent = self.config.get("accent", "#37d0ff")
+        theme = self.config.get("theme", "dark")
+        accent = "#008eb3" if theme == "light" else "#37d0ff"
         rel = getattr(self.proxy, "_last_gesture_rel", (0.0, 0.0))
 
         # Flash immediately (no snapshot round-trip, so it always shows).
@@ -396,9 +397,32 @@ class Launcher:
         self.settings.set_captured_key(code)
 
     def _on_volume_scroll(self, direction: int) -> None:
+        if self.overlay.isVisible():
+            node = getattr(self.overlay, "hover_node", None)
+            from .overlay import IT_WINDOW, IT_WINDOW_GROUP
+            is_open_window = node and ((node.kind == IT_WINDOW) or 
+                                       (node.kind == IT_WINDOW_GROUP and getattr(node, "data", None) is not None))
+            if is_open_window:
+                r, _ = self.overlay._pointer_polar()
+                if r > getattr(self.overlay, "r_hub", 0):
+                    wid = None
+                    if node.kind == IT_WINDOW:
+                        wid = node.data.get("id")
+                    elif node.kind == IT_WINDOW_GROUP and node.data:
+                        if len(node.data) == 1:
+                            wid = node.data[0].get("id")
+                    
+                    if wid:
+                        if direction > 0:
+                            self.kwin.toggle_maximize(wid)
+                        else:
+                            self.kwin.minimize(wid)
+                    return
+
         if self.config.get("overlay_mode", "pie") == "switch":
             self.overlay.switch_category(direction)
             return
+            
         self._do_volume_adjust(direction)
 
     def _on_volume_button(self, direction: int) -> None:

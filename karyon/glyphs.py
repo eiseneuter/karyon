@@ -20,6 +20,11 @@ def set_accent(color) -> None:
     global _ACCENT
     _ACCENT = QColor(color)
 
+def set_color(color) -> None:
+    """Base colour used for the glyphs."""
+    global GLYPH
+    GLYPH = QColor(color)
+
 
 def _pen(width: float) -> QPen:
     pen = QPen(GLYPH, width)

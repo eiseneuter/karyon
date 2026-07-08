@@ -330,6 +330,19 @@ class KWinBridge:
         self._cache_set_minimized(win_id, True)
         self._with_window(win_id, "w.minimized = true;")
 
+    def toggle_maximize(self, win_id: str) -> None:
+        action = """
+            if (w.minimized) w.minimized = false;
+            var maxed = (typeof w.maximizeMode !== 'undefined' && w.maximizeMode === 3) || 
+                        (w.width >= workspace.clientArea(0, w).width - 10 && w.height >= workspace.clientArea(0, w).height - 10);
+            if (maxed) {
+                w.setMaximize(false, false);
+            } else {
+                w.setMaximize(true, true);
+            }
+        """
+        self._with_window(win_id, action)
+
     def close(self, win_id: str) -> None:
         self._cache_remove(win_id)
         self._with_window(win_id, "w.closeWindow();")

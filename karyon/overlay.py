@@ -22,9 +22,6 @@ from PyQt6.QtWidgets import QWidget
 log = logging.getLogger(__name__)
 
 # -- colors -----------------------------------------------------------------
-GLYPH = QColor(232, 238, 246)
-SEG_BASE = QColor(28, 32, 42)
-SEG_HOVER = QColor(72, 80, 97)
 CYAN = QColor("#37d0ff")
 RED = QColor("#ff5c6a")
 GREEN = QColor("#4cdf6b")
@@ -205,6 +202,30 @@ def _icon_for(name: str) -> QIcon:
 
 
 class RadialOverlay(QWidget):
+    def _is_light(self) -> bool:
+        return getattr(self, "config", {}).get("theme", "dark") == "light"
+        
+    def _seg_base(self) -> QColor:
+        return QColor(238, 242, 248) if self._is_light() else QColor(28, 32, 42)
+
+    def _seg_hover(self) -> QColor:
+        return QColor(190, 200, 215) if self._is_light() else QColor(72, 80, 97)
+
+    def _glyph_color(self) -> QColor:
+        return QColor(40, 48, 60) if self._is_light() else QColor(232, 238, 246)
+
+    def _cyan(self) -> QColor:
+        return QColor("#008eb3") if self._is_light() else QColor(CYAN)
+
+    def _green(self) -> QColor:
+        return QColor("#1f9b3c") if self._is_light() else QColor(GREEN)
+
+    def _red(self) -> QColor:
+        return QColor("#db2b3b") if self._is_light() else QColor(RED)
+
+    def _orange(self) -> QColor:
+        return QColor("#d18300") if self._is_light() else QColor(255, 170, 0)
+
     request_gesture = pyqtSignal(str)
     request_session = pyqtSignal(str)
     request_reactivate = pyqtSignal()
@@ -2466,7 +2487,7 @@ class RadialOverlay(QWidget):
             
         if animating:
             repaint = True
-            fps_delay = 32 if self.config.get("performance_mode", False) else 16
+            fps_delay = 33 # Standardized to ~30 FPS
             self._tick_timer.start(fps_delay)
             
         self._is_idle_clock = False
@@ -2701,59 +2722,72 @@ class RadialOverlay(QWidget):
         p.end()
 
     def _paint_title(self, p, cx, cy, node) -> None:
-        box, f = self._title_box_and_font(node)
+        box, f, text = self._title_box_and_font(node)
         if box.isEmpty():
             return
         p.setFont(f)
-        text = node.label
-        p.setPen(QPen(QColor(0, 0, 0), max(1.0, 1.0 * self.s)))
-        p.setBrush(QColor(245, 247, 250))
-        p.drawRoundedRect(box, 5 * self.s, 5 * self.s)
-        p.setPen(QPen(QColor(16, 18, 24)))
+        if self._is_light():
+            p.setPen(QPen(QColor(200, 200, 200), max(1.0, 1.0 * self.s)))
+            p.setBrush(QColor(40, 48, 60))
+            p.drawRoundedRect(box, 5 * self.s, 5 * self.s)
+            p.setPen(QPen(QColor(245, 247, 250)))
+        else:
+            p.setPen(QPen(QColor(0, 0, 0), max(1.0, 1.0 * self.s)))
+            p.setBrush(QColor(245, 247, 250))
+            p.drawRoundedRect(box, 5 * self.s, 5 * self.s)
+            p.setPen(QPen(QColor(16, 18, 24)))
         p.drawText(box, Qt.AlignmentFlag.AlignCenter, text)
 
     def _current_title_rect(self) -> QRect:
         if self.hover_node is None or not self.hover_node.label:
             return QRect()
-        box, _font = self._title_box_and_font(self.hover_node)
+        box, _font, _text = self._title_box_and_font(self.hover_node)
         if box.isEmpty():
             return QRect()
         margin = int(math.ceil(8 * self.s))
         return box.toAlignedRect().adjusted(-margin, -margin, margin, margin)
 
-    def _title_box_and_font(self, node) -> tuple[QRectF, QFont]:
+    def _title_box_and_font(self, node) -> tuple[QRectF, QFont, str]:
         text = node.label
         f = QFont()
-        f.setPointSizeF(4.5 * self.s)   # reduced from 7.0 for better proportions
+        f.setPointSizeF(4.5 * self.s)
         f.setBold(True)
         fm = QFontMetrics(f)
         pad = 6 * self.s
         rect = self.rect()
-        max_w = max(80.0, rect.width() - 8.0)
-        max_text_w = max(40.0, max_w - 2 * pad)
+        
+        # Limit text width to a reasonable max (e.g. 300 scaled px) to prevent giant boxes
+        max_text_w = min(300.0 * self.s, max(40.0, max(80.0, rect.width() - 8.0) - 2 * pad))
+        
+        # Elide middle ensures the file extension is preserved
+        text = fm.elidedText(text, Qt.TextElideMode.ElideMiddle, int(max_text_w))
+        
         tw = fm.horizontalAdvance(text)
-        while tw > max_text_w and f.pointSizeF() > 4.2 * self.s:
-            f.setPointSizeF(f.pointSizeF() - 0.35 * self.s)
-            fm = QFontMetrics(f)
-            tw = fm.horizontalAdvance(text)
-        if tw > max_text_w and tw > 0:
-            f.setStretch(max(10, int(100 * max_text_w / tw)))
-            fm = QFontMetrics(f)
-            tw = fm.horizontalAdvance(text)
         th = fm.height()
-        w = min(tw + 2 * pad, max_w)
+        w = tw + 2 * pad
         h = th + pad * 0.7
+        
         # Place the pill just outside the hovered element, along its direction.
         depth = self.seg3_depth if node.kind == IT_CTRL_BTN else self.seg_depth
         r_out = node.radius + depth / 2 + 8 * self.s + h / 2
-        ang = math.radians(node.angle)
-        cx, cy = self._center.x(), self._center.y()
-        cxp = cx + r_out * math.cos(ang)
-        cyp = cy + r_out * math.sin(ang)
-        px, py = cxp - w / 2, cyp - h / 2
-        px = max(rect.left() + 4, min(rect.right() - w - 4, px))
-        py = max(rect.top() + 4, min(rect.bottom() - h - 4, py))
-        return QRectF(px, py, w, h), f
+        angle = node.angle
+        if node.kind in (IT_TRAY_MENU, IT_FAV_MENU):
+            angle -= 4.0
+        elif node.kind in (IT_APP, IT_FILE, IT_WINDOW_GROUP, IT_WINDOW) and getattr(node, "depth", 0) == 0:
+            angle -= 3.0
+            
+        cxr = rect.width() / 2 + r_out * math.cos(math.radians(angle))
+        cyr = rect.height() / 2 + r_out * math.sin(math.radians(angle))
+        rx = cxr - w / 2
+        ry = cyr - h / 2
+        
+        # Keep inside overlay rect
+        if rx < pad: rx = pad
+        elif rx + w > rect.width() - pad: rx = rect.width() - pad - w
+        if ry < pad: ry = pad
+        elif ry + h > rect.height() - pad: ry = rect.height() - pad - h
+            
+        return QRectF(rx, ry, w, h), f, text
 
     def _paint_cursor(self, p) -> None:
         px, py = self._pointer.x(), self._pointer.y()
@@ -2779,7 +2813,7 @@ class RadialOverlay(QWidget):
     def _paint_hub(self, p, cx, cy) -> None:
         # Plain disc; the trigger thirds/quarters are invisible hit zones.
         p.setPen(Qt.PenStyle.NoPen)
-        p.setBrush(SEG_BASE)
+        p.setBrush(self._seg_base())
         p.drawEllipse(QPointF(cx, cy), self.r_hub, self.r_hub)
 
         if self.config.get("overlay_mode", "pie") != "switch":
@@ -2805,7 +2839,7 @@ class RadialOverlay(QWidget):
                 f0, f1 = i / segs, (i + 1) / segs   # 0 = edge, 1 = inner
                 ra = self.r_hub - f0 * tick
                 rb = self.r_hub - f1 * tick
-                col = QColor(GLYPH)
+                col = QColor(self._glyph_color())
                 col.setAlpha(int(170 * (1.0 - f0)))
                 pen = QPen(col, 3.0)   # a touch wider than before (was 2.0)
                 pen.setCapStyle(Qt.PenCapStyle.FlatCap)
@@ -2837,20 +2871,20 @@ class RadialOverlay(QWidget):
                 tw = p.fontMetrics().horizontalAdvance(txt)
                 cyr = rect.center().y()
                 self._draw_lightning(p, cx - tw / 2 - 6 * self.s, cyr, 8 * self.s)
-                p.setPen(QPen(CYAN))
+                p.setPen(QPen(self._cyan()))
                 p.drawText(rect, Qt.AlignmentFlag.AlignCenter, txt)
         # time (middle, big)
         if cfg.get("hub_show_clock", True):
             ft = QFont(); ft.setPointSizeF(14 * self.s); ft.setBold(True)
             p.setFont(ft)
-            p.setPen(QPen(GLYPH))
+            p.setPen(QPen(self._glyph_color()))
             p.drawText(QRectF(cx - r, cy - r * 0.16, 2 * r, r * 0.52),
                        Qt.AlignmentFlag.AlignCenter, now.strftime("%H:%M"))
         # date (bottom)
         if cfg.get("hub_show_date", True):
             fd = QFont(); fd.setPointSizeF(7.5 * self.s)
             p.setFont(fd)
-            p.setPen(QPen(GLYPH))
+            p.setPen(QPen(self._glyph_color()))
             p.drawText(QRectF(cx - r, cy + r * 0.30, 2 * r, r * 0.34),
                        Qt.AlignmentFlag.AlignCenter, now.strftime("%a %d %b"))
 
@@ -2867,21 +2901,27 @@ class RadialOverlay(QWidget):
         p.save()
         p.translate(px, py)
         
-        color = CYAN
         if self.open_sector == SEC_WINDOWS:
-            color = QColor("#3ddc84") # green
+            color = self._green()
         elif self.open_sector == SEC_APPS:
-            color = CYAN
+            color = self._cyan()
         elif self.open_sector == SEC_FILES:
-            color = QColor(255, 170, 0) # orange
+            color = self._orange()
+        else:
+            color = self._cyan()
             
-        p.setPen(QPen(color, max(1.0, 1.2 * self.s)))
+        # 1px thinner lines
+        p.setPen(QPen(color, max(1.0, 1.2 * self.s - 1.0)))
         p.setBrush(Qt.BrushStyle.NoBrush)
         
         w = size * 0.6
         h = size * 0.6
         
         if self.open_sector == SEC_WINDOWS:
+            # Make the window icon a little smaller
+            w = w * 0.85
+            h = h * 0.85
+            
             bx = -w/2 + w*0.4
             by = -h/2 - h*0.3
             fx = -w/2 - w*0.1
@@ -2892,11 +2932,14 @@ class RadialOverlay(QWidget):
             p.drawLine(QPointF(bx, by), QPointF(bx + w, by)) # top
             p.drawLine(QPointF(bx + w, by), QPointF(bx + w, by + h)) # right
             p.drawLine(QPointF(bx + w, by + h), QPointF(fx + w, by + h)) # bottom
-            p.drawLine(QPointF(bx, by + h*0.25), QPointF(bx + w, by + h*0.25)) # titlebar
+            
+            # Fill back window titlebar
+            p.fillRect(QRectF(bx, by, w, h*0.25), color)
             
             # Front window
             p.drawRect(QRectF(fx, fy, w, h))
-            p.drawLine(QPointF(fx, fy + h*0.25), QPointF(fx + w, fy + h*0.25))
+            # Fill front window titlebar
+            p.fillRect(QRectF(fx, fy, w, h*0.25), color)
             
         elif self.open_sector == SEC_APPS:
             # 3x3 grid
@@ -2987,16 +3030,28 @@ class RadialOverlay(QWidget):
             t = 1.0
         if node is getattr(self, "open_group", None) or node is getattr(self, "_ctrl_node", None):
             t = 1.0
+            
         col = QColor(
-            int(SEG_BASE.red() + (SEG_HOVER.red() - SEG_BASE.red()) * t),
-            int(SEG_BASE.green() + (SEG_HOVER.green() - SEG_BASE.green()) * t),
-            int(SEG_BASE.blue() + (SEG_HOVER.blue() - SEG_BASE.blue()) * t),
+            int(self._seg_base().red() + (self._seg_hover().red() - self._seg_base().red()) * t),
+            int(self._seg_base().green() + (self._seg_hover().green() - self._seg_base().green()) * t),
+            int(self._seg_base().blue() + (self._seg_hover().blue() - self._seg_base().blue()) * t),
         )
+        
+        # Open windows get a slight green tint to distinguish them from closed pinned items
+        is_open_window = (node.kind == IT_WINDOW_GROUP and getattr(node, "data", None) is not None) or node.kind == IT_WINDOW
+        if is_open_window:
+            green_col = self._green()
+            mix = 0.05
+            col.setRed(int(col.red() * (1 - mix) + green_col.red() * mix))
+            col.setGreen(int(col.green() * (1 - mix) + green_col.green() * mix))
+            col.setBlue(int(col.blue() * (1 - mix) + green_col.blue() * mix))
         path = self._band_path(cx, cy, rin, rout, a0, a1)
         p.setBrush(col)
         p.setPen(Qt.PenStyle.NoPen)
         p.drawPath(path)
         self._paint_edge_glow(p, cx, cy, path, rout, node, a0, a1)
+
+        self._paint_progress_bar(p, cx, cy, node, rout)
 
         # icon or glyph at node center -- sized to fit the segment.
         gx = cx + rc * math.cos(math.radians(node.angle))
@@ -3028,7 +3083,7 @@ class RadialOverlay(QWidget):
         # close on closable single windows.  A MULTI-window group shows neither
         # on its main symbol -- it opens on hover and is closed via its badge.
         if self._is_drillable(node) and node.kind != IT_WINDOW_GROUP:
-            self._paint_bar(p, cx, cy, node, rout, CYAN)
+            self._paint_bar(p, cx, cy, node, rout, self._cyan())
         # Count / mail / speaker badges.  Drawn last here AND re-drawn on top of
         # the title pill (see paintEvent) so the white title can never cover them.
         self._paint_badges(p, cx, cy, node)
@@ -3103,13 +3158,13 @@ class RadialOverlay(QWidget):
             opacity = 255
         
         if state == "hint":
-            symbol_color = QColor(CYAN.red(), CYAN.green(), CYAN.blue(), opacity)
+            symbol_color = QColor(self._cyan().red(), self._cyan().green(), self._cyan().blue(), opacity)
         elif state == "armed":
-            symbol_color = QColor(GREEN.red(), GREEN.green(), GREEN.blue(), opacity)
+            symbol_color = QColor(self._green().red(), self._green().green(), self._green().blue(), opacity)
         elif state == "pinned":
-            symbol_color = QColor(CYAN.red(), CYAN.green(), CYAN.blue(), opacity)
+            symbol_color = QColor(self._cyan().red(), self._cyan().green(), self._cyan().blue(), opacity)
         else: # "unpin"
-            symbol_color = QColor(RED.red(), RED.green(), RED.blue(), opacity)
+            symbol_color = QColor(self._red().red(), self._red().green(), self._red().blue(), opacity)
             
         # Draw simple pin symbol inside the badge
         s = br
@@ -3148,13 +3203,13 @@ class RadialOverlay(QWidget):
         is_closed_pinned = (node.kind == IT_WINDOW_GROUP and node.pinned and getattr(node, "data", None) is None)
         
         if is_sys or is_closed_pinned:
-            acc = QColor(CYAN)
-        elif node.sector == SEC_WINDOWS:
-            acc = QColor(0, 212, 85) # Green
-        elif node.sector == SEC_FILES:
-            acc = QColor(255, 170, 0) # Orange
+            acc = self._cyan()
+        elif node.kind in (IT_WINDOW, IT_WINDOW_GROUP):
+            acc = self._green()
+        elif node.kind == IT_FILE:
+            acc = self._orange()
         else:
-            acc = QColor(CYAN)
+            acc = self._cyan()
             
         acc.setAlpha(180)
         g_out = math.degrees(1.0 / r_edge) if r_edge > 0 else 0
@@ -3177,7 +3232,7 @@ class RadialOverlay(QWidget):
         return math.hypot(px - bx, py - by) <= br + 4 * self.s
 
     def _speaker_geom(self, node):
-        br = 8.0 * self.s
+        br = 6.5 * self.s
         rin = node.radius - self.seg_depth / 2
         # Tucked closer to the inner edge on the right side
         r_b = rin + br - 1.5 * self.s
@@ -3202,9 +3257,9 @@ class RadialOverlay(QWidget):
         opacity = 255 if node is self.hover_node else 153
         
         if muted:
-            bg = GREEN if hovering else RED
+            bg = self._green() if hovering else self._red()
         else:
-            bg = RED if hovering else CYAN
+            bg = self._red() if hovering else self._cyan()
             
         symbol_color = QColor(bg.red(), bg.green(), bg.blue(), opacity)
         
@@ -3240,21 +3295,22 @@ class RadialOverlay(QWidget):
         border = max(0.8, 1.5 * self.s - 1.0)
         
         opacity = 255
-        bg = RED if hot else CYAN
+        bg = self._red() if hot else self._cyan()
         bg_color = QColor(bg.red(), bg.green(), bg.blue(), opacity)
-        border_color = QColor(12, 16, 22, opacity)
+        border_color = self._seg_base()
+        border_color.setAlpha(opacity)
         
         p.setPen(QPen(border_color, border))
         p.setBrush(bg_color)
         p.drawEllipse(QPointF(bx, by), br, br)
         if hot:
-            cross_color = QColor(255, 255, 255, opacity)
+            cross_color = QColor(255, 255, 255, opacity) if self._is_light() else QColor(12, 16, 22, opacity)
             p.setPen(QPen(cross_color, 1.5 * self.s))
             d = br * 0.36
             p.drawLine(QPointF(bx - d, by - d), QPointF(bx + d, by + d))
             p.drawLine(QPointF(bx - d, by + d), QPointF(bx + d, by - d))
         else:
-            text_color = QColor(8, 10, 14, opacity)
+            text_color = QColor(255, 255, 255, opacity) if self._is_light() else QColor(8, 10, 14, opacity)
             p.setPen(QPen(text_color))
             f = QFont(); f.setPointSizeF(6.5 * self.s); f.setBold(True)
             p.setFont(f)
@@ -3264,17 +3320,21 @@ class RadialOverlay(QWidget):
 
     def _paint_bar(self, p, cx, cy, node, r_edge, color, faint=False,
                    framed=False) -> None:
-        if color is RED:
+        if color in (RED, self._red()):
             # Deeper/darker red at rest; lighten the bar when the pointer is on
             # it (no accent outline).
             col = QColor(255, 110, 122) if framed else QColor(176, 36, 48)
         else:
             col = QColor(color)
-        base = 70 if faint else 240
-        # Both the red close bar AND the cyan drill bar follow the transparency
-        # setting (may fade out with the rest of the overlay).
-        base = int(base * (1.0 - self.config.get("transparency", 10) / 100.0))
-        col.setAlpha(max(20, base))
+            
+        if color in (CYAN, self._cyan()):
+            # 27% transparency = 73% opacity
+            col.setAlphaF(0.73)
+        else:
+            base = 70 if faint else 240
+            # follow the transparency setting
+            base = int(base * (1.0 - self.config.get("transparency", 10) / 100.0))
+            col.setAlpha(max(20, base))
         # Bar fills its zone (same width for drill and close), drawn just inside
         # the segment edge.
         w = self.bar_w
@@ -3291,27 +3351,51 @@ class RadialOverlay(QWidget):
         # the CYAN drill bar's INNER edge sits inside the segment with nothing to
         # smooth it -- so antialias the cyan bar there (never the red close bar,
         # never in Performance Mode).
-        smooth = (color is CYAN) and getattr(self, "_aa", True)
+        smooth = (color in (CYAN, self._cyan())) and getattr(self, "_aa", True)
         p.setRenderHint(QPainter.RenderHint.Antialiasing, smooth)
         p.drawArc(self._arc_rect(cx, cy, rc), int(-a0 * 16), int(-(a1 - a0) * 16))
-        
-        # Subtle progress overlay on the RED close bar (0..1)
-        if color is RED and node.kind == IT_WINDOW_GROUP and self.progress is not None:
+        p.setRenderHint(QPainter.RenderHint.Antialiasing,
+                        getattr(self, "_aa", True))
+
+    def _paint_progress_bar(self, p, cx, cy, node, r_edge) -> None:
+        if getattr(node, "kind", None) == IT_WINDOW_GROUP and getattr(self, "progress", None) is not None:
             frac = self.progress.get(*getattr(node, "progress_keys", ()))
             if frac is not None:
                 frac = max(0.0, min(1.0, float(frac)))
                 if frac > 0.001:
-                    # Draw a white semi-transparent overlay to highlight the progress portion
-                    overlay_col = QColor(255, 255, 255, 100)
-                    overlay_pen = QPen(overlay_col, w)
-                    overlay_pen.setCapStyle(Qt.PenCapStyle.FlatCap)
-                    p.setPen(overlay_pen)
-                    # Progress runs left-to-right (from a0 to a0 + (a1 - a0) * frac)
+                    w = self.bar_w
+                    rc = r_edge - w / 2
+                    
+                    # Use un-morphed angles so text doesn't move during segment growth
+                    a0 = node.angle - node.half_deg
+                    a1 = node.angle + node.half_deg
                     span = (a1 - a0) * frac
+                    
+                    # 1. Track: Lighter background across the ENTIRE segment (a0 to a1)
+                    if self._is_light():
+                        track_col = QColor(0, 0, 0, 50)
+                        prog_col = QColor(0, 0, 0, 160)
+                        text_col = QColor(255, 255, 255)
+                    else:
+                        track_col = QColor(61, 220, 132, 100)
+                        prog_col = QColor(61, 220, 132, 240)
+                        base = int(240 * (1.0 - self.config.get("transparency", 10) / 100.0))
+                        text_col = QColor(8, 10, 14, max(20, base))
+
+                    track_pen = QPen(track_col, w)
+                    track_pen.setCapStyle(Qt.PenCapStyle.FlatCap)
+                    p.setPen(track_pen)
+                    p.setBrush(Qt.BrushStyle.NoBrush)
+                    p.setRenderHint(QPainter.RenderHint.Antialiasing, getattr(self, "_aa", True))
+                    p.drawArc(self._arc_rect(cx, cy, rc), int(-a0 * 16), int(-(a1 - a0) * 16))
+                    
+                    # 2. Progress fill
+                    prog_pen = QPen(prog_col, w)
+                    prog_pen.setCapStyle(Qt.PenCapStyle.FlatCap)
+                    p.setPen(prog_pen)
                     p.drawArc(self._arc_rect(cx, cy, rc), int(-a0 * 16), int(-span * 16))
                     
-                    # Draw black percentage text left-aligned inside the close bar, aligned tangentially
-                    text_col = QColor(8, 10, 14, col.alpha())
+                    # 3. Percentage Text (tangential inside the bar)
                     p.setPen(QPen(text_col))
                     f = QFont()
                     f.setPointSizeF(4.5 * self.s)
@@ -3320,32 +3404,27 @@ class RadialOverlay(QWidget):
                     p.setFont(f)
                     pct_text = f"{int(round(frac * 100))} %"
                     
-                    # Offset slightly from the left edge of the close bar (a0)
                     text_angle = a0 + 2.5
                     rad = math.radians(text_angle)
                     tx = cx + rc * math.cos(rad)
-                    ty = cy + rc * math.sin(rad) + 1.0  # +1px down
+                    ty = cy + rc * math.sin(rad)
                     
-                    # Tangent rotation angle along the arc, normalized and flipped to prevent upside-down text
                     rot_deg = text_angle + 90
                     rot_deg = (rot_deg + 180) % 360 - 180
                     if rot_deg > 90 or rot_deg < -90:
                         rot_deg += 180
-                        
-                    rot_deg += 4  # tilt +4 degrees as requested (was +2)
-                        
+                    rot_deg += 4
+                    
                     p.save()
                     p.translate(tx, ty)
                     p.rotate(rot_deg)
                     
                     tw = 30 * self.s
                     th = 12 * self.s
+                    # Perfectly centered on rc
                     p.drawText(QRectF(0, -th / 2, tw, th),
                                Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, pct_text)
                     p.restore()
-                    
-        p.setRenderHint(QPainter.RenderHint.Antialiasing,
-                        getattr(self, "_aa", True))
 
     def _paint_node_text(self, p, cx, cy, node, rin, rout) -> None:
         # Single-line radial label: fills the segment depth, ellipsised with
@@ -3369,7 +3448,7 @@ class RadialOverlay(QWidget):
         elided = fm.elidedText(node.label, Qt.TextElideMode.ElideRight, avail)
         cxr = (-rc) if flip else rc          # band centre along the (rotated) x
         rect = QRectF(cxr - (depth / 2 - m), -th / 2, depth - 2 * m, th)
-        p.setPen(QPen(GLYPH))
+        p.setPen(QPen(self._glyph_color()))
         p.setClipRect(QRectF(cxr - (depth / 2 - m) - 1, -th, depth - 2 * m + 2, 2 * th))
         p.drawText(rect, int(Qt.AlignmentFlag.AlignCenter), elided)
         p.restore()
@@ -3377,7 +3456,7 @@ class RadialOverlay(QWidget):
     def _paint_hub_label(self, p, cx, cy, text) -> None:
         if not text:
             return
-        p.setPen(QPen(GLYPH))
+        p.setPen(QPen(self._glyph_color()))
         f = QFont()
         f.setPointSizeF(8 * self.s)
         f.setBold(True)
@@ -3390,12 +3469,13 @@ class RadialOverlay(QWidget):
         # cyan bar on the outer edge of the (possibly overflowed) parent band
         depth = self.seg3_depth if node.kind == IT_CTRL_BTN else self.seg_depth
         r_edge = node.radius + depth / 2
-        self._paint_bar(p, cx, cy, node, r_edge, CYAN)
+        self._paint_bar(p, cx, cy, node, r_edge, self._cyan())
 
     # -- glyphs -------------------------------------------------------------
     def _paint_glyph(self, p, x, y, name: str, scale: float = 1.0) -> None:
         from . import glyphs
-        glyphs.set_accent(CYAN.name())
+        glyphs.set_color(self._glyph_color().name())
+        glyphs.set_accent(self._cyan().name())
         size = 36 * self.s * scale
         p.save()
         p.translate(x - size / 2, y - size / 2)
