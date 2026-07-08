@@ -151,6 +151,7 @@ class _Bridge(QObject):
     key_captured = pyqtSignal(int)
     press = pyqtSignal()
     volume_scroll = pyqtSignal(int)
+    volume_button = pyqtSignal(int)
     trigger_mute = pyqtSignal()
     external_update = pyqtSignal()
 
@@ -208,6 +209,9 @@ class Launcher:
         self.bridge.press.connect(self._on_press, Qt.ConnectionType.QueuedConnection)
         self.bridge.volume_scroll.connect(self._on_volume_scroll,
                                           Qt.ConnectionType.QueuedConnection)
+        self.bridge.volume_button.connect(self._on_volume_button,
+                                          Qt.ConnectionType.QueuedConnection)
+
         self.bridge.trigger_mute.connect(self._on_trigger_mute,
                                          Qt.ConnectionType.QueuedConnection)
         self.bridge.external_update.connect(self.overlay.request_repaint,
@@ -226,11 +230,13 @@ class Launcher:
             on_key_captured=self.bridge.key_captured.emit,
             on_press=self.bridge.press.emit,
             on_volume_scroll=self.bridge.volume_scroll.emit,
+            on_volume_button=self.bridge.volume_button.emit,
             on_trigger_mute=self.bridge.trigger_mute.emit,
         )
         self.proxy.start()
         self.executor = GestureExecutor(self.proxy, self.config)
         self.settings.bind_proxy(self.proxy)
+        self.overlay.on_shown = self.proxy.jiggle_virtual_mice
 
         # Start persistent KWin fullscreen monitor daemon script.
         def on_fullscreen(payload: dict) -> None:
@@ -390,18 +396,46 @@ class Launcher:
         self.settings.set_captured_key(code)
 
     def _on_volume_scroll(self, direction: int) -> None:
+        if self.config.get("overlay_mode", "pie") == "switch":
+            self.overlay.switch_category(direction)
+            return
+        self._do_volume_adjust(direction)
+
+    def _on_volume_button(self, direction: int) -> None:
+        self._do_volume_adjust(direction)
+
+    def _do_volume_adjust(self, direction: int) -> None:
         step = max(1, int(self.config.get("volume_steps", 1)))
         suffix = "+" if direction > 0 else "-"
         amount = step * max(1, abs(int(direction)))
+        cmd = ["wpctl", "set-volume", "@DEFAULT_AUDIO_SINK@", f"{amount}%{suffix}"]
+        log.info(f"DEBUG: Executing volume command: {cmd}")
         try:
-            run_detached(
-                ["wpctl", "set-volume", "@DEFAULT_AUDIO_SINK@", f"{amount}%{suffix}"]
-            )
+            run_detached(cmd)
         except Exception:  # noqa: BLE001
             log.debug("Lautstärke konnte nicht per Mausrad geändert werden",
                       exc_info=True)
 
     def _on_trigger_mute(self) -> None:
+        if self.overlay.isVisible() and getattr(self.overlay, "hover_node", None) is not None:
+            r, _ = self.overlay._pointer_polar()
+            if r > self.overlay.r_hub:
+                node = self.overlay.hover_node
+                k = getattr(node, "kind", None)
+                if k in ("window", "window_group"):
+                    wid = None
+                    if k == "window" and isinstance(node.data, str):
+                        wid = node.data
+                    elif k == "window_group" and isinstance(node.data, list) and node.data:
+                        wid = node.data[0].get("id")
+                    
+                    if wid:
+                        self.kwin.close(wid)
+                        snap = getattr(self.kwin, "cached_snapshot", None)
+                        if snap and "windows" in snap:
+                            snap["windows"] = [w for w in snap["windows"] if w.get("id") != wid]
+                            self.overlay.refresh_model(snap)
+                        return
         try:
             run_detached(
                 ["wpctl", "set-mute", "@DEFAULT_AUDIO_SINK@", "toggle"]
@@ -542,7 +576,7 @@ def main() -> int:
     debug = ("--debug" in sys.argv
              or os.environ.get("KARYON_DEBUG") == "1")
     level = logging.DEBUG if debug else logging.INFO
-    handlers = [logging.StreamHandler()]
+    handlers = [logging.StreamHandler(), logging.FileHandler("/tmp/karyon.log")]
     if debug:
         handlers.append(logging.FileHandler("/tmp/karyon-debug.log"))
     logging.basicConfig(level=level,

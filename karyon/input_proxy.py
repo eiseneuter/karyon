@@ -115,9 +115,12 @@ def _injection_keycodes() -> list:
 
 
 class InputProxy:
-    def __init__(self, config, *, on_hold=None, on_release=None, on_cancel=None,
+    def __init__(self, config: dict,
+                 on_hold=None, on_release=None, on_cancel=None,
                  on_motion=None, on_gesture=None, on_key_captured=None,
-                 on_press=None, on_volume_scroll=None, on_trigger_mute=None):
+                 on_press=None, on_volume_scroll=None, on_volume_button=None,
+                 on_trigger_mute=None):
+        super().__init__()
         self.config = config
         self.on_hold = on_hold
         self.on_release = on_release
@@ -127,7 +130,11 @@ class InputProxy:
         self.on_key_captured = on_key_captured
         self.on_press = on_press
         self.on_volume_scroll = on_volume_scroll
+        self.on_volume_button = on_volume_button
         self.on_trigger_mute = on_trigger_mute
+
+        self._volume_hold_dir = 0
+        self._volume_hold_time = 0.0
 
         self._thread: threading.Thread | None = None
         self._stop = threading.Event()
@@ -265,6 +272,19 @@ class InputProxy:
         return ecodes.REL_X in rels and ecodes.BTN_LEFT in keys
 
     @staticmethod
+    def _is_extra_mouse_buttons(dev: "InputDevice") -> bool:
+        if VIRTUAL_MARKER in (dev.name or ""):
+            return False
+        caps = dev.capabilities()
+        keys = caps.get(ecodes.EV_KEY, [])
+        for k in (ecodes.BTN_SIDE, ecodes.BTN_EXTRA, ecodes.BTN_BACK, ecodes.BTN_FORWARD,
+                  ecodes.KEY_BACK, ecodes.KEY_FORWARD, ecodes.KEY_PREVIOUS, ecodes.KEY_NEXT,
+                  ecodes.KEY_PREVIOUSSONG, ecodes.KEY_NEXTSONG, ecodes.BTN_TASK):
+            if k in keys:
+                return True
+        return False
+
+    @staticmethod
     def _is_keyboard(dev: "InputDevice") -> bool:
         if VIRTUAL_MARKER in (dev.name or ""):
             return False
@@ -314,7 +334,7 @@ class InputProxy:
                 if self._is_remote_input(dev):
                     dev.close()
                     continue
-                if self._is_mouse(dev):
+                if self._is_mouse(dev) or self._is_extra_mouse_buttons(dev):
                     seen_mice.add(path)
                     if path not in self._devices:
                         self._add_mouse(path, dev)
@@ -610,6 +630,16 @@ class InputProxy:
         except Exception:  # noqa: BLE001
             pass
 
+    def jiggle_virtual_mice(self) -> None:
+        for ui in self._virtuals.values():
+            try:
+                ui.write(ecodes.EV_REL, ecodes.REL_X, 1)
+                ui.syn()
+                ui.write(ecodes.EV_REL, ecodes.REL_X, -1)
+                ui.syn()
+            except Exception:
+                pass
+
     def _handle_mouse_event(self, ev, path: str) -> None:
         # Kernel buffer overflowed and dropped events. Force a release to prevent
         # getting permanently stuck if the ButtonRelease was among the dropped events.
@@ -639,6 +669,32 @@ class InputProxy:
             if ev.value == 1 and self.on_trigger_mute:
                 self.on_trigger_mute()
             return
+            
+        vol_btns = (ecodes.BTN_SIDE, ecodes.BTN_EXTRA, ecodes.BTN_BACK, ecodes.BTN_FORWARD,
+                    ecodes.KEY_BACK, ecodes.KEY_FORWARD,
+                    ecodes.KEY_PREVIOUS, ecodes.KEY_NEXT,
+                    ecodes.KEY_PREVIOUSSONG, ecodes.KEY_NEXTSONG,
+                    ecodes.BTN_TASK)
+        if ev.type == ecodes.EV_KEY and ev.code in vol_btns:
+            log.info(f"DEBUG: Processing vol_btn {ev.code}, value={ev.value}, state={self.state}")
+            if (ev.value in (0, 1) and self.state in (PENDING, MENU)
+                    and self.config.get("adjust_volume_with_trigger_wheel", True)
+                    and self.config.get("overlay_mode", "pie") == "switch"):
+                if ev.value == 1:
+                    if self.state == PENDING:
+                        self._drag = True
+                    
+                    back_codes = (ecodes.BTN_SIDE, ecodes.BTN_BACK, ecodes.KEY_BACK, 
+                                  ecodes.KEY_PREVIOUS, ecodes.KEY_PREVIOUSSONG, ecodes.BTN_TASK)
+                    self._volume_hold_dir = -1 if ev.code in back_codes else 1
+                    
+                    self._volume_hold_time = time.monotonic() + 0.3
+                    if self.on_volume_button:
+                        log.info(f"DEBUG: Emitting on_volume_button({self._volume_hold_dir})")
+                        self.on_volume_button(self._volume_hold_dir)
+                elif ev.value == 0:
+                    self._volume_hold_dir = 0
+                return
         if (self.state == MENU and ev.type == ecodes.EV_KEY
                 and ev.code in cancel and ev.code not in codes):
             if ev.value == 1:
@@ -814,6 +870,11 @@ class InputProxy:
                 self.on_motion(self._menu_rel[0], self._menu_rel[1])
 
     def _check_hold(self, now: float) -> None:
+        if self._volume_hold_dir != 0 and now >= self._volume_hold_time:
+            self._volume_hold_time = now + 0.25
+            if self.on_volume_button:
+                self.on_volume_button(self._volume_hold_dir)
+
         if self.state != PENDING or self._drag:
             return
         hold_ms = float(self.config.get("hold_ms", 200))
@@ -867,6 +928,7 @@ class InputProxy:
         return math.hypot(x1 - x0, y1 - y0) / dt
 
     def _on_trigger_release(self) -> None:
+        self._volume_hold_dir = 0
         # Gestures fire during motion, so a release never triggers one.
         if self.state == PENDING:
             if self._drag:

@@ -74,7 +74,6 @@ class Node:
     closable: bool = False
     card: bool = False
     passive: bool = False
-    glow: bool = False
     icon_scale: float = 1.0
     render_icon: bool = False      # draw a glyph instead of label text
     hover_t: float = 0.0
@@ -247,6 +246,7 @@ class RadialOverlay(QWidget):
         self._mail_blink_timer.setSingleShot(True)
         self._mail_blink_timer.timeout.connect(self._on_mail_blink_timeout)
         self._mail_blink_state = 0
+        self.switch_mode_active_category = SEC_WINDOWS
 
         self._intro_stage = -1
         self._intro_word = "KARYON"
@@ -411,7 +411,8 @@ class RadialOverlay(QWidget):
         # With it on, start the cursor ~15px ABOVE the centre, toward the
         # pre-selected window at the top.  The offset persists as the cursor
         # moves (applied in set_pointer), so it does not snap back to centre.
-        if self.config.get("focus_window_switcher", True):
+        self._init_active_category()
+        if self.config.get("show_windows", True):
             self._preselect_window()
             self._cursor_oy = -10 * self.s
         self._pointer = QPointF(self._center.x(),
@@ -442,6 +443,8 @@ class RadialOverlay(QWidget):
         self.repaint()
         # Make the window visible in the next tick once the first frame is fully drawn
         QTimer.singleShot(0, lambda: self.setWindowOpacity(0.99))
+        if hasattr(self, "on_shown"):
+            QTimer.singleShot(50, self.on_shown)
         self._schedule_next_idle_tick()
 
     def _clamp_center(self, cursor, screen) -> tuple:
@@ -464,6 +467,22 @@ class RadialOverlay(QWidget):
         if rc:
             self._mru_rc = [rc] + [x for x in self._mru_rc if x != rc]
         self._last_activate_time = time.monotonic()
+
+    def _init_active_category(self) -> None:
+        wins = self.config.get("show_windows", True)
+        valid = self.active_sectors
+
+        if self.config.get("overlay_mode", "pie") == "switch":
+            if wins and SEC_WINDOWS in valid:
+                self.switch_mode_active_category = SEC_WINDOWS
+            else:
+                cur = getattr(self, "switch_mode_active_category", valid[0])
+                if cur not in valid:
+                    self.switch_mode_active_category = valid[0]
+            self.open_sector = self.switch_mode_active_category
+        else:
+            self.open_sector = SEC_WINDOWS if (wins and SEC_WINDOWS in valid) else valid[0]
+        self._layout_sectors()
 
     def _preselect_window(self) -> None:
         """Pre-select the previously active window so a press-and-release with no
@@ -525,9 +544,6 @@ class RadialOverlay(QWidget):
                     anchor = active_group
                 else:
                     target = anchor = groups[0]
-
-        self.open_sector = SEC_WINDOWS
-        self._layout_sectors()
         self.hover_node = target
         target.hover_t_target = 1.0
         target.hover_t = 1.0
@@ -562,7 +578,7 @@ class RadialOverlay(QWidget):
         # idle period can be stale, which would otherwise draw the menu offset).
         if len(self._path) <= 1:
             self._recenter_on_cursor(snapshot.get("cursor"))
-            if self.config.get("focus_window_switcher", True):
+            if self.config.get("show_windows", True):
                 self._preselect_window()
         self._check_start_mail_blink()
         self.request_repaint()
@@ -618,7 +634,8 @@ class RadialOverlay(QWidget):
         self._model_revision = getattr(self, "_model_revision", 0) + 1
         cfg = self.config
         windows = snapshot.get("windows", [])
-        self._build_windows(windows)
+        if cfg.get("show_windows", True):
+            self._build_windows(windows)
         if cfg["show_apps"]:
             self._build_apps(windows)
         if cfg["show_recent_files"]:
@@ -628,6 +645,28 @@ class RadialOverlay(QWidget):
         if not self.active_sectors:
             self.active_sectors = [SEC_WINDOWS]
         self._layout_sectors()
+
+    def switch_category(self, direction: int) -> None:
+        """Cycle the active category in Switch Mode."""
+        order = list(self.active_sectors)
+        if not order:
+            return
+            
+        try:
+            idx = order.index(getattr(self, "switch_mode_active_category", SEC_WINDOWS))
+        except ValueError:
+            idx = 0
+            
+        if direction < 0:
+            idx = (idx + 1) % len(order)
+        elif direction > 0:
+            idx = (idx - 1) % len(order)
+            
+        new_cat = order[idx]
+        self.switch_mode_active_category = new_cat
+        self._set_open_sector(new_cat)
+        self._update_hover()
+        self.update()
 
     def _build_windows(self, windows: list) -> None:
         cfg = self.config
@@ -791,11 +830,9 @@ class RadialOverlay(QWidget):
         nodes.extend(closed_pinned_nodes)
         if cfg["show_desktop"]:
             nodes.append(Node(kind=IT_SHOW_DESKTOP, label="Show Desktop",
-                               passive=True, glow=True, glyph="show_desktop",
+                               passive=True, glyph="show_desktop",
                                sector=SEC_WINDOWS))
         nodes.extend(arranged)
-        if not cfg["show_apps"] and cfg["show_tray"]:
-            nodes.append(self._build_tray_node())
         # Mail segment: a dedicated ring-2 segment at the very END of the
         # windows row, shown only when a tray app signals a new message.  It
         # carries the first attention item's data so releasing on it activates
@@ -805,8 +842,8 @@ class RadialOverlay(QWidget):
         else:
             att = []
         if att:
-            mail_node = Node(kind=IT_MAIL, label="Neue Nachricht",
-                             passive=True, glow=True, glyph="mail",
+            mail_node = Node(kind=IT_MAIL, label="Mail",
+                             passive=True, glyph="mail",
                              data=att[0].data, closable=True)
             mail_node.tray_item = att[0]
             nodes.append(mail_node)
@@ -951,7 +988,7 @@ class RadialOverlay(QWidget):
         return name, icon
 
     def _build_tray_node(self) -> Node:
-        node = Node(kind=IT_TRAY_MENU, label="Tray", passive=True, glow=True,
+        node = Node(kind=IT_TRAY_MENU, label="Tray", passive=True,
                     glyph="tray")
         for item in self.tray.enabled_tray_items():
             child = Node(kind=IT_TRAY, label=item.label, data=item.data,
@@ -1079,10 +1116,10 @@ class RadialOverlay(QWidget):
         if cfg["show_all_apps"]:
             # Menu button: drilling it morphs the row into the category list.
             pivot = Node(kind=IT_MENU, label="All Applications",
-                         passive=True, glow=True, icon_scale=0.8,
+                         passive=True, icon_scale=0.8,
                          glyph="hamburger")
         elif cfg["show_favorites"]:
-            pivot = Node(kind=IT_FAV_MENU, label="Favorites", glow=True,
+            pivot = Node(kind=IT_FAV_MENU, label="Favorites",
                          glyph="star", children=self._fav_nodes())
         running = set()
         for w in windows:
@@ -1090,13 +1127,12 @@ class RadialOverlay(QWidget):
                                               pid=int(w.get("pid", 0) or 0))
             if app:
                 running.add(app.app_id)
-        if cfg["show_recent_apps"]:
-            for app in self.app_index.frequent(cfg["max_recent_apps"], exclude=running):
-                nodes.append(Node(kind=IT_APP, label=app.name,
-                                  icon=_icon_for(app.icon),
-                                  data=app,
-                                  pinned=self.pins.is_app_pinned(app.app_id),
-                                  sector=SEC_APPS))
+        for app in self.app_index.frequent(cfg["max_recent_apps"], exclude=running):
+            nodes.append(Node(kind=IT_APP, label=app.name,
+                              icon=_icon_for(app.icon),
+                              data=app,
+                              pinned=self.pins.is_app_pinned(app.app_id),
+                              sector=SEC_APPS))
         if cfg["show_session"]:
             nodes.append(self._session_node())
         if cfg["show_tray"]:
@@ -1125,7 +1161,7 @@ class RadialOverlay(QWidget):
 
     def _session_node(self) -> Node:
         from .session import SESSION_ACTIONS
-        node = Node(kind=IT_SESSION, label="Session", glow=True, glyph="session")
+        node = Node(kind=IT_SESSION, label="Session", glyph="session")
         for key, label, _destr in SESSION_ACTIONS:
             node.children.append(Node(kind=IT_SESSION, label=label, data=key,
                                       glyph=f"session_{key}"))
@@ -1142,7 +1178,7 @@ class RadialOverlay(QWidget):
                 # aim with NO drill bar, like the other categories.  (As the apps
                 # pivot -- show_all_apps off -- it is IT_FAV_MENU with a bar.)
                 nodes.append(Node(kind=IT_CATEGORY, label="Favorites",
-                                  render_icon=True, glow=True, glyph="star",
+                                  render_icon=True, glyph="star",
                                   children=self._fav_nodes()))
             node = Node(kind=IT_CATEGORY, label=name, sublabel=f"{len(apps)} apps",
                         children=[Node(kind=IT_APP, label=a.name, data=a,
@@ -1200,6 +1236,10 @@ class RadialOverlay(QWidget):
         
         if not self.config["show_apps"] and self.config["show_session"]:
             nodes.append(self._session_node())
+        if not self.config["show_apps"] and self.config.get("show_tray", True):
+            tray_node = self._build_tray_node()
+            tray_node.sector = SEC_FILES
+            nodes.append(tray_node)
         self.ring2[SEC_FILES] = nodes
         self._ring2_base[SEC_FILES] = list(nodes)
 
@@ -1212,10 +1252,15 @@ class RadialOverlay(QWidget):
             # Opened state spans will be centered around these nominals.
             return {SEC_WINDOWS: -90.0, SEC_APPS: 0.0, SEC_FILES: 180.0}
         if n == 2:
-            # Windows top half, the other bottom half.
+            # If Windows is missing, Apps moves to the top (-90).
+            # Otherwise Windows is top, and the other is bottom (90).
             out = {}
-            for s in secs:
-                out[s] = -90.0 if s == SEC_WINDOWS else 90.0
+            if SEC_WINDOWS in secs:
+                for s in secs:
+                    out[s] = -90.0 if s == SEC_WINDOWS else 90.0
+            else:
+                for s in secs:
+                    out[s] = -90.0 if s == SEC_APPS else 90.0
             return out
         return {secs[0]: -90.0}
 
@@ -1226,6 +1271,20 @@ class RadialOverlay(QWidget):
         secs = self.active_sectors
         n = len(secs)
         nominal = self._nominal_for(secs)
+        
+        if self.config.get("overlay_mode", "pie") == "switch":
+            active = getattr(self, "switch_mode_active_category", SEC_WINDOWS)
+            # Center it at 270 degrees (which is -90 in qt)
+            self._nominal = {s: -90.0 for s in (SEC_WINDOWS, SEC_APPS, SEC_FILES)}
+            self._sector_arc[active] = (-270.0, 90.0) # Full 360 degrees
+            # Hide the others
+            for s in secs:
+                if s != active:
+                    self._sector_arc[s] = (0.0, 0.0)
+            self._layout_ring2(active)
+            self._update_sector_vis()
+            return
+            
         self._nominal = nominal
 
         if n == 1:
@@ -1595,17 +1654,18 @@ class RadialOverlay(QWidget):
         c = self._nominal.get(sec, (a0 + a1) / 2)
         span = (a1 - a0) - 2 * SECTOR_MARGIN
         
-        if sec == SEC_FILES and (any(n.pinned for n in nodes) or any(n.kind == IT_SESSION for n in nodes)):
+        if sec == SEC_FILES and (any(n.pinned for n in nodes) or any(n.kind in (IT_SESSION, IT_TRAY_MENU) for n in nodes)):
             pinned = [n for n in nodes if n.pinned]
-            unpinned = [n for n in nodes if not n.pinned and n.kind != IT_SESSION]
+            unpinned = [n for n in nodes if not n.pinned and n.kind not in (IT_SESSION, IT_TRAY_MENU)]
             session = next((n for n in nodes if n.kind == IT_SESSION), None)
+            tray = next((n for n in nodes if n.kind == IT_TRAY_MENU), None)
             
             r_out = self.r2c + self.seg_depth / 2
             slot = math.degrees(self._seg_phys_w / r_out)
             gap = math.degrees(self._gap_phys / r_out)
             cap = max(1, int(360.0 / slot) - self._ring_gap(2))
             
-            reserved = 1 if session else 0
+            reserved = (1 if session else 0) + (1 if tray else 0)
             group_cap = max(0, cap - reserved)
             
             pinned_fit_count = min(len(pinned), group_cap)
@@ -1620,6 +1680,8 @@ class RadialOverlay(QWidget):
             row0 = on_ring2
             if session:
                 row0 = [session] + row0
+            if tray:
+                row0 = row0 + [tray]
                 
             total = slot * len(row0)
             for col, node in enumerate(row0):
@@ -1706,9 +1768,7 @@ class RadialOverlay(QWidget):
         if self._repeat_active():
             self._tick_timer.start(80)
             return
-        if (self.config.get("hub_show_monitor", False)
-                or self.config.get("hub_show_clock", True)
-                or self.config.get("hub_show_date", True)):
+        if self.config.get("hub_show_clock", True) or self.config.get("hub_show_date", True):
             self._tick_timer.start(1000)
 
     def _repeat_active(self) -> bool:
@@ -1759,14 +1819,15 @@ class RadialOverlay(QWidget):
         self.hover_pin = False
         self.hover_mail = False
 
-        # Offset-open lock: only the Windows sector is selectable by moving; the
+        # Offset-open lock: only the initial sector is selectable by moving; the
         # other two sectors can only be reached via the drawn hub (which unlocks).
         if self._win_lock:
             if r <= self.r_hub:
                 self._win_lock = False        # reached the hub -> unlock
             else:
-                self.open_sector = SEC_WINDOWS
-                self._hover_in_sector(SEC_WINDOWS, r, a)
+                sec = self.open_sector if self.open_sector != -1 else self.active_sectors[0]
+                self.open_sector = sec
+                self._hover_in_sector(sec, r, a)
                 return
 
         # Inner circle: trigger zones for switching AND a compressed selection
@@ -1870,17 +1931,6 @@ class RadialOverlay(QWidget):
                 self._layout_control_buttons(node)
             return
 
-        # Closable window items: red close bar on the outer edge.  The red bar is
-        # ONLY a close trigger -- never a drilldown trigger.  Ring 3 is opened by
-        # highlighting the symbol body (below); here we just keep it open so the
-        # close bar does not block reaching the other windows.
-        # Only window groups, single windows, and mail segments support close buttons.
-        if node.kind in (IT_WINDOW_GROUP, IT_WINDOW, IT_MAIL) and node.closable and in_outer:
-            self.hover_close = True
-            if not node.children:
-                self.open_group = None
-            return
-
         # Multi-window group: a round count badge on the symbol closes ALL its
         # windows when the pointer is over it (outer edge still drills).
         if node.kind == IT_WINDOW_GROUP and node.children:
@@ -1947,8 +1997,6 @@ class RadialOverlay(QWidget):
                 self._ctrl_t = 0.0
                 self._layout_control_buttons(best)
             return
-        if best.closable and on_bar:
-            self.hover_close = True
 
     def _pick_nearest(self, nodes: list, r: float, a: float) -> Node | None:
         best, bestscore = None, 1e9
@@ -2422,9 +2470,7 @@ class RadialOverlay(QWidget):
             self._tick_timer.start(fps_delay)
             
         self._is_idle_clock = False
-        if (self.config.get("hub_show_monitor", False)
-                or self.config.get("hub_show_clock", True)
-                or self.config.get("hub_show_date", True)):
+        if self.config.get("hub_show_clock", True) or self.config.get("hub_show_date", True):
             if not repaint:
                 self._is_idle_clock = True
             repaint = True
@@ -2448,7 +2494,7 @@ class RadialOverlay(QWidget):
             return QRect(int(cx - hr), int(cy - hr), 2 * hr, 2 * hr)
             
         # Generously cover the outermost drawable: ring-4 outer edge + drill/close
-        # bar + edge glow + margin.
+        # bar + margin.
         max_r = self.r3_out + 2 * s + self.seg3_depth + self.bar_w + 24 * s
         rect = QRect(int(cx - max_r), int(cy - max_r),
                      int(2 * max_r), int(2 * max_r))
@@ -2711,7 +2757,6 @@ class RadialOverlay(QWidget):
 
     def _paint_cursor(self, p) -> None:
         px, py = self._pointer.x(), self._pointer.y()
-        cursor_type = self.config.get("overlay_cursor", "cross")
         
         old_aa = p.renderHints() & QPainter.RenderHint.Antialiasing
         p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
@@ -2719,36 +2764,15 @@ class RadialOverlay(QWidget):
         dark_col = QColor(12, 16, 22, 200)
         white_col = QColor(255, 255, 255)
         
-        if cursor_type == "ring":
-            r = 5.2 * self.s
-            p.setBrush(Qt.BrushStyle.NoBrush)
-            # 1. Dark outline
-            p.setPen(QPen(dark_col, 4.0 * self.s))
-            p.drawEllipse(QPointF(px, py), r, r)
-            # 2. White core
-            p.setPen(QPen(white_col, 2.0 * self.s))
-            p.drawEllipse(QPointF(px, py), r, r)
-        else:
-            r_inner = 4.5 * self.s
-            r_outer = 9.5 * self.s
-            c = 0.70710678
-            ri = r_inner
-            ro = r_outer
-            
-            # 1. Dark outline
-            p.setPen(QPen(dark_col, 4.2 * self.s, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
-            p.drawLine(QPointF(px + ri * c, py + ri * c), QPointF(px + ro * c, py + ro * c))
-            p.drawLine(QPointF(px - ri * c, py + ri * c), QPointF(px - ro * c, py + ro * c))
-            p.drawLine(QPointF(px - ri * c, py - ri * c), QPointF(px - ro * c, py - ro * c))
-            p.drawLine(QPointF(px + ri * c, py - ri * c), QPointF(px + ro * c, py - ro * c))
-            
-            # 2. White core
-            p.setPen(QPen(white_col, 2.2 * self.s, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
-            p.drawLine(QPointF(px + ri * c, py + ri * c), QPointF(px + ro * c, py + ro * c))
-            p.drawLine(QPointF(px - ri * c, py + ri * c), QPointF(px - ro * c, py + ro * c))
-            p.drawLine(QPointF(px - ri * c, py - ri * c), QPointF(px - ro * c, py - ro * c))
-            p.drawLine(QPointF(px + ri * c, py - ri * c), QPointF(px + ro * c, py - ro * c))
-            
+        r = 5.2 * self.s
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        # 1. Dark outline
+        p.setPen(QPen(dark_col, 4.0 * self.s))
+        p.drawEllipse(QPointF(px, py), r, r)
+        # 2. White core
+        p.setPen(QPen(white_col, 2.0 * self.s))
+        p.drawEllipse(QPointF(px, py), r, r)
+        
         p.setRenderHint(QPainter.RenderHint.Antialiasing, bool(old_aa))
 
 
@@ -2758,7 +2782,9 @@ class RadialOverlay(QWidget):
         p.setBrush(SEG_BASE)
         p.drawEllipse(QPointF(cx, cy), self.r_hub, self.r_hub)
 
-        self._paint_hub_ticks(p, cx, cy)
+        if self.config.get("overlay_mode", "pie") != "switch":
+            self._paint_hub_ticks(p, cx, cy)
+            
         self._paint_info_card(p, cx, cy)
         # (Mail badge moved to a dedicated ring-2 segment -- see _build_windows)
 
@@ -2794,9 +2820,8 @@ class RadialOverlay(QWidget):
         cfg = self.config
         now = datetime.datetime.now()
         r = self.r_hub
-        # system monitor (top slot) -- 3 vertical bars: CPU / GPU / RAM
-        if cfg.get("hub_show_monitor", False):
-            self._paint_monitor(p, cx, cy)
+        # category icon (top slot)
+        self._paint_category_icon(p, cx, cy)
         # battery charge (below the monitor): yellow bolt + charge in the accent
         if cfg.get("hub_show_charge", True):
             try:
@@ -2812,7 +2837,7 @@ class RadialOverlay(QWidget):
                 tw = p.fontMetrics().horizontalAdvance(txt)
                 cyr = rect.center().y()
                 self._draw_lightning(p, cx - tw / 2 - 6 * self.s, cyr, 8 * self.s)
-                p.setPen(QPen(QColor(cfg.get("accent", "#37d0ff"))))
+                p.setPen(QPen(CYAN))
                 p.drawText(rect, Qt.AlignmentFlag.AlignCenter, txt)
         # time (middle, big)
         if cfg.get("hub_show_clock", True):
@@ -2829,37 +2854,81 @@ class RadialOverlay(QWidget):
             p.drawText(QRectF(cx - r, cy + r * 0.30, 2 * r, r * 0.34),
                        Qt.AlignmentFlag.AlignCenter, now.strftime("%a %d %b"))
 
-    def _paint_monitor(self, p, cx, cy) -> None:
-        from . import sysinfo
-        load = sysinfo.system_load()
-        s, r = self.s, self.r_hub
-        accent = QColor(self.config.get("accent", "#37d0ff"))
-        gpu_label = (load.get("gpu_vendor") or "GPU") if load.get("gpu_available") else "GPU"
-        rows = [("CPU", load["cpu"], accent),
-                (gpu_label, load["gpu"], QColor("#b46cff")),
-                ("RAM", load["ram"], QColor("#3ddc84"))]
-        f = QFont(); f.setPointSizeF(5.6 * s); f.setBold(True)
-        p.setFont(f)
-        fm = p.fontMetrics()
-        items = [(lbl, f"{int(round(max(0.0, min(100.0, float(val)))))} %", col)
-                 for lbl, val, col in rows]
-        # Two centred columns: labels right-aligned, values left-aligned, meeting
-        # at a common divider so the percent signs line up.
-        gap = 4.0 * s
-        max_lw = max(fm.horizontalAdvance(lbl) for lbl, _, _ in items)
-        max_vw = max(fm.horizontalAdvance(vt) for _, vt, _ in items)
-        x0 = cx - (max_lw + gap + max_vw) / 2.0
-        xv = x0 + max_lw + gap
-        h = r * 0.18
-        ys = (cy - r * 0.82, cy - r * 0.64, cy - r * 0.46)
-        for (lbl, val_txt, col), yc in zip(items, ys):
-            # label in its metric colour (GPU row = active vendor), value in white
-            p.setPen(QPen(col))
-            p.drawText(QRectF(x0, yc - h / 2.0, max_lw, h),
-                       Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight, lbl)
-            p.setPen(QPen(GLYPH))
-            p.drawText(QRectF(xv, yc - h / 2.0, max_vw, h),
-                       Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, val_txt)
+    def _paint_category_icon(self, p, cx, cy) -> None:
+        r = self.r_hub
+        # size and position of the drawing area
+        size = r * 0.35
+        px = cx
+        # The battery charge indicator text box starts at cy - r * 0.36.
+        # The bottom-most point of our drawn icons is at py + size * 0.36.
+        # We want: py + size * 0.36 = cy - r * 0.36 - 5 * self.s
+        py = cy - r * 0.36 - size * 0.36 - 5 * self.s
+        
+        p.save()
+        p.translate(px, py)
+        
+        color = CYAN
+        if self.open_sector == SEC_WINDOWS:
+            color = QColor("#3ddc84") # green
+        elif self.open_sector == SEC_APPS:
+            color = CYAN
+        elif self.open_sector == SEC_FILES:
+            color = QColor(255, 170, 0) # orange
+            
+        p.setPen(QPen(color, max(1.0, 1.2 * self.s)))
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        
+        w = size * 0.6
+        h = size * 0.6
+        
+        if self.open_sector == SEC_WINDOWS:
+            bx = -w/2 + w*0.4
+            by = -h/2 - h*0.3
+            fx = -w/2 - w*0.1
+            fy = -h/2 + h*0.1
+            
+            # Back window lines (avoids intersecting the front window)
+            p.drawLine(QPointF(bx, by), QPointF(bx, fy)) # left
+            p.drawLine(QPointF(bx, by), QPointF(bx + w, by)) # top
+            p.drawLine(QPointF(bx + w, by), QPointF(bx + w, by + h)) # right
+            p.drawLine(QPointF(bx + w, by + h), QPointF(fx + w, by + h)) # bottom
+            p.drawLine(QPointF(bx, by + h*0.25), QPointF(bx + w, by + h*0.25)) # titlebar
+            
+            # Front window
+            p.drawRect(QRectF(fx, fy, w, h))
+            p.drawLine(QPointF(fx, fy + h*0.25), QPointF(fx + w, fy + h*0.25))
+            
+        elif self.open_sector == SEC_APPS:
+            # 3x3 grid
+            sq = w * 0.22
+            gap = w * 0.17
+            startX = -(sq * 3 + gap * 2) / 2
+            startY = -(sq * 3 + gap * 2) / 2
+            for row in range(3):
+                for col in range(3):
+                    p.drawRect(QRectF(startX + col * (sq + gap), startY + row * (sq + gap), sq, sq))
+                    
+        elif self.open_sector == SEC_FILES:
+            dw = size * 0.5
+            dh = dw * 1.3
+            x0 = -dw/2
+            y0 = -dh/2
+            fold = dw * 0.35
+            
+            # Outline
+            p.drawPolyline(QPolygonF([
+                QPointF(x0, y0),
+                QPointF(x0 + dw - fold, y0),
+                QPointF(x0 + dw, y0 + fold),
+                QPointF(x0 + dw, y0 + dh),
+                QPointF(x0, y0 + dh),
+                QPointF(x0, y0)
+            ]))
+            # Fold inner lines
+            p.drawLine(QPointF(x0 + dw - fold, y0), QPointF(x0 + dw - fold, y0 + fold))
+            p.drawLine(QPointF(x0 + dw - fold, y0 + fold), QPointF(x0 + dw, y0 + fold))
+            
+        p.restore()
 
     def _draw_lightning(self, p, cx, cy, size) -> None:
         h = size
@@ -2927,8 +2996,7 @@ class RadialOverlay(QWidget):
         p.setBrush(col)
         p.setPen(Qt.PenStyle.NoPen)
         p.drawPath(path)
-        # faded inner glow at the outer edge (accent), instead of a 1px border
-        self._paint_edge_glow(p, cx, cy, path, rout, a0, a1)
+        self._paint_edge_glow(p, cx, cy, path, rout, node, a0, a1)
 
         # icon or glyph at node center -- sized to fit the segment.
         gx = cx + rc * math.cos(math.radians(node.angle))
@@ -2961,9 +3029,6 @@ class RadialOverlay(QWidget):
         # on its main symbol -- it opens on hover and is closed via its badge.
         if self._is_drillable(node) and node.kind != IT_WINDOW_GROUP:
             self._paint_bar(p, cx, cy, node, rout, CYAN)
-        if node.closable and node.kind in (IT_WINDOW_GROUP, IT_WINDOW, IT_MAIL):
-            framed = node is self.hover_node and self.hover_close
-            self._paint_bar(p, cx, cy, node, rout, RED, framed=framed)
         # Count / mail / speaker badges.  Drawn last here AND re-drawn on top of
         # the title pill (see paintEvent) so the white title can never cover them.
         self._paint_badges(p, cx, cy, node)
@@ -3074,17 +3139,29 @@ class RadialOverlay(QWidget):
             p.setBrush(symbol_color)
             p.drawEllipse(QPointF(bx, by - 0.25 * s), 0.25 * s, 0.25 * s)
 
-    def _paint_edge_glow(self, p, cx, cy, path, r_edge, a0=None, a1=None) -> None:
+    def _paint_edge_glow(self, p, cx, cy, path, r_edge, node, a0=None, a1=None) -> None:
         """Cheap flat accent line on the outer arc (outward-facing edge)."""
         if r_edge <= 1 or a0 is None or a1 is None:
             return
-        acc = QColor(self.config.get("accent", "#37d0ff"))
+            
+        is_sys = node.kind in (IT_SHOW_DESKTOP, IT_MENU, IT_FAV_MENU, IT_TRAY_MENU, IT_SESSION)
+        is_closed_pinned = (node.kind == IT_WINDOW_GROUP and node.pinned and getattr(node, "data", None) is None)
+        
+        if is_sys or is_closed_pinned:
+            acc = QColor(CYAN)
+        elif node.sector == SEC_WINDOWS:
+            acc = QColor(0, 212, 85) # Green
+        elif node.sector == SEC_FILES:
+            acc = QColor(255, 170, 0) # Orange
+        else:
+            acc = QColor(CYAN)
+            
         acc.setAlpha(180)
-        arc = self._arc_path(cx, cy, r_edge, a0, a1)
+        g_out = math.degrees(1.0 / r_edge) if r_edge > 0 else 0
+        arc = self._arc_path(cx, cy, r_edge, a0 + g_out, a1 - g_out)
         p.setBrush(Qt.BrushStyle.NoBrush)
         p.setPen(QPen(acc, max(1.0, 0.9 * self.s)))
         p.drawPath(arc)
-
     def _badge_geom(self, node):
         br = 6.5 * self.s
         rout = node.radius + self.seg_depth / 2
@@ -3318,7 +3395,7 @@ class RadialOverlay(QWidget):
     # -- glyphs -------------------------------------------------------------
     def _paint_glyph(self, p, x, y, name: str, scale: float = 1.0) -> None:
         from . import glyphs
-        glyphs.set_accent(self.config.get("accent", "#37d0ff"))
+        glyphs.set_accent(CYAN.name())
         size = 36 * self.s * scale
         p.save()
         p.translate(x - size / 2, y - size / 2)

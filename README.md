@@ -14,9 +14,8 @@ Karyon is entirely designed around speed and flow. **There are no traditional cl
 
 ### 1. Navigation & Window Management
 * **Smart Ring Layout:** Karyon arranges your open windows, frequent apps, and recent files in concentric rings around your cursor. Windows and applications are strictly ordered based on usage (Most Recently Used), so your current context is always exactly where you need it.
-* **Segment Bars (Red & Cyan):** Hovering over the edges of segments reveals interactive colored bars:
+* **Segment Bars (Cyan):** Hovering over the edges of segments reveals interactive colored bars:
   * **Cyan Bar (Drill-Down):** Appears on segments that contain deeper options or application sub-menus. Hovering over it drills down into the respective app or category.
-  * **Red Bar (Close):** Appears on the outer edge of open windows. Hover over the red bar and release the trigger to instantly close the application or window.
 * **Contextual Badges:**
   * **Window Counter Badge:** A numerical badge on application segments that indicates how many open windows belong to that application. Hovering over this badge transforms it into a close button (X), allowing you to close the entire application group by releasing the trigger.
   * **Pin Badge:** Hover over the pin icon and release to permanently pin an application or file to your overlay. Pinned items stay in place even when closed, ensuring your most vital tools are always exactly where you expect them. 
@@ -26,22 +25,27 @@ Karyon is entirely designed around speed and flow. **There are no traditional cl
 * **Mouse Gestures:** Flick your mouse in any of the 8 directions while holding the trigger button to invoke gestures (like *copy*, *paste*, *maximize*, or custom shortcuts). 
 * **Important:** Gestures are designed to be extremely fast. They must be initiated *without* opening the visual overlay. Press the trigger and immediately flick your mouse to execute the gesture seamlessly.
 
-### 3. Embedded Utilities & System Hub
-* **Central Hub:** The center of the radial menu displays real-time system information (clock, date, battery status, and CPU/GPU/RAM load).
+### 3. Overlay Modes (Pie & Switch)
+Karyon offers two distinct presentation modes for the radial menu:
+* **Pie Mode:** All activated categories (Windows, Apps, Recent Files) are displayed simultaneously in a full circle layout, subdivided into equal slices.
+* **Switch Mode:** Only one category is visible at a time. This mode is designed to prevent accidental selections and lets you switch the category via mouse wheel.
+
+### 4. Embedded Utilities & System Hub
+* **Central Hub:** The center of the radial menu acts as an orientation guide and information center. It prominently displays an icon indicating the currently active category (Windows, Apps, or Files), along with real-time system information (clock, date, and battery status).
 * **System Tray:** Access your system's tray icons directly within Karyon. Hovering over a tray icon and releasing the trigger opens its native Plasma flyout window (just like the real system tray), giving you full access to its controls.
 * **Notifications:** Completely separate from the tray, Karyon highlights unread notifications from messengers or apps, allowing you to instantly open the respective application and jump straight into the context.
 * **Volume Control:** Adjust the system volume instantly using your mouse wheel anywhere inside the overlay, or by drilling down into the volume tray icon and hovering over its internal buttons.
 
-### 4. Smart Game Mode & Deep Sleep
+### 5. Smart Game Mode & Deep Sleep
 Karyon is built to never get in your way when gaming. 
 * **Automatic Detection:** Karyon automatically reads the `.desktop` categories of your active windows. If you switch to a game, Karyon instantly enters Game Mode without requiring manual whitelists.
 * **Deep Sleep:** While Game Mode is active, Karyon suspends all background polling and forwards your mouse inputs 1:1. This "Deep Sleep" guarantees that 100% of your CPU and RAM are freed up for your game. As soon as you alt-tab out, Karyon instantly wakes up.
 
 ## Configuration & Customization
 Karyon features a dedicated settings panel accessible via the system tray icon (which can also be reached directly through the overlay itself). Here you can:
-* **Customize Triggers:** Bind different mouse buttons for triggering the overlay or gestures, and adjust the exact hold-time duration required to invoke the overlay or firing a gesture.
-* **Performance Mode:** For laptops or older hardware without dedicated graphics, Karyon includes a Performance Mode that halves the animation framerate (from 60 to 30 FPS) to drastically cut CPU usage while maintaining full visual quality.
-* **Adjust Aesthetics:** Change the global accent color, overlay scale, and transparency to match your Plasma theme perfectly.
+* **Customize Triggers:** Adjust the hold-time to invoke the overlay or firing a gesture.
+* **Performance Mode:** For older hardware, Karyon includes a Performance Mode that halves the animation framerate (from 60 to 30 FPS) to drastically cut CPU usage.
+* **Adjust Aesthetics:** Change overlay scale and transparency.
 * **Tweak Layout:** Toggle individual segments and rings on or off to keep the overlay minimal or fully loaded.
 
 ## Technical Background (How it works)

@@ -14,20 +14,9 @@ from .config import DEFAULTS
 
 log = logging.getLogger(__name__)
 
-ACCENTS = [
-    ("Cyan", "#37d0ff"), ("Mint", "#3dffb5"), ("Orange", "#ff9c3d"),
-    ("Violet", "#b48cff"), ("Red", "#ff5c6a"),
-]
 
-TRIGGERS = [
-    ("Middle", "middle"), ("Right", "right"), ("Forward", "forward"),
-    ("Backward", "backward"),
-]
 
-CANCELS = [
-    ("Left", "left"), ("Right", "right"), ("Middle", "middle"),
-    ("Forward", "forward"), ("Backward", "backward"),
-]
+
 
 PANEL_STYLE = """
 QFrame#panel { background: rgb(20,24,32); }
@@ -162,9 +151,14 @@ class SettingsPanel(QFrame):
         scroll.setWidget(inner)
         outer.addWidget(scroll)
 
-        title = QLabel("Karyon 1.5")
+        title = QLabel("Karyon 2.0")
         title.setObjectName("title")
         self._lay.addWidget(title)
+
+        info_text = QLabel("Right mouse click to show overlay. Let right mouse go to select. Left mouse click to cancel. Middle mouse click to close window.")
+        info_text.setWordWrap(True)
+        info_text.setStyleSheet("color: #888; font-style: italic; margin-bottom: 10px;")
+        self._lay.addWidget(info_text)
 
         self.sliders = {}
         self.combos = {}
@@ -183,22 +177,12 @@ class SettingsPanel(QFrame):
         self._lay.addLayout(self._grid)
         self._grow = 0
 
-        # Overlay trigger (the custom key lives inside this dropdown), then the
-        # cancel button, then accent.
-        self._add_combo("trigger_button", "Mouse Trigger", TRIGGERS)
-        self._refresh_custom_item()
-        self.combos["trigger_button"].currentIndexChanged.connect(
-            self._on_trigger_changed)
-        self._add_combo("cancel_button", "Mouse Cancel", CANCELS)
-        # Trigger and Cancel may never be the same button.
-        self.combos["trigger_button"].currentIndexChanged.connect(
-            self._enforce_trigger_cancel_distinct)
-        self.combos["cancel_button"].currentIndexChanged.connect(
-            self._enforce_trigger_cancel_distinct)
-        self._enforce_trigger_cancel_distinct()
-        self._add_combo("overlay_cursor", "Overlay Cursor", [("Ring", "ring"), ("Cross", "cross")])
-        self._add_combo("accent", "Accent color",
-                        [(n, v) for n, v in ACCENTS], by_value=True)
+
+
+        self._add_combo("overlay_mode", "Overlay Mode", [("Pie Mode", "pie"), ("Switch Mode (Mouse wheel)", "switch")])
+        self.combos["overlay_mode"].currentIndexChanged.connect(self._update_volume_label)
+        self.combos["overlay_mode"].currentIndexChanged.connect(self._deps)
+
         # Directly under Accent, spanning the grid so it isn't pushed to the bottom.
         self._grid.addWidget(self._make_check("game_mode", "Game Mode (auto-disable overlay in games)"),
                              self._grow, 0, 1, 4)
@@ -208,8 +192,15 @@ class SettingsPanel(QFrame):
         self._grow += 1
         self._grid.addWidget(self._make_check(
             "adjust_volume_with_trigger_wheel",
-            "Volume: Trigger + Mouse Wheel / Mute: Trigger + Middle Mouse"),
+            "Volume Control"),
             self._grow, 0, 1, 4)
+        self._grow += 1
+
+        self.volume_info_label = QLabel()
+        self.volume_info_label.setStyleSheet("color: #888; font-size: 11px;")
+        self.volume_info_label.setContentsMargins(24, 0, 0, 10)
+        self._grid.addWidget(self.volume_info_label, self._grow, 0, 1, 4)
+        self._update_volume_label()
         self._grow += 1
 
         # All sliders except the gesture window.  Units live on the value, not
@@ -227,14 +218,13 @@ class SettingsPanel(QFrame):
         grid = QGridLayout()
         self._lay.addLayout(grid)
         left = [
-            ("show_recent_files", "Show Recent Files"),
-            ("show_recent_apps", "Show Recent Apps"),
+            ("show_windows", "Show Windows"),
             ("show_apps", "Show Apps"),
-            ("focus_window_switcher", "Focus Window-Switcher"),
+            ("show_recent_files", "Show Recent Files"),
             ("mail_notification", "Icon Letter Notification"),
+            ("show_tray", "Icon Tray"),
         ]
         right = [
-            ("show_tray", "Icon Tray"),
             ("show_desktop", "Icon Desktop"),
             ("show_session", "Icon Session"),
             ("show_all_apps", "Icon All Applications"),
@@ -246,7 +236,7 @@ class SettingsPanel(QFrame):
             grid.addWidget(self._make_check(k, lab), r, 1)
         # Dependencies: >=2 main categories; Apps needs >=1 sub-option; the apps
         # sub-options grey out while Apps is off; recents caps track residents.
-        for k in ("show_apps", "show_recent_files", "show_recent_apps",
+        for k in ("show_windows", "show_apps", "show_recent_files",
                   "show_favorites", "show_all_apps", "show_session"):
             self.checks[k].toggled.connect(self._deps)
         self._deps()
@@ -259,8 +249,7 @@ class SettingsPanel(QFrame):
         for i, (k, lab) in enumerate([
                 ("hub_show_clock", "Clock"),
                 ("hub_show_date", "Date"),
-                ("hub_show_charge", "Charge"),
-                ("hub_show_monitor", "System Monitor")]):
+                ("hub_show_charge", "Charge")]):
             hgrid.addWidget(self._make_check(k, lab), i // 2, i % 2)
 
         # Gestures: a divider, then Enable, the activation-window slider, then the
@@ -292,7 +281,6 @@ class SettingsPanel(QFrame):
             gg.addWidget(self._make_gesture_combo(db, lb), r, 1)
 
         footer = QLabel(
-            "Hold Mouse trigger to show overlay. Let trigger go to select.\n"
             "Vibe-coded by Eisen 2026 | https://eisenvibe.vercel.app | "
             "rostrausch@gmail.com")
         footer.setObjectName("footer")
@@ -319,85 +307,67 @@ class SettingsPanel(QFrame):
         cb.blockSignals(False)
 
     def _deps(self, *_) -> None:
+        wins = self.checks.get("show_windows")
         apps = self.checks["show_apps"]
         rfiles = self.checks["show_recent_files"]
-        subkeys = ("show_recent_apps", "show_favorites", "show_all_apps")
+        subkeys = ("show_favorites", "show_all_apps")
         subs = [self.checks[k] for k in subkeys]
         sender = self.sender()
         any_sub = any(s.isChecked() for s in subs)
-        # Apps needs at least one of Recent Apps / Favorites / All Applications.
+        # Apps needs at least one of Favorites / All Applications.
         if apps.isChecked() and not any_sub:
             if sender is apps:
-                self._set_silent(subs[0], True)      # default to Recent Apps
+                self._set_silent(subs[0], True)
             else:
-                self._set_silent(apps, False)        # last sub off -> Apps off
-        # At least two main categories: Apps and Recent Files not both off.
-        if not apps.isChecked() and not rfiles.isChecked():
+                self._set_silent(apps, False)
+                
+        # Minimum main categories logic
+        mode = self.combos.get("overlay_mode")
+        is_pie = mode is None or mode.currentData() == "pie"
+        
+        num_checked = sum(1 for cb in (wins, apps, rfiles) if cb and cb.isChecked())
+        min_required = 2 if is_pie else 1
+        
+        if num_checked < min_required:
             if sender is rfiles:
-                self._set_silent(apps, True)
-                if not any(s.isChecked() for s in subs):
-                    self._set_silent(subs[0], True)
+                if not apps.isChecked(): self._set_silent(apps, True)
+                elif wins and not wins.isChecked(): self._set_silent(wins, True)
+            elif sender is apps:
+                if wins and not wins.isChecked(): self._set_silent(wins, True)
+                elif not rfiles.isChecked(): self._set_silent(rfiles, True)
             else:
-                self._set_silent(rfiles, True)
-        # Grey the apps sub-options while Apps is off (checkmark + label).
+                if not apps.isChecked(): self._set_silent(apps, True)
+                elif not rfiles.isChecked(): self._set_silent(rfiles, True)
+                
+        # Re-check subkeys if Apps was forced on
+        if apps.isChecked() and not any(s.isChecked() for s in subs):
+            self._set_silent(subs[0], True)
+
+        # Grey the apps sub-options while Apps is off
         on = apps.isChecked()
         for s in subs:
             s.setEnabled(on)
+            
+        # Grey the Windows dependents while Windows is off
+        if wins:
+            wins_on = wins.isChecked()
+            for k in ("show_desktop", "mail_notification"):
+                cb = self.checks.get(k)
+                if cb:
+                    cb.setEnabled(wins_on)
         self._update_recent_caps()
 
-    def _custom_item_index(self) -> int:
-        c = self.combos["trigger_button"]
-        for i in range(c.count()):
-            if c.itemData(i) == "custom_key":
-                return i
-        return -1
 
-    def _refresh_custom_item(self) -> None:
-        """Show the captured key inside the dropdown item, e.g.
-        'Custom key: Leftmeta' (or 'Custom Key…' when none is set)."""
-        i = self._custom_item_index()
-        if i < 0:
-            return
-        code = int(self.config.get("trigger_key", 0) or 0)
-        text = f"Custom key: {self._key_text()}" if code else "Custom Key…"
-        self.combos["trigger_button"].setItemText(i, text)
 
-    def _on_trigger_changed(self, *_) -> None:
-        # Selecting the custom-key item starts the key capture right away.
-        c = self.combos["trigger_button"]
-        if c.currentData() == "custom_key":
-            c.setItemText(self._custom_item_index(), "Custom key: press a key…")
-            if self.proxy is not None:
-                self.proxy.begin_key_capture()
-
-    @staticmethod
-    def _btn_set(kind: str, value) -> set:
-        # Mouse buttons a trigger/cancel choice occupies (custom key = none).
-        if kind == "trigger" and value == "lmb_rmb":
-            return {"left", "right"}
-        if kind == "trigger" and value == "custom_key":
-            return set()
-        return {value}
-
-    def _enforce_trigger_cancel_distinct(self, *_) -> None:
-        """Trigger and Cancel may never use the same mouse button."""
-        tc = self.combos["trigger_button"]
-        cc = self.combos["cancel_button"]
-        if not (self._btn_set("trigger", tc.currentData())
-                & self._btn_set("cancel", cc.currentData())):
-            return
-        # Keep the combo the user just changed; move the OTHER to a free option.
-        if self.sender() is cc:
-            keep, kkind, other, okind = cc, "cancel", tc, "trigger"
+    def _update_volume_label(self) -> None:
+        mode = self.combos.get("overlay_mode")
+        if not mode or not hasattr(self, "volume_info_label"): return
+        if mode.currentData() == "switch":
+            self.volume_info_label.setText("Volume: Mouse Back/Forward | Mute: Middle click")
         else:
-            keep, kkind, other, okind = tc, "trigger", cc, "cancel"
-        fixed = self._btn_set(kkind, keep.currentData())
-        for i in range(other.count()):
-            if not (self._btn_set(okind, other.itemData(i)) & fixed):
-                other.blockSignals(True)
-                other.setCurrentIndex(i)
-                other.blockSignals(False)
-                break
+            self.volume_info_label.setText("Volume: Mouse wheel up/down | Mute: Middle click")
+
+
 
     def _update_recent_caps(self, *_) -> None:
         """Each recents row holds at most 15 elements; subtract the symbols that
@@ -635,8 +605,6 @@ class SettingsPanel(QFrame):
             self._gesture_keys[tgt] = int(code)
             self._refresh_gesture_custom(tgt)
             return
-        self._captured_key = code
-        self._refresh_custom_item()
 
     # -- save/cancel/load ---------------------------------------------------
     def _load(self) -> None:
@@ -660,8 +628,6 @@ class SettingsPanel(QFrame):
                     c.setCurrentIndex(i)
                     break
         self._gesture_keys = dict(self.config.get("gesture_custom_keys", {}))
-        self._captured_key = int(self.config.get("trigger_key", 0) or 0)
-        self._refresh_custom_item()
         for direction in self.gesture_combos:
             self._refresh_gesture_custom(direction)
 
@@ -683,10 +649,16 @@ class SettingsPanel(QFrame):
         for direction, c in self.gesture_combos.items():
             self.config[f"gesture_{direction}"] = c.currentData()
         self.config["gesture_custom_keys"] = dict(self._gesture_keys)
-        self.config["trigger_key"] = self._captured_key
-        # enforce: show_apps and recent_files not both off
-        if not self.config["show_apps"] and not self.config["show_recent_files"]:
-            self.config["show_apps"] = True
+        # enforce minimum selected categories
+        is_pie = self.config.get("overlay_mode", "pie") == "pie"
+        min_req = 2 if is_pie else 1
+        checked = sum(1 for k in ("show_windows", "show_apps", "show_recent_files") if self.config.get(k, True))
+        if checked < min_req:
+            if not self.config.get("show_apps", True):
+                self.config["show_apps"] = True
+                checked += 1
+            if checked < min_req and not self.config.get("show_recent_files", True):
+                self.config["show_recent_files"] = True
         self.config.save()
         self._apply_style()
         self.hide()
