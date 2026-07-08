@@ -3218,7 +3218,7 @@ class RadialOverlay(QWidget):
         p.setPen(QPen(acc, max(1.0, 0.9 * self.s)))
         p.drawPath(arc)
     def _badge_geom(self, node):
-        br = 6.5 * self.s
+        br = 5.5 * self.s
         rout = node.radius + self.seg_depth / 2
         # Tucked just below the LEFT end of the close bar -- never touching it.
         r_b = rout - self.bar_w - br - 3.0 * self.s
@@ -3232,7 +3232,7 @@ class RadialOverlay(QWidget):
         return math.hypot(px - bx, py - by) <= br + 4 * self.s
 
     def _speaker_geom(self, node):
-        br = 6.5 * self.s
+        br = 5.5 * self.s
         rin = node.radius - self.seg_depth / 2
         # Tucked closer to the inner edge on the right side
         r_b = rin + br - 1.5 * self.s
@@ -3304,7 +3304,7 @@ class RadialOverlay(QWidget):
         p.setBrush(bg_color)
         p.drawEllipse(QPointF(bx, by), br, br)
         if hot:
-            cross_color = QColor(255, 255, 255, opacity) if self._is_light() else QColor(12, 16, 22, opacity)
+            cross_color = QColor(255, 255, 255, opacity)
             p.setPen(QPen(cross_color, 1.5 * self.s))
             d = br * 0.36
             p.drawLine(QPointF(bx - d, by - d), QPointF(bx + d, by + d))
