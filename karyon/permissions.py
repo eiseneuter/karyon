@@ -78,7 +78,7 @@ def run_setup() -> bool:
         result = subprocess.run(["pkexec", "bash", path], env=child_env())
         return result.returncode == 0
     except Exception:  # noqa: BLE001
-        log.exception("Rechte-Einrichtung fehlgeschlagen")
+        log.exception("Failed to set up permissions")
         return False
     finally:
         try:

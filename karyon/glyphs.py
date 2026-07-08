@@ -455,6 +455,39 @@ def _g_mail(p) -> None:
     ]))
 
 
+def _g_media_prev(p) -> None:
+    p.setPen(Qt.PenStyle.NoPen)
+    p.setBrush(QBrush(GLYPH))
+    # Left vertical bar
+    p.drawRect(QRectF(18, 18, 6, 28))
+    # Left-pointing triangle
+    poly = QPolygonF([QPointF(42, 18), QPointF(24, 32), QPointF(42, 46)])
+    p.drawPolygon(poly)
+
+def _g_media_play(p) -> None:
+    p.setPen(Qt.PenStyle.NoPen)
+    p.setBrush(QBrush(GLYPH))
+    # Right-pointing triangle
+    poly = QPolygonF([QPointF(24, 16), QPointF(48, 32), QPointF(24, 48)])
+    p.drawPolygon(poly)
+
+def _g_media_pause(p) -> None:
+    p.setPen(Qt.PenStyle.NoPen)
+    p.setBrush(QBrush(GLYPH))
+    # Two vertical bars
+    p.drawRect(QRectF(22, 18, 8, 28))
+    p.drawRect(QRectF(36, 18, 8, 28))
+
+def _g_media_next(p) -> None:
+    p.setPen(Qt.PenStyle.NoPen)
+    p.setBrush(QBrush(GLYPH))
+    # Right-pointing triangle
+    poly = QPolygonF([QPointF(22, 18), QPointF(40, 32), QPointF(22, 46)])
+    p.drawPolygon(poly)
+    # Right vertical bar
+    p.drawRect(QRectF(40, 18, 6, 28))
+
+
 _GLYPHS = {
     "hamburger": _hamburger,
     "star": _star,
@@ -496,4 +529,8 @@ _GLYPHS = {
     "inputmethod": _g_inputmethod,
     "weather": _g_weather,
     "mail": _g_mail,
+    "media_prev": _g_media_prev,
+    "media_play": _g_media_play,
+    "media_pause": _g_media_pause,
+    "media_next": _g_media_next,
 }

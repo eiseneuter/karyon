@@ -22,12 +22,13 @@ DEFAULTS: dict = {
     "scale": 1.5,
     "autostart": False,
     "theme": "dark",
-    "overlay_mode": "pie",
+    "overlay_mode": "switch",
     "game_mode": True,
     "max_recent_apps": 8,
     "max_recent_files": 12,
     "adjust_volume_with_trigger_wheel": True,
     "volume_steps": 1,
+    "show_media_control": True,
     "show_desktop": True,
     "show_all_apps": True,
     "show_tray": True,
@@ -93,7 +94,7 @@ class Config:
         except FileNotFoundError:
             return
         except Exception as exc:  # noqa: BLE001
-            log.warning("Konfiguration konnte nicht gelesen werden: %s", exc)
+            log.warning("Failed to read configuration: %s", exc)
             return
         if not isinstance(raw, dict):
             return
@@ -133,4 +134,4 @@ class Config:
                 encoding="utf-8",
             )
         except Exception as exc:  # noqa: BLE001
-            log.warning("Konfiguration konnte nicht gespeichert werden: %s", exc)
+            log.warning("Failed to save configuration: %s", exc)

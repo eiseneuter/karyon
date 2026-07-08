@@ -83,7 +83,7 @@ def read_menu(bus: str, menu_path: str) -> list[MenuEntry]:
         return [_parse(c["data"] if isinstance(c, dict) and "data" in c else c)
                 for c in (root[2] or [])]
     except Exception:  # noqa: BLE001
-        log.debug("DBusMenu lesen fehlgeschlagen: %s %s", bus, menu_path)
+        log.debug("Failed to read DBusMenu: %s %s", bus, menu_path)
         return []
 
 
@@ -112,4 +112,4 @@ def send_clicked(bus: str, menu_path: str, item_id: int) -> None:
              str(int(item_id)), "clicked", "s", "", "0"],
             env=child_env())
     except Exception:  # noqa: BLE001
-        log.exception("DBusMenu-Klick fehlgeschlagen: %s %s", menu_path, item_id)
+        log.exception("DBusMenu click failed: %s %s", menu_path, item_id)

@@ -151,7 +151,7 @@ class SettingsPanel(QFrame):
         scroll.setWidget(inner)
         outer.addWidget(scroll)
 
-        title = QLabel("Karyon 2.1")
+        title = QLabel("Karyon 2.2")
         title.setObjectName("title")
         self._lay.addWidget(title)
 
@@ -227,6 +227,7 @@ class SettingsPanel(QFrame):
             ("show_session", "Icon Session"),
             ("show_all_apps", "Icon All Applications"),
             ("show_favorites", "Icon Favorites"),
+            ("show_media_control", "Icons Media Control"),
         ]
         for r, (k, lab) in enumerate(left):
             grid.addWidget(self._make_check(k, lab), r, 0)
@@ -360,7 +361,7 @@ class SettingsPanel(QFrame):
         mode = self.combos.get("overlay_mode")
         if not mode or not hasattr(self, "volume_info_label"): return
         if mode.currentData() == "switch":
-            self.volume_info_label.setText("Volume: Mouse Back/Forward | Mute: Middle click")
+            self.volume_info_label.setText("Volume: Mouse wheel up/down in Hub bottom area | Mute: Middle click")
         else:
             self.volume_info_label.setText("Volume: Mouse wheel up/down | Mute: Middle click")
 

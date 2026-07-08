@@ -149,13 +149,13 @@ class KWinBridge:
             QDBusConnectionInterface.ServiceReplacementOptions.AllowReplacement,
         )
         if reg.value() == QDBusConnectionInterface.RegisterServiceReply.ServiceNotRegistered:
-            log.warning("DBus-Result-Service konnte nicht registriert werden")
+            log.warning("Failed to register DBus Result Service")
         ok = self._bus.registerObject(
             RESULT_PATH, RESULT_IFACE, self._receiver,
             QDBusConnection.RegisterOption.ExportAllSlots,
         )
         if not ok:
-            log.warning("DBus-Result-Objekt konnte nicht registriert werden")
+            log.warning("Failed to register DBus Result Object")
 
     # -- DBus callback ------------------------------------------------------
     def _on_result(self, data: str) -> None:
@@ -169,7 +169,7 @@ class KWinBridge:
                 try:
                     self._on_fullscreen_event(payload)
                 except Exception:  # noqa: BLE001
-                    log.exception("Fullscreen-Event-Callback fehlgeschlagen")
+                    log.exception("Fullscreen event callback failed")
             return
         entry = self._pending.pop(rid, None)
         if entry is None:
@@ -180,7 +180,7 @@ class KWinBridge:
         try:
             callback(payload)
         except Exception:  # noqa: BLE001
-            log.exception("Snapshot-Callback fehlgeschlagen")
+            log.exception("Snapshot callback failed")
 
     # -- script execution ---------------------------------------------------
     def _run_script(self, js: str, on_result=None, rid: str = "", timeout_ms: int = 300):
@@ -191,7 +191,7 @@ class KWinBridge:
         try:
             path.write_text(js, encoding="utf-8")
         except Exception:  # noqa: BLE001
-            log.exception("KWin-Script konnte nicht geschrieben werden")
+            log.exception("Failed to write KWin script")
             return
 
         if on_result is not None and rid:
@@ -210,14 +210,14 @@ class KWinBridge:
         reply = iface.call("loadScript", str(path), plugin)
         args = reply.arguments()
         if not args:
-            log.warning("loadScript ohne Antwort: %s", reply.errorMessage())
+            log.warning("loadScript no response: %s", reply.errorMessage())
             self._pending.pop(rid, None)
             self._unload(plugin, path)
             return
         sid = args[0]
         # A negative/invalid id would build an invalid DBus path.
         if not isinstance(sid, int) or sid < 0:
-            log.warning("loadScript lieferte ungueltige id: %r", sid)
+            log.warning("loadScript returned invalid id: %r", sid)
             self._pending.pop(rid, None)
             self._unload(plugin, path)
             return
@@ -434,7 +434,7 @@ class KWinBridge:
         try:
             path.write_text(js, encoding="utf-8")
         except Exception:  # noqa: BLE001
-            log.exception("KWin-Daemon-Script konnte nicht geschrieben werden")
+            log.exception("Failed to write KWin Daemon script")
             return
 
         iface = QDBusInterface("org.kde.KWin", "/Scripting",
@@ -443,11 +443,11 @@ class KWinBridge:
         reply = iface.call("loadScript", str(path), plugin)
         args = reply.arguments()
         if not args:
-            log.warning("loadScript fuer Daemon ohne Antwort: %s", reply.errorMessage())
+            log.warning("loadScript for daemon no response: %s", reply.errorMessage())
             return
         sid = args[0]
         if not isinstance(sid, int) or sid < 0:
-            log.warning("loadScript fuer Daemon lieferte ungueltige id: %r", sid)
+            log.warning("loadScript for daemon returned invalid id: %r", sid)
             return
         script = QDBusInterface("org.kde.KWin", f"/Scripting/Script{sid}",
                                 "org.kde.kwin.Script", self._bus)

@@ -118,7 +118,7 @@ class InputProxy:
     def __init__(self, config: dict,
                  on_hold=None, on_release=None, on_cancel=None,
                  on_motion=None, on_gesture=None, on_key_captured=None,
-                 on_press=None, on_volume_scroll=None, on_volume_button=None,
+                 on_press=None, on_volume_scroll=None,
                  on_trigger_mute=None):
         super().__init__()
         self.config = config
@@ -130,11 +130,7 @@ class InputProxy:
         self.on_key_captured = on_key_captured
         self.on_press = on_press
         self.on_volume_scroll = on_volume_scroll
-        self.on_volume_button = on_volume_button
         self.on_trigger_mute = on_trigger_mute
-
-        self._volume_hold_dir = 0
-        self._volume_hold_time = 0.0
 
         self._thread: threading.Thread | None = None
         self._stop = threading.Event()
@@ -376,7 +372,7 @@ class InputProxy:
                 self._virtuals[path] = ui
             except Exception:  # noqa: BLE001
                 log.warning("Virtuelles GerÃ¤t fÃ¼r %s fehlgeschlagen", dev.name)
-        log.info("Maus erfasst: %s (%s)", dev.name, "grab" if grabbed else "read-only")
+        log.info("Mouse captured: %s (%s)", dev.name, "grab" if grabbed else "read-only")
 
     @staticmethod
     def _is_touchpad(dev: "InputDevice") -> bool:
@@ -425,15 +421,15 @@ class InputProxy:
                 self._virtuals[path] = UInput.from_device(
                     dev, name=f"{VIRTUAL_MARKER} {dev.name}")
                 self._tp_grabbed = True
-                log.info("Touchpad erfasst: %s (Trigger+Navigation)", dev.name)
+                log.info("Touchpad captured: %s (Trigger+Navigation)", dev.name)
                 return
             except Exception:  # noqa: BLE001
-                log.warning("Touchpad-Vollmodus fehlgeschlagen: %s", dev.name)
+                log.warning("Touchpad full mode failed: %s", dev.name)
                 try:
                     dev.ungrab()
                 except Exception:  # noqa: BLE001
                     pass
-        log.info("Touchpad erfasst: %s (Navigation)", dev.name)
+        log.info("Touchpad captured: %s (Navigation)", dev.name)
 
     def _reconcile(self, seen_mice: set, seen_kb: set, seen_tp: set) -> None:
         disconnected = False
@@ -475,7 +471,7 @@ class InputProxy:
                         ui.close()
                     except Exception:  # noqa: BLE001
                         pass
-                log.info("Maus entfernt: %s", path)
+                log.info("Mouse removed: %s", path)
         for path in list(self._keyboards):
             if path not in seen_kb:
                 disconnected = True
@@ -662,7 +658,6 @@ class InputProxy:
         cancel = _cancel_codes(self.config)
         if (ev.type == ecodes.EV_KEY and ev.code == ecodes.BTN_MIDDLE
                 and ev.value in (0, 1) and self.state in (PENDING, MENU)
-                and self.config.get("adjust_volume_with_trigger_wheel", True)
                 and ev.code not in codes):
             if self.state == PENDING:
                 self._drag = True
@@ -670,31 +665,7 @@ class InputProxy:
                 self.on_trigger_mute()
             return
             
-        vol_btns = (ecodes.BTN_SIDE, ecodes.BTN_EXTRA, ecodes.BTN_BACK, ecodes.BTN_FORWARD,
-                    ecodes.KEY_BACK, ecodes.KEY_FORWARD,
-                    ecodes.KEY_PREVIOUS, ecodes.KEY_NEXT,
-                    ecodes.KEY_PREVIOUSSONG, ecodes.KEY_NEXTSONG,
-                    ecodes.BTN_TASK)
-        if ev.type == ecodes.EV_KEY and ev.code in vol_btns:
-            log.info(f"DEBUG: Processing vol_btn {ev.code}, value={ev.value}, state={self.state}")
-            if (ev.value in (0, 1) and self.state in (PENDING, MENU)
-                    and self.config.get("adjust_volume_with_trigger_wheel", True)
-                    and self.config.get("overlay_mode", "pie") == "switch"):
-                if ev.value == 1:
-                    if self.state == PENDING:
-                        self._drag = True
-                    
-                    back_codes = (ecodes.BTN_SIDE, ecodes.BTN_BACK, ecodes.KEY_BACK, 
-                                  ecodes.KEY_PREVIOUS, ecodes.KEY_PREVIOUSSONG, ecodes.BTN_TASK)
-                    self._volume_hold_dir = -1 if ev.code in back_codes else 1
-                    
-                    self._volume_hold_time = time.monotonic() + 0.3
-                    if self.on_volume_button:
-                        log.info(f"DEBUG: Emitting on_volume_button({self._volume_hold_dir})")
-                        self.on_volume_button(self._volume_hold_dir)
-                elif ev.value == 0:
-                    self._volume_hold_dir = 0
-                return
+
         if (self.state == MENU and ev.type == ecodes.EV_KEY
                 and ev.code in cancel and ev.code not in codes):
             if ev.value == 1:
@@ -714,8 +685,7 @@ class InputProxy:
             return  # consume the trigger, never forward (replayed if it was a click)
 
         if ev.type == ecodes.EV_REL:
-            if (ev.code == ecodes.REL_WHEEL and self.state in (PENDING, MENU)
-                    and self.config.get("adjust_volume_with_trigger_wheel", True)):
+            if (ev.code == ecodes.REL_WHEEL and self.state in (PENDING, MENU)):
                 self._on_volume_wheel(ev.value)
                 return
             if self.state == MENU:
@@ -865,16 +835,11 @@ class InputProxy:
             self._menu_rel[0] += dx * factor
             self._menu_rel[1] += dy * factor
             self._path.append((time.monotonic(),
-                               self._menu_rel[0], self._menu_rel[1]))
+                self._menu_rel[0], self._menu_rel[1]))
             if self.on_motion:
                 self.on_motion(self._menu_rel[0], self._menu_rel[1])
 
     def _check_hold(self, now: float) -> None:
-        if self._volume_hold_dir != 0 and now >= self._volume_hold_time:
-            self._volume_hold_time = now + 0.25
-            if self.on_volume_button:
-                self.on_volume_button(self._volume_hold_dir)
-
         if self.state != PENDING or self._drag:
             return
         hold_ms = float(self.config.get("hold_ms", 200))
@@ -928,7 +893,6 @@ class InputProxy:
         return math.hypot(x1 - x0, y1 - y0) / dt
 
     def _on_trigger_release(self) -> None:
-        self._volume_hold_dir = 0
         # Gestures fire during motion, so a release never triggers one.
         if self.state == PENDING:
             if self._drag:
@@ -989,7 +953,7 @@ class InputProxy:
                 ui.syn()
                 time.sleep(0.012)
         except Exception:  # noqa: BLE001
-            log.exception("send_keys fehlgeschlagen")
+            log.exception("send_keys failed")
 
     def warp_cursor(self, x: int, y: int, bounds) -> None:
         self._ensure_injection_devices()

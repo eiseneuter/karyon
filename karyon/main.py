@@ -19,6 +19,7 @@ from .flash import GestureFlash
 from .gestures import FOCUS_ACTIONS, GestureExecutor
 from .input_proxy import InputProxy
 from .kwin import KWinBridge
+from .media import MediaBridge
 from .overlay import RadialOverlay
 from .perf import timed
 from .procenv import child_env, run_detached
@@ -92,7 +93,7 @@ def _ensure_kwin_taskbar_rule() -> None:
         subprocess.run(["qdbus6", "org.kde.KWin", "/KWin", "reconfigure"],
                        env=child_env())
     except Exception:  # noqa: BLE001
-        log.debug("KWin-Regel konnte nicht geschrieben werden", exc_info=True)
+        log.debug("Failed to write KWin rule", exc_info=True)
 
 
 def _ensure_overlay_focus_rule() -> None:
@@ -115,9 +116,9 @@ def _ensure_overlay_focus_rule() -> None:
         w("acceptfocusrule", "2")
         subprocess.run(["qdbus6", "org.kde.KWin", "/KWin", "reconfigure"],
                        env=child_env())
-        log.info("Overlay-acceptfocus=false gesetzt (Fensterwechsel).")
+        log.info("Overlay acceptfocus=false set (Window Switch).")
     except Exception:  # noqa: BLE001
-        log.debug("acceptfocus-Regel konnte nicht gesetzt werden", exc_info=True)
+        log.debug("Failed to set acceptfocus rule", exc_info=True)
 
 
 def _ensure_focus_stealing_off() -> None:
@@ -135,9 +136,9 @@ def _ensure_focus_stealing_off() -> None:
                        env=child_env())
         subprocess.run(["qdbus6", "org.kde.KWin", "/KWin", "reconfigure"],
                        env=child_env())
-        log.info("Focus-Stealing-Prevention auf 0 gesetzt (Fensterwechsel).")
+        log.info("Focus Stealing Prevention set to 0 (Window Switch).")
     except Exception:  # noqa: BLE001
-        log.debug("FSP-Level konnte nicht gesetzt werden", exc_info=True)
+        log.debug("Failed to set FSP level", exc_info=True)
 
 
 # ---------------------------------------------------------------------------
@@ -179,6 +180,8 @@ class Launcher:
             from .audio import AudioMonitor
             self.audio = AudioMonitor()
             self.audio.start()
+        with timed("MediaBridge"):
+            self.media = MediaBridge()
         with timed("RadialOverlay"):
             self.overlay = RadialOverlay(self.config, self.kwin, self.app_index,
                                          self.tray, self.recent_files,
@@ -194,7 +197,6 @@ class Launcher:
         self._last_fs_payload = None
         self._fresh_snap_pending = False
         self._press_time = 0.0
-        self._wire_overlay()
         self._init_tray()
 
         # Signal bridge + input proxy
@@ -208,8 +210,6 @@ class Launcher:
                                          Qt.ConnectionType.QueuedConnection)
         self.bridge.press.connect(self._on_press, Qt.ConnectionType.QueuedConnection)
         self.bridge.volume_scroll.connect(self._on_volume_scroll,
-                                          Qt.ConnectionType.QueuedConnection)
-        self.bridge.volume_button.connect(self._on_volume_button,
                                           Qt.ConnectionType.QueuedConnection)
 
         self.bridge.trigger_mute.connect(self._on_trigger_mute,
@@ -230,13 +230,13 @@ class Launcher:
             on_key_captured=self.bridge.key_captured.emit,
             on_press=self.bridge.press.emit,
             on_volume_scroll=self.bridge.volume_scroll.emit,
-            on_volume_button=self.bridge.volume_button.emit,
             on_trigger_mute=self.bridge.trigger_mute.emit,
         )
         self.proxy.start()
         self.executor = GestureExecutor(self.proxy, self.config)
         self.settings.bind_proxy(self.proxy)
         self.overlay.on_shown = self.proxy.jiggle_virtual_mice
+        self._wire_overlay()
 
         # Start persistent KWin fullscreen monitor daemon script.
         def on_fullscreen(payload: dict) -> None:
@@ -246,16 +246,20 @@ class Launcher:
 
     # -- wiring -------------------------------------------------------------
     def _wire_overlay(self) -> None:
+        self.overlay.request_gesture.connect(self._on_gesture)
         self.overlay.request_session.connect(self._on_session)
         self.overlay.request_settings.connect(self._open_settings)
         self.overlay.request_setup_input.connect(self._setup_input)
         self.overlay.request_quit.connect(self.quit)
+        self.overlay.request_media.connect(self.media.action)
 
     def _on_tray_changed(self) -> None:
         if self.overlay.isVisible():
             snap = self.kwin.cached_snapshot
             if snap is None:
                 snap = {"cursor": self._fallback_cursor(), "windows": []}
+            if self.config.get("show_media_control", True):
+                snap["media"] = self.media.get_status()
             self.overlay.refresh_model(snap)
 
     def _init_tray(self) -> None:
@@ -304,6 +308,8 @@ class Launcher:
     def _open_with(self, snap) -> None:
         if snap is None:
             snap = {"cursor": self._fallback_cursor(), "windows": []}
+        if self.config.get("show_media_control", True):
+            snap["media"] = self.media.get_status()
         self._gesture_win_id = next(
             (w["id"] for w in snap.get("windows", []) if w.get("active")), "")
         self.overlay.open(snap)
@@ -313,6 +319,8 @@ class Launcher:
         # Rebuild the model in place with fresh data while the menu is open,
         # keeping the user's current sector/pointer.
         if self.overlay.isVisible():
+            if self.config.get("show_media_control", True):
+                snap["media"] = self.media.get_status()
             self._gesture_win_id = next(
                 (w["id"] for w in snap.get("windows", []) if w.get("active")),
                 self._gesture_win_id)
@@ -420,24 +428,26 @@ class Launcher:
                     return
 
         if self.config.get("overlay_mode", "pie") == "switch":
-            self.overlay.switch_category(direction)
+            if getattr(self.overlay, "hover_volume_area", False):
+                self._do_volume_adjust(direction)
+            else:
+                self.overlay.switch_category(direction)
             return
             
-        self._do_volume_adjust(direction)
+        if self.config.get("adjust_volume_with_trigger_wheel", True):
+            self._do_volume_adjust(direction)
 
-    def _on_volume_button(self, direction: int) -> None:
-        self._do_volume_adjust(direction)
+
 
     def _do_volume_adjust(self, direction: int) -> None:
         step = max(1, int(self.config.get("volume_steps", 1)))
         suffix = "+" if direction > 0 else "-"
         amount = step * max(1, abs(int(direction)))
         cmd = ["wpctl", "set-volume", "@DEFAULT_AUDIO_SINK@", f"{amount}%{suffix}"]
-        log.info(f"DEBUG: Executing volume command: {cmd}")
         try:
             run_detached(cmd)
         except Exception:  # noqa: BLE001
-            log.debug("Lautstärke konnte nicht per Mausrad geändert werden",
+            log.debug("Failed to change volume via mouse wheel",
                       exc_info=True)
 
     def _on_trigger_mute(self) -> None:
@@ -455,17 +465,32 @@ class Launcher:
                     
                     if wid:
                         self.kwin.close(wid)
-                        snap = getattr(self.kwin, "cached_snapshot", None)
-                        if snap and "windows" in snap:
-                            snap["windows"] = [w for w in snap["windows"] if w.get("id") != wid]
-                            self.overlay.refresh_model(snap)
+                        node.pending_close = True
+                        if not hasattr(self.overlay, "pending_close_wids"):
+                            self.overlay.pending_close_wids = set()
+                        self.overlay.pending_close_wids.add(wid)
+                        self.overlay.request_repaint()
+                        from PyQt6.QtCore import QTimer
+                        # Poll KWin's actual state a few times to see if the window closed
+                        # or if it was blocked by a save prompt.
+                        QTimer.singleShot(100, lambda: self.kwin.snapshot_async(self._late_snapshot))
+                        QTimer.singleShot(300, lambda: self.kwin.snapshot_async(self._late_snapshot))
+                        QTimer.singleShot(800, lambda: self.kwin.snapshot_async(self._late_snapshot))
+                        # If the window didn't close (e.g. save prompt), unhide the segment after 1.5s
+                        def clear_pending(w=wid):
+                            if hasattr(self.overlay, "pending_close_wids"):
+                                self.overlay.pending_close_wids.discard(w)
+                            if getattr(node, "pending_close", False):
+                                node.pending_close = False
+                            self.overlay.request_repaint()
+                        QTimer.singleShot(1500, clear_pending)
                         return
         try:
             run_detached(
                 ["wpctl", "set-mute", "@DEFAULT_AUDIO_SINK@", "toggle"]
             )
         except Exception:  # noqa: BLE001
-            log.debug("Mute konnte nicht per Maus-Trigger geändert werden",
+            log.debug("Failed to change mute via mouse trigger",
                       exc_info=True)
 
     # -- session ------------------------------------------------------------
@@ -647,7 +672,7 @@ def main() -> int:
         return 1
 
     _access = permissions.has_input_access()
-    log.info("Eingabe-Zugriff vorhanden: %s (pkexec: %s)",
+    log.info("Input access available: %s (pkexec: %s)",
              _access, permissions.setup_available())
     if not _access:
         _prompt_input_setup(app)

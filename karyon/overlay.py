@@ -46,6 +46,7 @@ IT_FILE = "file"
 IT_CTRL_BTN = "ctrl_btn"
 IT_TRAY_MENUITEM = "tray_menuitem"   # an entry from an app's DBus context menu
 IT_MAIL = "mail"                     # new-message segment at the end of ring 2
+IT_MEDIA_BTN = "media_btn"           # MPRIS media controls
 
 # -- angle constants --------------------------------------------------------
 ANG_GAP = 0.6
@@ -81,6 +82,7 @@ class Node:
     row: int = 0
     count: int = 0
     pinned: bool = False
+    pending_close: bool = False
 
 
 def approach(value: float, target: float, rate: float) -> float:
@@ -233,6 +235,7 @@ class RadialOverlay(QWidget):
     request_setup_input = pyqtSignal()
     request_quit = pyqtSignal()
     closed = pyqtSignal()
+    request_media = pyqtSignal(str)
 
     def __init__(self, config, kwin, app_index, tray, recent_files, progress=None,
                  audio=None):
@@ -336,6 +339,7 @@ class RadialOverlay(QWidget):
         self.hover_pin = False
         self.hover_mute = False
         self.hover_mail = False
+        self.hover_volume_area = False
         self.open_group: Node | None = None
         self._ctrl_node: Node | None = None
         self._ctrl_t = 0.0
@@ -407,6 +411,7 @@ class RadialOverlay(QWidget):
 
     def open(self, snapshot: dict) -> None:
         self._reset_state()
+        self.media_status = snapshot.get("media")
         self._compute_geometry()
         cursor = snapshot.get("cursor")
         screen = self._screen_for_cursor(cursor)
@@ -573,14 +578,13 @@ class RadialOverlay(QWidget):
             self.open_group = anchor
             self._drill_armed = False
             self._layout_children(anchor)
-        log.info("PRESELECT: active=%s target=%s mru_rc=%s",
-                 (self._active_window_id or "")[:10],
-                 (target.label[:14] if target else None),
-                 self._mru_rc[:3])
 
     def refresh_model(self, snapshot: dict) -> None:
         """Rebuild ring2 from a fresher snapshot while the menu stays open,
         preserving the user's current sector and apps stage."""
+        if getattr(self, "pending_close_wids", set()):
+            snapshot["windows"] = [w for w in snapshot.get("windows", []) if w["id"] not in self.pending_close_wids]
+        self.media_status = snapshot.get("media")
         keep_sector = self.open_sector
         keep_stage = self._apps_stage
         self.open_group = None
@@ -602,6 +606,7 @@ class RadialOverlay(QWidget):
             if self.config.get("show_windows", True):
                 self._preselect_window()
         self._check_start_mail_blink()
+        self._update_hover()
         self.request_repaint()
 
     def _recenter_on_cursor(self, cursor) -> None:
@@ -1428,7 +1433,7 @@ class RadialOverlay(QWidget):
         """Empty segments left before a row wraps outward, per absolute ring:
         ring 2 -> 4, ring 3 -> 7, ring 4 and beyond -> 10."""
         if ring <= 2:
-            return 4
+            return max(3, self.config.get("gap_ring1", 4))
         if ring == 3:
             return 7
         return 10
@@ -1603,6 +1608,7 @@ class RadialOverlay(QWidget):
         cap = max(1, int(360.0 / slot) - self._ring_gap(2))
 
         reserved = (1 if sd else 0) + (1 if tray else 0) + (1 if mail else 0)
+        reserved += 3 # Immer 3 Segmentplätze für Medienkontrolle freihalten
         group_cap = max(0, cap - reserved)
         
         groups_fitted = (closed_pinned + open_groups)[:group_cap]
@@ -1669,7 +1675,9 @@ class RadialOverlay(QWidget):
     def _layout_ring2(self, sec: int) -> None:
         self.ring2[sec] = list(self._ring2_base.get(sec, []))
         nodes = self.ring2[sec]
-        if not nodes:
+        # We must not return early if there are media controls to be drawn
+        has_media = (sec == SEC_WINDOWS and getattr(self, "media_status", None) and getattr(self.media_status, "get", lambda x: None)("status"))
+        if not nodes and not has_media:
             return
         a0, a1 = self._sector_arc[sec]
         c = self._nominal.get(sec, (a0 + a1) / 2)
@@ -1758,6 +1766,62 @@ class RadialOverlay(QWidget):
             self._layout_radial(nodes, c, self.r2c, self.seg_depth, span)
         for node in nodes:
             node.sector = sec
+
+        is_active_sec = (self.open_sector == -1 and sec == SEC_WINDOWS) or (self.open_sector != -1 and sec == self.open_sector)
+        if self.config.get("overlay_mode", "pie") == "switch":
+            is_active_sec = True
+            
+        if is_active_sec and getattr(self, "media_status", None) and getattr(self.media_status, "get", lambda x: None)("status"):
+            r_out = self.r2c + self.seg_depth / 2
+            slot = math.degrees(self._seg_phys_w / r_out)
+            gap = math.degrees(self._gap_phys / r_out)
+            
+            status = self.media_status.get("status")
+            app_name = self.media_status.get("app_name", "Media")
+            play_label = "Pause" if status == "Playing" else "Play"
+            
+            m_prev = Node(kind=IT_MEDIA_BTN, label=f"{app_name} - Previous", glyph="media_prev", data="Previous")
+            m_play = Node(kind=IT_MEDIA_BTN, label=f"{app_name} - {play_label}", glyph="media_pause" if status == "Playing" else "media_play", data="PlayPause")
+            m_next = Node(kind=IT_MEDIA_BTN, label=f"{app_name} - Next", glyph="media_next", data="Next")
+            
+            if self.config.get("overlay_mode", "pie") == "switch":
+                # In Switch Mode, place opposite to the center (bottom of the ring)
+                media_center = c + 180.0
+            else:
+                # In Pie Mode, place in the free space alongside the windows
+                ring2_wins = [n for n in nodes if getattr(n, "row", -1) == 0 and getattr(n, "sector", -1) == sec]
+                L = len(ring2_wins)
+                cap = max(1, int(span / slot))
+                free = cap - L - 3
+                
+                mid_gap = slot * (1 + free / 3.0) if free > 1 else slot * 0.5
+                
+                # Shift windows to the left to make room on the right
+                shift = (3 * slot + mid_gap) / 2
+                for n in ring2_wins:
+                    n.angle -= shift
+                    
+                media_center = c + L * slot / 2.0 + mid_gap / 2.0
+            
+            # In Qt, 0 is right, 90 is bottom, 180 is left, 270 is top.
+            # At the bottom (0 to 180), +angle goes LEFT.
+            # At the top (180 to 360), +angle goes RIGHT.
+            media_center_norm = media_center % 360.0
+            if 0 < media_center_norm < 180:
+                m_prev.angle = media_center + slot
+                m_next.angle = media_center - slot
+            else:
+                m_prev.angle = media_center - slot
+                m_next.angle = media_center + slot
+                
+            m_play.angle = media_center
+            
+            for n in (m_prev, m_play, m_next):
+                n.radius = self.r2c
+                n.half_deg = (slot - gap) / 2
+                n.row = 0
+                n.sector = sec
+                nodes.append(n)
 
     # -- pointer input ------------------------------------------------------
     def set_pointer(self, dx: float, dy: float) -> None:
@@ -1851,9 +1915,16 @@ class RadialOverlay(QWidget):
                 self._hover_in_sector(sec, r, a)
                 return
 
+        self.hover_volume_area = False
+        
         # Inner circle: trigger zones for switching AND a compressed selection
         # field for the active sector's symbols.
         if r <= self.r_hub:
+            if self.config.get("overlay_mode", "pie") == "switch" and self.config.get("adjust_volume_with_trigger_wheel", True):
+                dy = r * math.sin(math.radians(a))
+                if dy > 25 * self.s:
+                    self.hover_volume_area = True
+            
             here = self._sector_containing(a)
             if self.open_sector == -1 or here != self.open_sector:
                 self._set_open_sector(here)
@@ -2138,10 +2209,6 @@ class RadialOverlay(QWidget):
             self._hover_dirty = False
             self._update_hover()
         node = self.hover_node
-        log.info("RELEASE: gesture_fired=%s hover=%s close=%s sector=%s",
-                 self._gesture_fired,
-                 (node.kind + ":" + node.label[:14]) if node else None,
-                 self.hover_close, self.open_sector)
         if self._gesture_fired:
             self.close_menu()
             return
@@ -2190,6 +2257,10 @@ class RadialOverlay(QWidget):
 
     def _activate(self, node: Node, close_one: bool, close_all: bool) -> None:
         kind = node.kind
+        if kind == IT_MEDIA_BTN:
+            self.close_menu()
+            self.request_media.emit(node.data)
+            return
         if kind == IT_MAIL:
             self.close_menu()
             if close_one:
@@ -2622,7 +2693,10 @@ class RadialOverlay(QWidget):
         active_progress_nodes = frozenset(
             id(node) for node in self.ring2.get(self.open_sector, []) if self._has_progress(node)
         )
-        current_state = (self.open_sector, id(self.open_group), id(self._ctrl_node), self.size().width(), active_progress_nodes, getattr(self, "_mail_blink_state", 0), getattr(self, "_model_revision", 0))
+        pending_close_nodes = frozenset(
+            id(node) for node in self.ring2.get(self.open_sector, []) if getattr(node, "pending_close", False)
+        )
+        current_state = (self.open_sector, id(self.open_group), id(self._ctrl_node), self.size().width(), active_progress_nodes, pending_close_nodes, getattr(self, "_mail_blink_state", 0), getattr(self, "_model_revision", 0))
         if not getattr(self, "_static_frame_cache", None) or getattr(self, "_cache_state", None) != current_state:
             from PyQt6.QtGui import QPixmap
             self._static_frame_cache = QPixmap(self.size())
@@ -2722,7 +2796,7 @@ class RadialOverlay(QWidget):
         p.end()
 
     def _paint_title(self, p, cx, cy, node) -> None:
-        box, f, text = self._title_box_and_font(node)
+        box, f, text = self._title_box_and_font(cx, cy, node)
         if box.isEmpty():
             return
         p.setFont(f)
@@ -2741,13 +2815,14 @@ class RadialOverlay(QWidget):
     def _current_title_rect(self) -> QRect:
         if self.hover_node is None or not self.hover_node.label:
             return QRect()
-        box, _font, _text = self._title_box_and_font(self.hover_node)
+        cx, cy = int(self._pointer.x()), int(self._pointer.y())
+        box, _font, _text = self._title_box_and_font(cx, cy, self.hover_node)
         if box.isEmpty():
             return QRect()
         margin = int(math.ceil(8 * self.s))
         return box.toAlignedRect().adjusted(-margin, -margin, margin, margin)
 
-    def _title_box_and_font(self, node) -> tuple[QRectF, QFont, str]:
+    def _title_box_and_font(self, cx, cy, node) -> tuple[QRectF, QFont, str]:
         text = node.label
         f = QFont()
         f.setPointSizeF(4.5 * self.s)
@@ -2767,17 +2842,28 @@ class RadialOverlay(QWidget):
         w = tw + 2 * pad
         h = th + pad * 0.7
         
-        # Place the pill just outside the hovered element, along its direction.
-        depth = self.seg3_depth if node.kind == IT_CTRL_BTN else self.seg_depth
-        r_out = node.radius + depth / 2 + 8 * self.s + h / 2
+        depth = self.seg3_depth if getattr(node, "ring3", False) else self.seg_depth
         angle = node.angle
         if node.kind in (IT_TRAY_MENU, IT_FAV_MENU):
             angle -= 4.0
         elif node.kind in (IT_APP, IT_FILE, IT_WINDOW_GROUP, IT_WINDOW) and getattr(node, "depth", 0) == 0:
             angle -= 3.0
             
-        cxr = rect.width() / 2 + r_out * math.cos(math.radians(angle))
-        cyr = rect.height() / 2 + r_out * math.sin(math.radians(angle))
+        # Calculate the proper distance so the box edge doesn't overlap the segment
+        rad = math.radians(angle)
+        cos_a = math.cos(rad)
+        sin_a = math.sin(rad)
+        abs_cos = abs(cos_a)
+        abs_sin = abs(sin_a)
+        d_x = (w / 2) / abs_cos if abs_cos > 1e-5 else float('inf')
+        d_y = (h / 2) / abs_sin if abs_sin > 1e-5 else float('inf')
+        r_rect = min(d_x, d_y)
+        
+        # Add 8px gap between segment and text box
+        r_out = node.radius + depth / 2 + 8 * self.s + r_rect
+            
+        cxr = cx + r_out * cos_a
+        cyr = cy + r_out * sin_a
         rx = cxr - w / 2
         ry = cyr - h / 2
         
@@ -2810,11 +2896,50 @@ class RadialOverlay(QWidget):
         p.setRenderHint(QPainter.RenderHint.Antialiasing, bool(old_aa))
 
 
+    def _paint_hub_volume_area(self, p, cx, cy) -> None:
+        p.setPen(Qt.PenStyle.NoPen)
+        if self._is_light():
+            col = QColor(0, 0, 0, 15)
+            if getattr(self, "hover_volume_area", False):
+                col = QColor(0, 0, 0, 30)
+        else:
+            col = QColor(255, 255, 255, 24)
+            if getattr(self, "hover_volume_area", False):
+                col = QColor(255, 255, 255, 45)
+        p.setBrush(col)
+        # Draw a horizontal chord at the bottom (-145 deg to -35 deg, making it ~7px higher)
+        p.drawChord(QRectF(cx - self.r_hub, cy - self.r_hub, self.r_hub * 2, self.r_hub * 2), -145 * 16, 110 * 16)
+        
+        # Speaker symbol
+        s = 8.0 * self.s
+        bx = cx
+        by = cy + self.r_hub * 0.75
+        symbol_color = QColor(self._glyph_color())
+        symbol_color.setAlpha(180)
+        
+        body = QPolygonF([
+            QPointF(bx - 0.46 * s, by - 0.16 * s),
+            QPointF(bx - 0.16 * s, by - 0.16 * s),
+            QPointF(bx + 0.14 * s, by - 0.42 * s),
+            QPointF(bx + 0.14 * s, by + 0.42 * s),
+            QPointF(bx - 0.16 * s, by + 0.16 * s),
+            QPointF(bx - 0.46 * s, by + 0.16 * s),
+        ])
+        p.setBrush(symbol_color)
+        p.drawPolygon(body)
+        
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        p.setPen(QPen(symbol_color, max(0.8, 0.9 * self.s)))
+        p.drawArc(QRectF(bx + 0.06 * s, by - 0.30 * s, 0.5 * s, 0.6 * s), -55 * 16, 110 * 16)
+
     def _paint_hub(self, p, cx, cy) -> None:
         # Plain disc; the trigger thirds/quarters are invisible hit zones.
         p.setPen(Qt.PenStyle.NoPen)
         p.setBrush(self._seg_base())
         p.drawEllipse(QPointF(cx, cy), self.r_hub, self.r_hub)
+
+        if self.config.get("overlay_mode", "pie") == "switch" and self.config.get("adjust_volume_with_trigger_wheel", True):
+            self._paint_hub_volume_area(p, cx, cy)
 
         if self.config.get("overlay_mode", "pie") != "switch":
             self._paint_hub_ticks(p, cx, cy)
@@ -2867,7 +2992,7 @@ class RadialOverlay(QWidget):
                 fb = QFont(); fb.setPointSizeF(6.8 * self.s)
                 p.setFont(fb)
                 txt = f"{bat['percent']}%"
-                rect = QRectF(cx - r, cy - r * 0.36, 2 * r, r * 0.26)
+                rect = QRectF(cx - r, cy - r * 0.30, 2 * r, r * 0.26)
                 tw = p.fontMetrics().horizontalAdvance(txt)
                 cyr = rect.center().y()
                 self._draw_lightning(p, cx - tw / 2 - 6 * self.s, cyr, 8 * self.s)
@@ -2885,7 +3010,7 @@ class RadialOverlay(QWidget):
             fd = QFont(); fd.setPointSizeF(7.5 * self.s)
             p.setFont(fd)
             p.setPen(QPen(self._glyph_color()))
-            p.drawText(QRectF(cx - r, cy + r * 0.30, 2 * r, r * 0.34),
+            p.drawText(QRectF(cx - r, cy + r * 0.24, 2 * r, r * 0.34),
                        Qt.AlignmentFlag.AlignCenter, now.strftime("%a %d %b"))
 
     def _paint_category_icon(self, p, cx, cy) -> None:
@@ -2893,10 +3018,10 @@ class RadialOverlay(QWidget):
         # size and position of the drawing area
         size = r * 0.35
         px = cx
-        # The battery charge indicator text box starts at cy - r * 0.36.
+        # The battery charge indicator text box starts at cy - r * 0.30.
         # The bottom-most point of our drawn icons is at py + size * 0.36.
-        # We want: py + size * 0.36 = cy - r * 0.36 - 5 * self.s
-        py = cy - r * 0.36 - size * 0.36 - 5 * self.s
+        # We want: py + size * 0.36 = cy - r * 0.30 - 5 * self.s
+        py = cy - r * 0.30 - size * 0.36 - 5 * self.s
         
         p.save()
         p.translate(px, py)
@@ -3015,8 +3140,14 @@ class RadialOverlay(QWidget):
 
 
     def _paint_node(self, p, cx, cy, node: Node, ring3=False, wf=1.0) -> None:
+        if getattr(node, "pending_close", False):
+            return
         if node.half_deg <= 0.01:   # dropped (overflowed single-row) node
             return
+            
+        if node.kind == "media_btn":
+            with open("/tmp/karyon_media.log", "a") as f:
+                f.write(f"PAINTING media_btn: angle={node.angle}, radius={node.radius}, half_deg={node.half_deg}\n")
         depth = self.seg3_depth if (ring3 or node.kind == IT_CTRL_BTN) else self.seg_depth
         rc = node.radius
         rin = rc - depth / 2
@@ -3041,7 +3172,7 @@ class RadialOverlay(QWidget):
         is_open_window = (node.kind == IT_WINDOW_GROUP and getattr(node, "data", None) is not None) or node.kind == IT_WINDOW
         if is_open_window:
             green_col = self._green()
-            mix = 0.05
+            mix = 0.10
             col.setRed(int(col.red() * (1 - mix) + green_col.red() * mix))
             col.setGreen(int(col.green() * (1 - mix) + green_col.green() * mix))
             col.setBlue(int(col.blue() * (1 - mix) + green_col.blue() * mix))

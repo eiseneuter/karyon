@@ -159,7 +159,7 @@ def _read_appletsrc() -> dict:
                 if val.lower() == "true":
                     result["show_all"] = True
     except Exception:  # noqa: BLE001
-        log.debug("appletsrc konnte nicht gelesen werden", exc_info=True)
+        log.debug("Failed to read appletsrc", exc_info=True)
     return result
 
 
@@ -480,7 +480,7 @@ class TrayManager(QObject):
                               "org.kde.StatusNotifierWatcher",
                               "StatusNotifierHostRegistered", self._on_sni_change)
         except Exception:  # noqa: BLE001
-            log.exception("StatusNotifierHost-Registrierung fehlgeschlagen")
+            log.exception("Failed to register StatusNotifierHost")
 
     def _listen(self) -> None:
         watcher = "org.kde.StatusNotifierWatcher"
@@ -621,7 +621,7 @@ class TrayManager(QObject):
         else:
             bus, path = service, "/StatusNotifierItem"
         if not bus or not self._valid_path(path):
-            log.warning("activate_sni: ungueltiger Service/Pfad %r", service)
+            log.warning("activate_sni: invalid service/path %r", service)
             return
         iface = QDBusInterface(bus, path, "org.kde.StatusNotifierItem", self._bus)
         iface.setTimeout(200)
@@ -645,4 +645,4 @@ class TrayManager(QObject):
         try:
             run_detached(list(argv))
         except Exception:  # noqa: BLE001
-            log.exception("run_builtin fehlgeschlagen: %s", argv)
+            log.exception("run_builtin failed: %s", argv)

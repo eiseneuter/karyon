@@ -141,13 +141,13 @@ class AppIndex:
         for app in self.apps.values():
             if app.wm_class:
                 self._by_wmclass.setdefault(app.wm_class.lower(), app)
-        log.info(".desktop-Index: %d Eintraege", len(self.apps))
+        log.info(".desktop index: %d entries", len(self.apps))
 
     def prewarm(self) -> None:
         try:
             self._categories = self._build_categories()
         except Exception:  # noqa: BLE001
-            log.exception("Kategorien konnten nicht geparst werden")
+            log.exception("Failed to parse categories")
             self._categories = {}
 
     # -- categories (KDE applications.menu) ---------------------------------
@@ -292,7 +292,7 @@ class AppIndex:
                     favs.append(app)
             con.close()
         except Exception:  # noqa: BLE001
-            log.debug("Favoriten konnten nicht gelesen werden", exc_info=True)
+            log.debug("Failed to read favorites", exc_info=True)
         return favs
 
     def _find_app(self, app_id: str) -> App | None:
@@ -517,4 +517,4 @@ class AppIndex:
             subprocess.Popen(parts, start_new_session=True, env=child_env())
             self.record_usage(app.app_id)
         except Exception:  # noqa: BLE001
-            log.exception("App-Start fehlgeschlagen: %s", app.app_id)
+            log.exception("App launch failed: %s", app.app_id)

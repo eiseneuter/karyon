@@ -24,7 +24,7 @@ def _dbus(service: str, path: str, iface_method: str, *args: str) -> None:
     try:
         subprocess.Popen(cmd, env=child_env())
     except Exception:  # noqa: BLE001
-        log.exception("Session-DBus fehlgeschlagen: %s", iface_method)
+        log.exception("Session DBus failed: %s", iface_method)
 
 
 def is_destructive(key: str) -> bool:

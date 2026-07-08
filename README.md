@@ -14,6 +14,7 @@ Karyon is fully capable of entirely replacing your KDE Plasma Panel (Task Manage
 * **Cancel:** Left-click anywhere while the overlay is open to cancel and close it without making a selection.
 * **Category Switching:** In Pie Mode, hover over the different sections of the central hub to switch categories. In Switch Mode, use your mouse wheel to switch between categories.
 * **Volume:** Scroll the mouse wheel up/down (in Pie Mode) anywhere in the overlay (except when hovering over open window segments) to adjust the system volume. In Switch Mode, there is a dedicated Volume Control Area at the bottom of the central hub where you can use the mouse wheel to adjust the volume.
+* **Media Controls:** When media is actively playing or paused, smart media controls (Previous, Play/Pause, Next) appear dynamically in the active sector. Click them to control playback.
 * **Mute Audio:** Middle-click anywhere in the overlay (except on window segments) to toggle system mute.
 * **Window Management:** Hover directly over an open window segment and scroll the mouse wheel **Up** to Maximize (or Restore) the window, and **Down** to Minimize it. Middle-click on the segment closes the window.
 

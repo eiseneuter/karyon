@@ -44,7 +44,7 @@ class ProgressMonitor(QObject):
         self._bus = QDBusConnection.sessionBus()
         ok = self._bus.connect("", "", _IFACE, "Update", self._on_update)
         if not ok:
-            log.info("LauncherEntry-Signal nicht verbunden (kein Fortschritt)")
+            log.info("LauncherEntry signal not connected (no progress)")
 
     @pyqtSlot(str, "QVariantMap")
     def _on_update(self, uri: str, props) -> None:  # noqa: N802
