@@ -1608,7 +1608,9 @@ class RadialOverlay(QWidget):
         cap = max(1, int(360.0 / slot) - self._ring_gap(2))
 
         reserved = (1 if sd else 0) + (1 if tray else 0) + (1 if mail else 0)
-        reserved += 3 # Immer 3 Segmentplätze für Medienkontrolle freihalten
+        has_media = getattr(self, "media_status", None) and getattr(self.media_status, "get", lambda x: None)("status")
+        if has_media and self.config.get("show_media_control", True) and self.config.get("overlay_mode", "pie") == "pie":
+            reserved += 3 # Nur im Pie Mode Platz freihalten, und auch nur wenn Medien laufen
         group_cap = max(0, cap - reserved)
         
         groups_fitted = (closed_pinned + open_groups)[:group_cap]
@@ -1651,7 +1653,9 @@ class RadialOverlay(QWidget):
         for c, node in enumerate(row0):
             # Calculate angle based on centering the boundary of the two most recent active segments straight UP
             if idx_active_start != -1 and len(active_segments) >= 2:
-                midpoint = idx_active_start + L_left + 0.5
+                # Center G2 (the previously active window) exactly under the cursor
+                # G2 is at index L_left + 1 within active_segments.
+                midpoint = idx_active_start + L_left + 1
                 node.angle = center + (c - midpoint) * slot
             elif idx_active_start != -1 and len(active_segments) == 1:
                 # Center G1 exactly
