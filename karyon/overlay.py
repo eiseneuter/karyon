@@ -1753,6 +1753,8 @@ class RadialOverlay(QWidget):
         self.open_sector = sec
         self.open_group = None
         self._ctrl_node = None
+        self.hover_node = None
+        self._deadzone_active = False
         if sec != SEC_APPS:
             self._apps_stage = 0
         self._rebuild_apps_stage()
