@@ -21,8 +21,6 @@ DEFAULTS: dict = {
     "mouse_speed": 0.0,
     "scale": 1.5,
     "autostart": False,
-    "theme": "dark",
-    "overlay_mode": "switch",
     "game_mode": True,
     "max_recent_apps": 8,
     "max_recent_files": 12,

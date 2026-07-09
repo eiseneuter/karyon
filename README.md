@@ -12,9 +12,9 @@ Karyon is fully capable of entirely replacing your KDE Plasma Panel (Task Manage
 ### 1. General Operation
 * **Trigger & Select:** Hold the right mouse button to open the overlay. Hover over the desired item and let the right mouse button go to select it.
 * **Cancel:** Left-click anywhere while the overlay is open to cancel and close it without making a selection.
-* **Category Switching:** In Pie Mode, hover over the different sections of the central hub to switch categories. In Switch Mode, use your mouse wheel to switch between categories.
-* **Volume:** Scroll the mouse wheel up/down (in Pie Mode) anywhere in the overlay (except when hovering over open window segments) to adjust the system volume. In Switch Mode, there is a dedicated Volume Control Area at the bottom of the central hub where you can use the mouse wheel to adjust the volume.
-* **Media Controls:** When media is actively playing or paused, smart media controls (Previous, Play/Pause, Next) appear dynamically in the active sector. Click them to control playback.
+* **Category Switching:** Use your mouse wheel to switch between categories.
+* **Volume:** Use your mouse wheel to adjust the system volume in the dedicated Volume Control Area at the bottom of the central hub.
+* **Media Controls:** When media is actively playing or paused, smart media controls (Previous, Play/Pause, Next) appear dynamically. Click them to control playback.
 * **Mute Audio:** Middle-click anywhere in the overlay (except on window segments) to toggle system mute.
 * **Window Management:** Hover directly over an open window segment and scroll the mouse wheel **Up** to Maximize (or Restore) the window, and **Down** to Minimize it. Middle-click on the segment closes the window.
 
@@ -31,16 +31,13 @@ Karyon is fully capable of entirely replacing your KDE Plasma Panel (Task Manage
 * **Mouse Gestures:** Flick your mouse in any of the 8 directions while holding the right mouse button to invoke gestures (like *copy*, *paste*, *maximize*, or custom shortcuts). 
 * **Important:** Gestures are designed to be extremely fast. They must be initiated *without* opening the visual overlay. Press the right mouse button and immediately flick your mouse to execute the gesture seamlessly.
 
-### 4. Overlay Modes (Pie & Switch)
-Karyon offers two distinct presentation modes for the radial menu:
-* **Pie Mode:** All activated categories (Windows, Apps, Recent Files) are displayed simultaneously in a full circle layout, subdivided into equal slices.
-* **Switch Mode:** This mode is designed to prevent accidental selections and lets you switch the category via mouse wheel.
+
 
 ### 5. Embedded Utilities & System Hub
 * **Central Hub:** The center of the radial menu acts as an orientation guide and information center. It prominently displays an icon indicating the currently active category (Windows, Apps, or Files), along with real-time system information (clock, date, and battery status).
 * **System Tray:** Access your system's tray icons directly within Karyon. Hovering over a tray icon and releasing the right mouse button opens its native Plasma flyout window (just like the real system tray), giving you full access to its controls.
 * **Notifications:** Completely separate from the tray, Karyon highlights unread notifications from messengers or apps, allowing you to instantly open the respective application and jump straight into the context.
-* **Volume Control:** Adjust the system volume instantly using your mouse wheel anywhere inside the overlay (in Pie Mode) or inside the dedicated Volume Control Area at the bottom of the hub (in Switch Mode), or by drilling down into the volume tray icon and hovering over its internal buttons.
+* **Volume Control:** Adjust the system volume instantly using your mouse wheel inside the dedicated Volume Control Area at the bottom of the hub, or by drilling down into the volume tray icon and hovering over its internal buttons.
 
 ### 6. Smart Game Mode & Deep Sleep
 Karyon is built to never get in your way when gaming. 
@@ -52,7 +49,7 @@ Karyon is built to never get in your way when gaming.
 ## Configuration & Customization
 Karyon features a dedicated settings panel accessible via the system tray icon (which can also be reached directly through the overlay itself). Here you can:
 * **Customize Hold Time:** Adjust the hold-time to invoke the overlay or firing a gesture.
-* **Adjust Aesthetics:** Switch between a sleek Dark Theme (default) and a vibrant Light Theme, and change overlay scale and transparency.
+* **Adjust Aesthetics:** Change overlay scale and transparency.
 * **Tweak Layout:** Toggle individual segments and rings on or off to keep the overlay minimal or fully loaded.
 
 ## Technical Background (How it works)

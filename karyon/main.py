@@ -362,8 +362,7 @@ class Launcher:
                 (w["id"] for w in snap.get("windows", []) if w.get("active")),
                 self._gesture_win_id)
         action = self.executor.direction_action(direction)
-        theme = self.config.get("theme", "dark")
-        accent = "#008eb3" if theme == "light" else "#37d0ff"
+        accent = "#37d0ff"
         rel = getattr(self.proxy, "_last_gesture_rel", (0.0, 0.0))
 
         # Flash immediately (no snapshot round-trip, so it always shows).
@@ -426,15 +425,11 @@ class Launcher:
                             self.kwin.minimize(wid)
                     return
 
-        if self.config.get("overlay_mode", "pie") == "switch":
-            if getattr(self.overlay, "hover_volume_area", False):
-                self._do_volume_adjust(direction)
-            else:
-                self.overlay.switch_category(direction)
-            return
-            
-        if self.config.get("adjust_volume_with_trigger_wheel", True):
+        if getattr(self.overlay, "hover_volume_area", False) and self.config.get("adjust_volume_with_trigger_wheel", True):
             self._do_volume_adjust(direction)
+        else:
+            self.overlay.switch_category(direction)
+        return
 
 
 
@@ -488,6 +483,9 @@ class Launcher:
             run_detached(
                 ["wpctl", "set-mute", "@DEFAULT_AUDIO_SINK@", "toggle"]
             )
+            if self.overlay.isVisible():
+                self.overlay.global_muted = not getattr(self.overlay, "global_muted", False)
+                self.overlay.request_repaint()
         except Exception:  # noqa: BLE001
             log.debug("Failed to change mute via mouse trigger",
                       exc_info=True)

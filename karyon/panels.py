@@ -151,7 +151,7 @@ class SettingsPanel(QFrame):
         scroll.setWidget(inner)
         outer.addWidget(scroll)
 
-        title = QLabel("Karyon 2.2")
+        title = QLabel("Karyon 2.3")
         title.setObjectName("title")
         self._lay.addWidget(title)
 
@@ -179,11 +179,6 @@ class SettingsPanel(QFrame):
 
 
 
-        self._add_combo("overlay_mode", "Overlay Mode", [("Pie Mode", "pie"), ("Switch Mode (Mouse wheel)", "switch")])
-        self.combos["overlay_mode"].currentIndexChanged.connect(self._update_volume_label)
-        self.combos["overlay_mode"].currentIndexChanged.connect(self._deps)
-        self._add_combo("theme", "Theme", [("Dark", "dark"), ("Light", "light")])
-
         # Directly under Theme, spanning the grid so it isn't pushed to the bottom.
         self._grid.addWidget(self._make_check("game_mode", "Game Mode (auto-disable overlay in games)"),
                              self._grow, 0, 1, 4)
@@ -197,8 +192,8 @@ class SettingsPanel(QFrame):
         self.volume_info_label = QLabel()
         self.volume_info_label.setStyleSheet("color: #888; font-size: 11px;")
         self.volume_info_label.setContentsMargins(24, 0, 0, 10)
+        self.volume_info_label.setText("Volume: Mouse wheel up/down in Hub bottom area | Mute: Middle click")
         self._grid.addWidget(self.volume_info_label, self._grow, 0, 1, 4)
-        self._update_volume_label()
         self._grow += 1
 
         # All sliders except the gesture window.  Units live on the value, not
@@ -312,22 +307,10 @@ class SettingsPanel(QFrame):
         subkeys = ("show_favorites", "show_all_apps")
         subs = [self.checks[k] for k in subkeys]
         sender = self.sender()
-        any_sub = any(s.isChecked() for s in subs)
-        # Apps needs at least one of Favorites / All Applications.
-        if apps.isChecked() and not any_sub:
-            if sender is apps:
-                self._set_silent(subs[0], True)
-            else:
-                self._set_silent(apps, False)
-                
         # Minimum main categories logic
-        mode = self.combos.get("overlay_mode")
-        is_pie = mode is None or mode.currentData() == "pie"
-        
         num_checked = sum(1 for cb in (wins, apps, rfiles) if cb and cb.isChecked())
-        min_required = 2 if is_pie else 1
         
-        if num_checked < min_required:
+        if num_checked < 1:
             if sender is rfiles:
                 if not apps.isChecked(): self._set_silent(apps, True)
                 elif wins and not wins.isChecked(): self._set_silent(wins, True)
@@ -337,10 +320,6 @@ class SettingsPanel(QFrame):
             else:
                 if not apps.isChecked(): self._set_silent(apps, True)
                 elif not rfiles.isChecked(): self._set_silent(rfiles, True)
-                
-        # Re-check subkeys if Apps was forced on
-        if apps.isChecked() and not any(s.isChecked() for s in subs):
-            self._set_silent(subs[0], True)
 
         # Grey the apps sub-options while Apps is off
         on = apps.isChecked()
@@ -357,13 +336,7 @@ class SettingsPanel(QFrame):
 
 
 
-    def _update_volume_label(self) -> None:
-        mode = self.combos.get("overlay_mode")
-        if not mode or not hasattr(self, "volume_info_label"): return
-        if mode.currentData() == "switch":
-            self.volume_info_label.setText("Volume: Mouse wheel up/down in Hub bottom area | Mute: Middle click")
-        else:
-            self.volume_info_label.setText("Volume: Mouse wheel up/down | Mute: Middle click")
+
 
 
 

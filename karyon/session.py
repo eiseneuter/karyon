@@ -22,7 +22,7 @@ SESSION_ACTIONS = [
 def _dbus(service: str, path: str, iface_method: str, *args: str) -> None:
     cmd = ["qdbus6", service, path, iface_method, *args]
     try:
-        subprocess.Popen(cmd, env=child_env())
+        subprocess.Popen(cmd, env=child_env(), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     except Exception:  # noqa: BLE001
         log.exception("Session DBus failed: %s", iface_method)
 

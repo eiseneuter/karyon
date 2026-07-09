@@ -514,7 +514,8 @@ class AppIndex:
                      if not p.startswith("%")]
             if app.terminal:
                 parts = ["konsole", "-e"] + parts
-            subprocess.Popen(parts, start_new_session=True, env=child_env())
+            subprocess.Popen(parts, start_new_session=True, env=child_env(),
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             self.record_usage(app.app_id)
         except Exception:  # noqa: BLE001
             log.exception("App launch failed: %s", app.app_id)

@@ -109,6 +109,6 @@ class RecentFiles:
     def open(self, path: str) -> None:
         try:
             subprocess.Popen(["xdg-open", path], start_new_session=True,
-                             env=child_env())
+                             env=child_env(), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         except Exception:  # noqa: BLE001
             log.exception("Datei konnte nicht geoeffnet werden: %s", path)
