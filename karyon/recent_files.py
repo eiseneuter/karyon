@@ -26,8 +26,15 @@ class RecentFiles:
     def __init__(self) -> None:
         self._recent_dir = Path(os.path.expanduser("~/.local/share/RecentDocuments"))
         self._xbel = Path(os.path.expanduser("~/.local/share/recently-used.xbel"))
+        self._cache_items: list[RecentFile] = []
+        self._cache_n: int = 0
+        self._cache_time: float = 0.0
 
     def items(self, n: int) -> list[RecentFile]:
+        import time
+        now = time.monotonic()
+        if self._cache_items and n <= self._cache_n and (now - self._cache_time) < 2.0:
+            return self._cache_items[:n]
         out: dict[str, RecentFile] = {}
         for rf in self._from_recent_docs():
             out.setdefault(rf.path, rf)
@@ -37,7 +44,10 @@ class RecentFiles:
         ordered = sorted(
             (r for r in out.values() if not os.path.isdir(r.path)),
             key=lambda r: r.mtime, reverse=True)
-        return ordered[:n]
+        self._cache_items = ordered[:n]
+        self._cache_n = n
+        self._cache_time = now
+        return self._cache_items
 
     def _from_recent_docs(self) -> list[RecentFile]:
         result = []
@@ -83,7 +93,7 @@ class RecentFiles:
                     pass
                 result.append(RecentFile(os.path.basename(fpath), fpath, "", mtime))
         except Exception:  # noqa: BLE001
-            log.debug("xbel konnte nicht gelesen werden", exc_info=True)
+            log.debug("Failed to read xbel", exc_info=True)
         return result
 
     @staticmethod

@@ -293,10 +293,15 @@ class RadialOverlay(QWidget):
 
     # -- geometry -----------------------------------------------------------
     def _compute_geometry(self) -> None:
+        # Skip full recompute if scale hasn't changed since last time.
+        s = float(self.config["scale"]) * 1.5
+        if hasattr(self, "s") and self.s == s:
+            self._static_frame_cache = None
+            self._current_frame = None
+            return
         self._static_frame_cache = None
         self._current_frame = None
         # Scale adjusted: user requested that the new 1.0 = old 1.5.
-        s = float(self.config["scale"]) * 1.5
         self.s = s
         gap = 2 * s                       # uniform gap between ALL rings
         self.r_neutral = (2.5 / 1.5) * s  # 5px-diameter neutral centre at s=1.5
@@ -1221,9 +1226,17 @@ class RadialOverlay(QWidget):
                 for a in self.app_index.favorites()]
 
     def _file_icon(self, path: str, icon_name: str = "") -> QIcon:
+        cache = getattr(self, "_file_icon_cache", None)
+        if cache is None:
+            cache = self._file_icon_cache = {}
+        key = (path, icon_name or "")
+        cached = cache.get(key)
+        if cached is not None:
+            return cached
         if icon_name:
             ic = QIcon.fromTheme(icon_name)
             if not ic.isNull():
+                cache[key] = ic
                 return ic
         mt = self._mimedb.mimeTypeForFile(path)
         for name in (mt.iconName(), mt.genericIconName(), "text-x-generic"):
@@ -1231,8 +1244,11 @@ class RadialOverlay(QWidget):
                 continue
             ic = QIcon.fromTheme(name)
             if not ic.isNull():
+                cache[key] = ic
                 return ic
-        return QIcon()
+        result = QIcon()
+        cache[key] = result
+        return result
 
     def _build_files(self) -> None:
         recent_items = self.recent_files.items(self.config["max_recent_files"])

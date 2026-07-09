@@ -308,8 +308,7 @@ class Launcher:
     def _open_with(self, snap) -> None:
         if snap is None:
             snap = {"cursor": self._fallback_cursor(), "windows": []}
-        if self.config.get("show_media_control", True):
-            snap["media"] = self.media.get_status()
+        # Media status is deferred to _late_snapshot to keep the open path fast.
         self._gesture_win_id = next(
             (w["id"] for w in snap.get("windows", []) if w.get("active")), "")
         self.overlay.open(snap)

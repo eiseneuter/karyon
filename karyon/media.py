@@ -8,8 +8,21 @@ class MediaBridge:
     def __init__(self):
         self._bus = QDBusConnection.sessionBus()
         self._last_player = None
+        self._player_cache = None       # cached (player, time) tuple
+        self._player_cache_ttl = 1.5    # seconds
     
     def _get_player_service(self) -> str | None:
+        import time
+        now = time.monotonic()
+        if self._player_cache is not None:
+            cached_player, cached_time = self._player_cache
+            if (now - cached_time) < self._player_cache_ttl:
+                return cached_player
+        result = self._get_player_service_uncached()
+        self._player_cache = (result, now)
+        return result
+
+    def _get_player_service_uncached(self) -> str | None:
         try:
             msg = QDBusMessage.createMethodCall(
                 "org.freedesktop.DBus",
@@ -119,3 +132,5 @@ class MediaBridge:
                     iface.call("Play")
         except Exception:
             log.exception(f"Media action failed {cmd}")
+        # Invalidate cache so get_status() reflects the state change
+        self._player_cache = None
