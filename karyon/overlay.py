@@ -50,8 +50,6 @@ IT_MEDIA_BTN = "media_btn"           # MPRIS media controls
 
 # -- angle constants --------------------------------------------------------
 ANG_GAP = 0.6
-RING2_SLOT = 28.0
-APPS_SPAN = 180.0
 SECTOR_MARGIN = 0.66
 RING2_SPAN = 180.0 - 2 * SECTOR_MARGIN
 RING3_SPAN = 200.0
@@ -154,6 +152,9 @@ def _icon_for(name: str) -> QIcon:
     if name.lower() in ("soffice", "soffice.bin"):
         name = "libreoffice"
 
+    if len(_icon_cache) > 500:
+        _icon_cache.clear()
+        
     cached = _icon_cache.get(name)
     if cached is not None:
         return cached
@@ -440,17 +441,28 @@ class RadialOverlay(QWidget):
         self._pointer = QPointF(self._center)
         self._build_model(snapshot)
         self._icon_pixmap_cache = {}
+        self._path_cache = {}
         # With "Focus on Window-Switcher" off, do NOT pre-select the last window
         # or auto-open the windows category -- the cursor stays neutral (centre).
         # With it on, start the cursor ~15px ABOVE the centre, toward the
         # pre-selected window at the top.  The offset persists as the cursor
         # moves (applied in set_pointer), so it does not snap back to centre.
         self._init_active_category()
-        self._cursor_oy = -15 * self.s
+        self._cursor_ox = 0.0
+        self._cursor_oy = 0.0
         if self.config.get("show_windows", True):
             self._preselect_window()
-        self._pointer = QPointF(self._center.x(),
+            if getattr(self, "hover_node", None) is not None:
+                r_offset = 15 * self.s
+                a_rad = math.radians(self.hover_node.angle)
+                self._cursor_ox = r_offset * math.cos(a_rad)
+                self._cursor_oy = r_offset * math.sin(a_rad)
+            else:
+                self._cursor_oy = -15 * self.s
+
+        self._pointer = QPointF(self._center.x() + self._cursor_ox,
                                 self._center.y() + self._cursor_oy)
+        self._initial_pointer = QPointF(self._pointer)
         self._open_time = time.monotonic()
         self._path = [(self._open_time, self._pointer.x(), self._pointer.y())]
         self._initial_hover_node = getattr(self, "hover_node", None)
@@ -1092,14 +1104,8 @@ class RadialOverlay(QWidget):
 
     def _layout_drawer_children(self, node: Node) -> None:
         kids = getattr(node, "drawer_children", []) or []
-        r_out = self.r4c + self.seg3_depth / 2
-        slot = math.degrees(self._seg_phys_w / r_out)
-        gap = math.degrees(self._gap_phys / r_out)
-        start = node.angle - (len(kids) - 1) * slot / 2
-        for i, kid in enumerate(kids):
-            kid.angle = start + i * slot
-            kid.radius = self.r4c
-            kid.half_deg = (slot - gap) / 2
+        self._layout_radial(kids, node.angle, self.r4c, self.seg3_depth, 360.0, start_ring=4)
+        for kid in kids:
             kid.hover_t = 0.0
         node.children_ctrl = list(kids)
 
@@ -1126,14 +1132,8 @@ class RadialOverlay(QWidget):
 
     def _layout_menu_children(self, node: Node) -> None:
         kids = self._menu_nodes(node)
-        r_out = self.r4c + self.seg3_depth / 2
-        slot = math.degrees(self._seg_phys_w / r_out)
-        gap = math.degrees(self._gap_phys / r_out)
-        start = node.angle - (len(kids) - 1) * slot / 2
-        for i, kid in enumerate(kids):
-            kid.angle = start + i * slot
-            kid.radius = self.r4c
-            kid.half_deg = (slot - gap) / 2
+        self._layout_radial(kids, node.angle, self.r4c, self.seg3_depth, 360.0, start_ring=4)
+        for kid in kids:
             kid.hover_t = 0.0
         node.children_ctrl = list(kids)
 
@@ -1226,7 +1226,7 @@ class RadialOverlay(QWidget):
 
     def _file_icon(self, path: str, icon_name: str = "") -> QIcon:
         cache = getattr(self, "_file_icon_cache", None)
-        if cache is None:
+        if cache is None or len(cache) > 500:
             cache = self._file_icon_cache = {}
         key = (path, icon_name or "")
         cached = cache.get(key)
@@ -1323,37 +1323,6 @@ class RadialOverlay(QWidget):
         for sec in self.active_sectors:
             if sec not in self._sector_draw or not anim:
                 self._sector_draw[sec] = list(self._sector_vis[sec])
-
-    def _center_on(self, sec: int, anchor) -> None:
-        """Rotate a sector's ring-2 row so ``anchor`` sits at the sector nominal
-        (Windows -> straight up, Apps -> straight right)."""
-        nodes = self.ring2.get(sec, [])
-        if anchor is None or anchor not in nodes:
-            return
-        nominal = self._nominal.get(sec)
-        if nominal is None:
-            return
-        delta = nominal - anchor.angle
-        for n in nodes:
-            n.angle += delta
-
-    def _sector_containing(self, a: float) -> int:
-        """Which active sector's arc currently contains angle a."""
-        for sec, (a0, a1) in self._sector_arc.items():
-            lo = _norm(a0)
-            span = a1 - a0
-            d = _norm(a - a0)
-            if d < 0:
-                d += 360.0
-            if 0 <= d <= span:
-                return sec
-        # fallback: nearest nominal
-        best, bestd = self.active_sectors[0], 999.0
-        for sec in self.active_sectors:
-            d = _ang_dist(a, self._nominal.get(sec, 0.0))
-            if d < bestd:
-                best, bestd = sec, d
-        return best
         
     def _has_progress(self, node) -> bool:
         if self.progress is None or getattr(node, "kind", None) != IT_WINDOW_GROUP:
@@ -1408,10 +1377,6 @@ class RadialOverlay(QWidget):
             node.half_deg = 0.0
             node.row = -1
 
-    def _per_row(self, base_r: float, depth: float, gap_segs: int) -> int:
-        """Segments that fit on one row before ``gap_segs`` are left free."""
-        slot_base = math.degrees(self._seg_phys_w / (base_r + depth / 2))
-        return max(1, int(360.0 / slot_base) - gap_segs)
 
     def _layout_pinned_row(self, nodes: list, center: float, sec: int = -1, span: float = 360.0) -> None:
         """Ring-2 row with pinned symbols: the apps pivot ('All Applications' or
@@ -1527,7 +1492,7 @@ class RadialOverlay(QWidget):
         
         # Split groups into closed pinned nodes and open window groups
         closed_pinned = [n for n in nodes if n.kind == IT_WINDOW_GROUP and n.pinned and n.data is None]
-        open_groups = [n for n in nodes if n.kind == IT_WINDOW_GROUP and n not in closed_pinned]
+        open_groups = [n for n in nodes if n.kind == IT_WINDOW_GROUP and not (n.pinned and n.data is None)]
         def grank(g):
             rc = getattr(g, "app_rc", "") or ""
             if rc in self._mru_rc:
@@ -1546,11 +1511,11 @@ class RadialOverlay(QWidget):
         has_media = getattr(self, "media_status", None) and getattr(self.media_status, "get", lambda x: None)("status")
         group_cap = max(0, cap - reserved)
         
-        groups_fitted = (closed_pinned + open_groups)[:group_cap]
-        overflow = (closed_pinned + open_groups)[group_cap:]
+        on_ring2_closed = closed_pinned[:group_cap]
+        on_ring2_open = open_groups[:max(0, group_cap - len(closed_pinned))]
         
-        on_ring2_closed = [g for g in groups_fitted if g in closed_pinned]
-        on_ring2_open = [g for g in groups_fitted if g in open_groups]
+        groups_fitted = on_ring2_closed + on_ring2_open
+        overflow = closed_pinned[len(on_ring2_closed):] + open_groups[len(on_ring2_open):]
         
         # Rearrange the active window groups on Ring 2 in a top-centered peak layout:
         # G_1 and G_2 in the middle, older groups split: younger remaining (G_3...G_6) to the right,
@@ -1730,7 +1695,7 @@ class RadialOverlay(QWidget):
     def set_pointer(self, dx: float, dy: float) -> None:
         # dx/dy are the virtual delta from the menu center (since open); the
         # persistent vertical offset keeps the start point above centre.
-        x = self._center.x() + dx
+        x = self._center.x() + dx + getattr(self, "_cursor_ox", 0.0)
         y = self._center.y() + dy + getattr(self, "_cursor_oy", 0.0)
         self._pointer = QPointF(x, y)
         self._path.append((time.monotonic(), x, y))
@@ -1801,7 +1766,12 @@ class RadialOverlay(QWidget):
         # highlight) so a press+release without moving fires the pre-selection.
         # This zone vanishes as soon as the user highlights a different symbol.
         if getattr(self, "_deadzone_active", False):
-            if r <= getattr(self, "r_neutral", 0.0):
+            if hasattr(self, "_initial_pointer"):
+                dx = self._pointer.x() - self._initial_pointer.x()
+                dy = self._pointer.y() - self._initial_pointer.y()
+                if math.hypot(dx, dy) <= 3.0 * self.s:  # 6px diameter deadzone
+                    return
+            elif r <= getattr(self, "r_neutral", 0.0):
                 return
 
         self._clear_hover_targets()
@@ -1838,11 +1808,6 @@ class RadialOverlay(QWidget):
             self._set_open_sector(getattr(self, "switch_mode_active_category", self.active_sectors[0]))
 
         self._hover_in_sector(self.open_sector, r, a)
-
-    def _hover_window_lock(self, r: float, a: float) -> None:
-        nodes = [n for n in self.ring2[SEC_WINDOWS]
-                 if n.kind in (IT_WINDOW_GROUP, IT_SHOW_DESKTOP, IT_TRAY_MENU)]
-        self._pick_nearest(nodes, r, a)
 
     def _hover_in_sector(self, sec: int, r: float, a: float) -> None:
         if sec == -1 or sec not in self.ring2:
@@ -2031,9 +1996,6 @@ class RadialOverlay(QWidget):
                 and (getattr(node, "menu", None) or getattr(node, "local_menu", None))):
             return True
         return bool(node.control)
-
-    def _in_drill_zone(self, r: float) -> bool:
-        return r >= self.r2_out - self.drill_zone
 
     def _layout_children(self, node: Node) -> None:
         kids = node.children
@@ -2486,9 +2448,18 @@ class RadialOverlay(QWidget):
             hr = int(self.r_hub + 4 * s)
             return QRect(int(cx - hr), int(cy - hr), 2 * hr, 2 * hr)
             
-        # Generously cover the outermost drawable: ring-4 outer edge + drill/close
-        # bar + margin.
-        max_r = self.r3_out + 2 * s + self.seg3_depth + self.bar_w + 24 * s
+        # Dynamically calculate the outermost drawable boundary to prevent ghosting
+        # when large node counts push layout to ring 5+.
+        r_list = []
+        for sec in self.ring2.values():
+            r_list.extend(n.radius for n in sec)
+        if getattr(self, "open_group", None) and self.open_group.children:
+            r_list.extend(n.radius for n in self.open_group.children)
+        if getattr(self, "_ctrl_node", None) and getattr(self._ctrl_node, "children_ctrl", None):
+            r_list.extend(n.radius for n in self._ctrl_node.children_ctrl)
+            
+        max_node_r = max(r_list) if r_list else self.r3_out
+        max_r = max_node_r + self.seg_depth + self.bar_w + 24 * s
         rect = QRect(int(cx - max_r), int(cy - max_r),
                      int(2 * max_r), int(2 * max_r))
         cr = int(16 * s)   # cursor dot + pen + margin

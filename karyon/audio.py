@@ -78,8 +78,12 @@ class AudioMonitor:
             wait = self._ACTIVE_INTERVAL if active else self._IDLE_INTERVAL
             
             # Wait for either the timeout or an explicit wake/stop signal
-            self._wake.wait(wait)
+            woken = self._wake.wait(wait)
             self._wake.clear()
+            if woken:
+                # Debounce rapid bursts of events (e.g. from massive muting operations)
+                time.sleep(0.05)
+                self._wake.clear()
             
             if self._stop.is_set():
                 return
@@ -185,14 +189,16 @@ class AudioMonitor:
         if not live:
             return
         mute = 1 if any(not st["muted"] for st in live) else 0
+        cmds = []
         for st in live:
-            try:
-                subprocess.Popen(
-                    ["pactl", "set-sink-input-mute", st["index"], str(mute)],
-                    env=child_env())
-            except Exception:  # noqa: BLE001
-                log.exception("Mute-Toggle fehlgeschlagen")
+            cmds.append(f"pactl set-sink-input-mute {st['index']} {mute}")
             st["muted"] = bool(mute)
+        
+        if cmds:
+            try:
+                subprocess.Popen(["sh", "-c", "; ".join(cmds)], env=child_env())
+            except Exception:  # noqa: BLE001
+                log.exception("Mute-Toggle batch failed")
 
 
 def _qval(line: str) -> str:

@@ -124,11 +124,13 @@ class AppIndex:
         self._categories: dict[str, list[App]] = {}
         self._usage: dict = self._load_usage()
         self._pseudo: dict[str, App] = {}
+        self._match_cache: dict[tuple, App | None] = {}
 
     # -- scanning -----------------------------------------------------------
     def scan(self) -> None:
         self.apps.clear()
         self._by_wmclass.clear()
+        self._match_cache.clear()
         for base in _xdg_app_dirs():
             for path in base.rglob("*.desktop"):
                 rel = path.relative_to(base)
@@ -312,6 +314,10 @@ class AppIndex:
             return {}
 
     def _save_usage(self) -> None:
+        if len(self._usage) > 1000:
+            # Keep top 1000 most recently used/seen
+            sorted_usage = sorted(self._usage.items(), key=lambda x: max(float(x[1].get("last", 0)), float(x[1].get("seen", 0))), reverse=True)
+            self._usage = dict(sorted_usage[:1000])
         try:
             DATA_DIR.mkdir(parents=True, exist_ok=True)
             USAGE_PATH.write_text(json.dumps(self._usage), encoding="utf-8")
@@ -373,6 +379,18 @@ class AppIndex:
 
     # -- window matching ----------------------------------------------------
     def match_window(self, rc: str, desktop_file: str = "", pid: int = 0) -> App | None:
+        key = (rc, desktop_file, pid)
+        if key in self._match_cache:
+            return self._match_cache[key]
+            
+        result = self._match_window_uncached(rc, desktop_file, pid)
+        
+        self._match_cache[key] = result
+        if len(self._match_cache) > 2000:
+            self._match_cache.clear()
+        return result
+
+    def _match_window_uncached(self, rc: str, desktop_file: str = "", pid: int = 0) -> App | None:
         rc_low = (rc or "").lower()
         if rc_low in ("soffice", "soffice.bin") and pid:
             try:

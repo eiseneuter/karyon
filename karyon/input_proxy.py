@@ -166,11 +166,9 @@ class InputProxy:
         self._path: list[tuple] = []    # (t, x, y)
         self._gpath: list[tuple] = []   # (t, raw_x, raw_y) for flick detection
         self._chord_down: set = set()
-        self._gesture_fired = False
         self._gesture_done = False      # a flick already fired this press
         self._last_gesture_rel = (0.0, 0.0)   # raw travel of the last flick
         self._press_path = ""
-        self._trigger_replayed = False
 
     def set_inhibit(self, value: bool) -> None:
         """Enable or disable input inhibit (thread-safe).
@@ -640,6 +638,7 @@ class InputProxy:
         # Kernel buffer overflowed and dropped events. Force a release to prevent
         # getting permanently stuck if the ButtonRelease was among the dropped events.
         if ev.type == ecodes.EV_SYN and ev.code == ecodes.SYN_DROPPED:
+            self._chord_down.clear()
             if self.state != IDLE:
                 log.warning("SYN_DROPPED detected! Forcing trigger release.")
                 self._on_trigger_release()
@@ -757,7 +756,6 @@ class InputProxy:
         self._press_time = time.monotonic()
         self._rel = [0.0, 0.0]
         self._drag = False
-        self._gesture_fired = False
         self._gesture_done = False
         self._press_path = path
         self._trigger_replayed = False
@@ -817,6 +815,8 @@ class InputProxy:
         # whether or not the radial menu has opened yet.
         if self.state in (PENDING, MENU):
             self._gpath.append((time.monotonic(), self._rel[0], self._rel[1]))
+            if len(self._gpath) > 500:
+                del self._gpath[0]
             if self._maybe_fire_gesture():
                 return
         if self.state == PENDING:
@@ -836,6 +836,8 @@ class InputProxy:
             self._menu_rel[1] += dy * factor
             self._path.append((time.monotonic(),
                 self._menu_rel[0], self._menu_rel[1]))
+            if len(self._path) > 500:
+                del self._path[0]
             if self.on_motion:
                 self.on_motion(self._menu_rel[0], self._menu_rel[1])
 
@@ -872,10 +874,6 @@ class InputProxy:
         # (forwarded 1:1 during a flick, so it equals the cursor's screen move).
         self._last_gesture_rel = (self._rel[0], self._rel[1])
         self._gesture_done = True
-        self._gesture_fired = True
-        # Undo a held-button replay if a drag had already been started.
-        if self._drag and self._trigger_replayed:
-            self._replay_trigger(0)
         self.state = IDLE
         if self.on_gesture:
             self.on_gesture(direction)
@@ -926,15 +924,6 @@ class InputProxy:
         dt = max(1e-4, t1 - t0)
         return math.hypot(x1 - x0, y1 - y0) / dt
 
-    def _classify_flick(self) -> str | None:
-        if not self.config.get("gestures_enabled", True):
-            return None
-        dx, dy = self._rel
-        if math.hypot(dx, dy) < 20:
-            return None
-        if self._recent_speed() < float(self.config.get("gesture_min_speed", 1300)):
-            return None
-        return classify_direction(dx, dy, self.config.get("gesture_diagonal_size", 51))
 
     # -- public helpers -----------------------------------------------------
     def send_keys(self, keys: list) -> None:
