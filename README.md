@@ -36,7 +36,7 @@ Karyon is fully capable of entirely replacing your KDE Plasma Panel (Task Manage
 ### 5. Embedded Utilities & System Hub
 * **Central Hub:** The center of the radial menu acts as an orientation guide and information center. It prominently displays an icon indicating the currently active category (Windows, Apps, or Files), along with real-time system information (clock, date, and battery status).
 * **System Tray:** Access your system's tray icons directly within Karyon. Hovering over a tray icon and releasing the right mouse button opens its native Plasma flyout window (just like the real system tray), giving you full access to its controls.
-* **Notifications:** Completely separate from the tray, Karyon highlights unread notifications from messengers or apps, allowing you to instantly open the respective application and jump straight into the context.
+* **Notifications:** Completely separate from the tray, Karyon highlights unread notifications from messengers or apps, allowing you to instantly open the respective application and jump straight into the context. Middle-click the notification symbol to temporarily dismiss it until a new message arrives.
 * **Volume Control:** Adjust the system volume instantly using your mouse wheel inside the dedicated Volume Control Area at the bottom of the hub, or by drilling down into the volume tray icon and hovering over its internal buttons.
 
 ### 6. Smart Game Mode & Deep Sleep

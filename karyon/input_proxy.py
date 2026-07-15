@@ -271,6 +271,10 @@ class InputProxy:
             return False
         caps = dev.capabilities()
         keys = caps.get(ecodes.EV_KEY, [])
+        # If it has standard letter keys, it is a keyboard (even if it has multimedia keys).
+        # We must NOT grab it as a mouse, otherwise typing can result in stuck keys on SYN_DROPPED.
+        if ecodes.KEY_A in keys and ecodes.KEY_Z in keys:
+            return False
         for k in (ecodes.BTN_SIDE, ecodes.BTN_EXTRA, ecodes.BTN_BACK, ecodes.BTN_FORWARD,
                   ecodes.KEY_BACK, ecodes.KEY_FORWARD, ecodes.KEY_PREVIOUS, ecodes.KEY_NEXT,
                   ecodes.KEY_PREVIOUSSONG, ecodes.KEY_NEXTSONG, ecodes.BTN_TASK):

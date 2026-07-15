@@ -479,6 +479,11 @@ class Launcher:
                             self.overlay.request_repaint()
                         QTimer.singleShot(1500, clear_pending)
                         return
+                elif k == "mail":
+                    it = getattr(node, "tray_item", None)
+                    if it:
+                        self.tray.mute_attention(it.service, it.icon_sig)
+                        return
         try:
             run_detached(
                 ["wpctl", "set-mute", "@DEFAULT_AUDIO_SINK@", "toggle"]
