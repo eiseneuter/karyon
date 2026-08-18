@@ -79,6 +79,10 @@ def _ensure_kwin_taskbar_rule() -> None:
         w("skipswitcherrule", "2")
         w("above", "true")
         w("aboverule", "2")
+        w("desktops", "\\0")
+        w("desktopsrule", "2")
+        w("desktop", "0")
+        w("desktoprule", "2")
         # Force into KWin's OnScreenDisplay layer (8) which is above the
         # fullscreen/active layer, so the overlay renders over any fullscreen
         # window (video player, image viewer, browser fullscreen, etc.).
@@ -413,25 +417,31 @@ class Launcher:
                 if r > getattr(self.overlay, "r_hub", 0):
                     wid = None
                     if node.kind == IT_WINDOW:
-                        wid = node.data.get("id")
+                        if isinstance(node.data, str):
+                            wid = node.data
+                        elif isinstance(node.data, dict):
+                            wid = node.data.get("id")
                     elif node.kind == IT_WINDOW_GROUP and node.data:
-                        if len(node.data) == 1:
-                            wid = node.data[0].get("id")
+                        if isinstance(node.data, list) and len(node.data) > 0:
+                            first = node.data[0]
+                            wid = first.get("id") if isinstance(first, dict) else str(first)
+                        elif isinstance(node.data, str):
+                            wid = node.data
+                        elif isinstance(node.data, dict):
+                            wid = node.data.get("id")
                     
                     if wid:
                         if direction > 0:
                             self.kwin.toggle_maximize(wid)
                         else:
-                            self.kwin.minimize(wid)
-                    return
+                            self.kwin.toggle_minimize(wid)
+                        return
 
         if getattr(self.overlay, "hover_volume_area", False) and self.config.get("adjust_volume_with_trigger_wheel", True):
             self._do_volume_adjust(direction)
         else:
             self.overlay.switch_category(direction)
         return
-
-
 
     def _do_volume_adjust(self, direction: int) -> None:
         step = max(1, int(self.config.get("volume_steps", 1)))
@@ -452,10 +462,19 @@ class Launcher:
                 k = getattr(node, "kind", None)
                 if k in ("window", "window_group"):
                     wid = None
-                    if k == "window" and isinstance(node.data, str):
-                        wid = node.data
-                    elif k == "window_group" and isinstance(node.data, list) and node.data:
-                        wid = node.data[0].get("id")
+                    if k == "window":
+                        if isinstance(node.data, str):
+                            wid = node.data
+                        elif isinstance(node.data, dict):
+                            wid = node.data.get("id")
+                    elif k == "window_group" and node.data:
+                        if isinstance(node.data, list) and len(node.data) > 0:
+                            first = node.data[0]
+                            wid = first.get("id") if isinstance(first, dict) else str(first)
+                        elif isinstance(node.data, str):
+                            wid = node.data
+                        elif isinstance(node.data, dict):
+                            wid = node.data.get("id")
                     
                     if wid:
                         self.kwin.close(wid)

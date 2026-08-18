@@ -33,6 +33,9 @@ function stackIndex(w) {
 var out = [];
 for (var i = 0; i < wins.length; i++) {
     var w = wins[i];
+    if (w.resourceClass === "karyon" || w.caption === "Karyon") {
+        try { w.onAllDesktops = true; } catch (e) {}
+    }
     out.push({
         id: w.internalId.toString(),
         rc: w.resourceClass,
@@ -330,9 +333,34 @@ class KWinBridge:
         self._cache_set_minimized(win_id, True)
         self._with_window(win_id, "w.minimized = true;")
 
+    def toggle_minimize(self, win_id: str) -> None:
+        action = """
+            if (w.minimized) {
+                w.minimized = false;
+                workspace.activeWindow = w;
+            } else {
+                w.minimized = true;
+            }
+        """
+        self._cache_toggle_minimized(win_id)
+        self._with_window(win_id, action)
+
+    def _cache_toggle_minimized(self, win_id: str) -> None:
+        snap = self.cached_snapshot
+        if not snap:
+            return
+        for w in snap.get("windows", []):
+            if w.get("id") == win_id:
+                w["minimized"] = not w.get("minimized", False)
+                if not w["minimized"]:
+                    w["active"] = True
+
     def toggle_maximize(self, win_id: str) -> None:
         action = """
-            if (w.minimized) w.minimized = false;
+            if (w.minimized) {
+                w.minimized = false;
+            }
+            workspace.activeWindow = w;
             var maxed = (typeof w.maximizeMode !== 'undefined' && w.maximizeMode === 3) || 
                         (w.width >= workspace.clientArea(0, w).width - 10 && w.height >= workspace.clientArea(0, w).height - 10);
             if (maxed) {

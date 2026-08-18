@@ -269,15 +269,28 @@ class InputProxy:
     def _is_extra_mouse_buttons(dev: "InputDevice") -> bool:
         if VIRTUAL_MARKER in (dev.name or ""):
             return False
+        name = (dev.name or "").lower()
+        # Explicitly ignore system controls, wireless radio controls, audio AVRCP, power/sleep/lid
+        if any(kw in name for kw in ("wireless radio", "rfkill", "wmi", "hotkey", "acpi",
+                                     "power button", "sleep button", "lid switch", "video bus",
+                                     "avrcp", "headset", "headphone", "audio", "system control")):
+            return False
         caps = dev.capabilities()
+        # Devices with switch events (e.g. rfkill switch, lid switch) are not mice
+        if ecodes.EV_SW in caps:
+            return False
         keys = caps.get(ecodes.EV_KEY, [])
-        # If it has standard letter keys, it is a keyboard (even if it has multimedia keys).
-        # We must NOT grab it as a mouse, otherwise typing can result in stuck keys on SYN_DROPPED.
+        # If it has RFKILL / WLAN / Bluetooth keys, power keys, do not grab as mouse
+        if any(k in keys for k in (getattr(ecodes, "KEY_RFKILL", -1),
+                                   getattr(ecodes, "KEY_WLAN", -1),
+                                   getattr(ecodes, "KEY_BLUETOOTH", -1),
+                                   ecodes.KEY_POWER, ecodes.KEY_SLEEP)):
+            return False
+        # If it has standard letter keys, it is a keyboard
         if ecodes.KEY_A in keys and ecodes.KEY_Z in keys:
             return False
-        for k in (ecodes.BTN_SIDE, ecodes.BTN_EXTRA, ecodes.BTN_BACK, ecodes.BTN_FORWARD,
-                  ecodes.KEY_BACK, ecodes.KEY_FORWARD, ecodes.KEY_PREVIOUS, ecodes.KEY_NEXT,
-                  ecodes.KEY_PREVIOUSSONG, ecodes.KEY_NEXTSONG, ecodes.BTN_TASK):
+        # Only true mouse button codes
+        for k in (ecodes.BTN_SIDE, ecodes.BTN_EXTRA, ecodes.BTN_BACK, ecodes.BTN_FORWARD, ecodes.BTN_TASK):
             if k in keys:
                 return True
         return False
