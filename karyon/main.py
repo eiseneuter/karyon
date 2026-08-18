@@ -196,6 +196,7 @@ class Launcher:
             from .panels import SettingsPanel
             self.settings = SettingsPanel(self.config)
             self.settings.closed.connect(self._on_settings_closed)
+            self.settings.quit_requested.connect(self.quit)
 
         self._gesture_win_id = ""
         self._last_fs_payload = None
@@ -595,7 +596,17 @@ class Launcher:
             self.proxy.stop()
         except Exception:  # noqa: BLE001
             pass
+        try:
+            self.audio.stop()
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            self.tray.stop()
+        except Exception:  # noqa: BLE001
+            pass
         self.app.quit()
+        import os
+        os._exit(0)
 
 
 # ---------------------------------------------------------------------------

@@ -57,8 +57,6 @@ def _trigger_codes(config) -> tuple:
     if name == "custom_key":
         code = int(config.get("trigger_key", 0) or 0)
         return (code,) if code else ()
-    if name in ("tp_left", "tp_right"):
-        return ()            # handled on the touchpad device, not a mouse
     return (e.BTN_MIDDLE,)
 
 
@@ -75,20 +73,7 @@ def _cancel_codes(config) -> tuple:
         return (e.BTN_FORWARD, e.BTN_EXTRA)
     if name == "backward":
         return (e.BTN_BACK, e.BTN_SIDE)
-    if name in ("tp_left", "tp_right"):
-        return ()
     return (e.BTN_RIGHT,)
-
-
-def _tp_button_code(name) -> int | None:
-    """Touchpad trigger/cancel value -> raw button code (or None)."""
-    if evdev is None:
-        return None
-    if name == "tp_left":
-        return ecodes.BTN_LEFT
-    if name == "tp_right":
-        return ecodes.BTN_RIGHT
-    return None
 
 
 # Keycodes the injection device must be able to emit.  Declare the WHOLE
@@ -138,14 +123,6 @@ class InputProxy:
         self._devices: dict[str, InputDevice] = {}   # path -> mouse
         self._virtuals: dict[str, UInput] = {}        # path -> virtual uinput
         self._keyboards: dict[str, InputDevice] = {}  # for custom_key (read-only)
-        # Touchpads: kept OPEN but only exclusively grabbed while the overlay is
-        # up, so normal touchpad use is untouched otherwise.  scale maps absolute
-        # finger units to roughly-screen pixels.
-        self._touchpads: dict[str, InputDevice] = {}
-        self._tp_scale: dict[str, tuple] = {}         # path -> (sx, sy)
-        self._tp_grabbed = False
-        self._tp_last: dict[str, list] = {}           # path -> [last_x, last_y]
-        self._tp_full_active = False                  # current touchpad mode
         self._ui_keys: UInput | None = None
         self._ui_abs: UInput | None = None
 
@@ -185,7 +162,7 @@ class InputProxy:
     # -- lifecycle ----------------------------------------------------------
     def start(self) -> None:
         if evdev is None:
-            log.error("python-evdev nicht verfÃ¼gbar â Eingabe-Proxy deaktiviert")
+            log.error("python-evdev nicht verfügbar – Eingabe-Proxy deaktiviert")
             return
         self._thread = threading.Thread(target=self._run, name="input-proxy",
                                         daemon=True)
@@ -220,17 +197,6 @@ class InputProxy:
             except Exception:  # noqa: BLE001
                 pass
         self._keyboards.clear()
-        for tp in list(self._touchpads.values()):
-            try:
-                tp.ungrab()
-            except Exception:  # noqa: BLE001
-                pass
-            try:
-                tp.close()
-            except Exception:  # noqa: BLE001
-                pass
-        self._touchpads.clear()
-        self._tp_grabbed = False
         for ui in (self._ui_keys, self._ui_abs):
             try:
                 if ui is not None:
@@ -312,27 +278,7 @@ class InputProxy:
         except Exception:  # noqa: BLE001
             return
         want_kb = self.config.get("trigger_button") == "custom_key" or self.capture_key
-        # Re-open touchpads if the full/nav mode changed (trigger reconfigured).
-        if self._tp_full() != self._tp_full_active:
-            for tp_path in list(self._touchpads):
-                tp = self._touchpads.pop(tp_path)
-                self._tp_scale.pop(tp_path, None)
-                self._tp_last.pop(tp_path, None)
-                ui = self._virtuals.pop(tp_path, None)
-                for obj in (tp, ui):
-                    try:
-                        if obj is tp:
-                            tp.ungrab()
-                    except Exception:  # noqa: BLE001
-                        pass
-                    try:
-                        if obj is not None:
-                            obj.close()
-                    except Exception:  # noqa: BLE001
-                        pass
-            self._tp_grabbed = False
-            self._tp_full_active = self._tp_full()
-        seen_mice, seen_kb, seen_tp = set(), set(), set()
+        seen_mice, seen_kb = set(), set()
         for path in paths:
             try:
                 dev = InputDevice(path)
@@ -345,16 +291,14 @@ class InputProxy:
                 if self._is_remote_input(dev):
                     dev.close()
                     continue
+                # Touchpads are explicitly ignored and left entirely to the OS.
+                if self._is_touchpad(dev):
+                    dev.close()
+                    continue
                 if self._is_mouse(dev) or self._is_extra_mouse_buttons(dev):
                     seen_mice.add(path)
                     if path not in self._devices:
                         self._add_mouse(path, dev)
-                    else:
-                        dev.close()
-                elif self._is_touchpad(dev):
-                    seen_tp.add(path)
-                    if path not in self._touchpads:
-                        self._add_touchpad(path, dev)
                     else:
                         dev.close()
                 elif want_kb and self._is_keyboard(dev):
@@ -370,8 +314,7 @@ class InputProxy:
                     dev.close()
                 except Exception:  # noqa: BLE001
                     pass
-        self._reconcile(seen_mice, seen_kb, seen_tp)
-
+        self._reconcile(seen_mice, seen_kb)
 
     def _add_mouse(self, path: str, dev: "InputDevice") -> None:
         try:
@@ -386,7 +329,7 @@ class InputProxy:
                 ui = UInput.from_device(dev, name=f"{VIRTUAL_MARKER} {dev.name}")
                 self._virtuals[path] = ui
             except Exception:  # noqa: BLE001
-                log.warning("Virtuelles GerÃ¤t fÃ¼r %s fehlgeschlagen", dev.name)
+                log.warning("Virtuelles Gerät für %s fehlgeschlagen", dev.name)
         log.info("Mouse captured: %s (%s)", dev.name, "grab" if grabbed else "read-only")
 
     @staticmethod
@@ -407,67 +350,8 @@ class InputProxy:
                     or ecodes.BTN_TOOL_DOUBLETAP in keys)
         return has_xy and is_touch
 
-    def _tp_full(self) -> bool:
-        """A touchpad button is configured as trigger/cancel -> the touchpad must
-        be grabbed full-time and its normal events forwarded (so the button can be
-        consumed cleanly), instead of only grabbed while the overlay is up."""
-        return (self.config.get("trigger_button") in ("tp_left", "tp_right")
-                or self.config.get("cancel_button") in ("tp_left", "tp_right"))
-
-    def _add_touchpad(self, path: str, dev: "InputDevice") -> None:
-        self._touchpads[path] = dev
-        sx = sy = 0.25
-        try:
-            abs_codes = [a[0] for a in dev.capabilities().get(ecodes.EV_ABS, [])]
-            xc = ecodes.ABS_X if ecodes.ABS_X in abs_codes else ecodes.ABS_MT_POSITION_X
-            yc = ecodes.ABS_Y if ecodes.ABS_Y in abs_codes else ecodes.ABS_MT_POSITION_Y
-            xa, ya = dev.absinfo(xc), dev.absinfo(yc)
-            sx = 780.0 / ((xa.max - xa.min) or 1)
-            sy = 780.0 / ((ya.max - ya.min) or 1)
-        except Exception:  # noqa: BLE001
-            pass
-        self._tp_scale[path] = (sx, sy)
-        self._tp_last[path] = [None, None]
-        if self._tp_full():
-            # Grab full-time + forward normal events through a virtual device, so a
-            # touchpad button can serve as trigger/cancel.
-            try:
-                dev.grab()
-                self._virtuals[path] = UInput.from_device(
-                    dev, name=f"{VIRTUAL_MARKER} {dev.name}")
-                self._tp_grabbed = True
-                log.info("Touchpad captured: %s (Trigger+Navigation)", dev.name)
-                return
-            except Exception:  # noqa: BLE001
-                log.warning("Touchpad full mode failed: %s", dev.name)
-                try:
-                    dev.ungrab()
-                except Exception:  # noqa: BLE001
-                    pass
-        log.info("Touchpad captured: %s (Navigation)", dev.name)
-
-    def _reconcile(self, seen_mice: set, seen_kb: set, seen_tp: set) -> None:
+    def _reconcile(self, seen_mice: set, seen_kb: set) -> None:
         disconnected = False
-        for path in list(self._touchpads):
-            if path not in seen_tp:
-                disconnected = True
-                tp = self._touchpads.pop(path)
-                self._tp_scale.pop(path, None)
-                self._tp_last.pop(path, None)
-                try:
-                    tp.ungrab()
-                except Exception:  # noqa: BLE001
-                    pass
-                try:
-                    tp.close()
-                except Exception:  # noqa: BLE001
-                    pass
-                ui = self._virtuals.pop(path, None)
-                if ui is not None:
-                    try:
-                        ui.close()
-                    except Exception:  # noqa: BLE001
-                        pass
         for path in list(self._devices):
             if path not in seen_mice:
                 disconnected = True
@@ -504,7 +388,7 @@ class InputProxy:
                 cap = {ecodes.EV_KEY: _injection_keycodes()}
                 self._ui_keys = UInput(cap, name=f"{VIRTUAL_MARKER} keys")
             except Exception:  # noqa: BLE001
-                log.warning("Tastatur-InjektionsgerÃ¤t nicht verfÃ¼gbar")
+                log.warning("Tastatur-Injektionsgerät nicht verfügbar")
         if self._ui_abs is None:
             try:
                 cap = {
@@ -535,8 +419,6 @@ class InputProxy:
                 fds[dev.fd] = (dev, path, "mouse")
             for path, kb in self._keyboards.items():
                 fds[kb.fd] = (kb, path, "kb")
-            for path, tp in self._touchpads.items():
-                fds[tp.fd] = (tp, path, "tp")
             if not fds:
                 time.sleep(0.1)
                 self._check_hold(time.monotonic())
@@ -554,82 +436,12 @@ class InputProxy:
                     for ev in dev.read():
                         if kind == "kb":
                             self._handle_kb_event(ev)
-                        elif kind == "tp":
-                            self._handle_touchpad_event(ev, path)
                         else:
                             self._handle_mouse_event(ev, path)
                 except OSError:
                     continue
 
             self._check_hold(time.monotonic())
-            # In nav mode touchpads are grabbed only while the overlay is up; release
-            # them as soon as it closes.  In full mode they stay grabbed.
-            if (not self._tp_full() and self.state != MENU and self._tp_grabbed):
-                self._ungrab_touchpads()
-
-    # -- touchpad navigation ------------------------------------------------
-    def _grab_touchpads(self) -> None:
-        if self._tp_grabbed:
-            return
-        for path, tp in self._touchpads.items():
-            try:
-                tp.grab()
-            except Exception:  # noqa: BLE001
-                pass
-            self._tp_last[path] = [None, None]
-        self._tp_grabbed = True
-
-    def _ungrab_touchpads(self) -> None:
-        if not self._tp_grabbed:
-            return
-        for tp in self._touchpads.values():
-            try:
-                tp.ungrab()
-            except Exception:  # noqa: BLE001
-                pass
-        self._tp_grabbed = False
-
-    def _handle_touchpad_event(self, ev, path: str) -> None:
-        # Touchpad trigger button (full mode): drive the state machine, consume it.
-        tp_trig = _tp_button_code(self.config.get("trigger_button"))
-        if tp_trig is not None and ev.type == ecodes.EV_KEY and ev.code == tp_trig:
-            if ev.value == 1:
-                self._on_trigger_press(path)
-            elif ev.value == 0:
-                self._on_trigger_release()
-            return
-        # Touchpad cancel button while the menu is open.
-        tp_canc = _tp_button_code(self.config.get("cancel_button"))
-        if (self.state == MENU and tp_canc is not None and tp_canc != tp_trig
-                and ev.type == ecodes.EV_KEY and ev.code == tp_canc):
-            if ev.value == 1:
-                self.state = IDLE
-                if self.on_cancel:
-                    self.on_cancel()
-            return
-        # While the overlay is up: finger motion steers it; consume everything.
-        if self.state == MENU:
-            last = self._tp_last.get(path)
-            if last is None:
-                return
-            if ev.type == ecodes.EV_KEY and ev.code == ecodes.BTN_TOUCH:
-                last[0] = last[1] = None
-                return
-            if ev.type == ecodes.EV_ABS:
-                sx, sy = self._tp_scale.get(path, (0.25, 0.25))
-                if ev.code in (ecodes.ABS_X, ecodes.ABS_MT_POSITION_X):
-                    if last[0] is not None:
-                        self._on_delta((ev.value - last[0]) * sx, 0.0)
-                    last[0] = ev.value
-                elif ev.code in (ecodes.ABS_Y, ecodes.ABS_MT_POSITION_Y):
-                    if last[1] is not None:
-                        self._on_delta(0.0, (ev.value - last[1]) * sy)
-                    last[1] = ev.value
-            return
-        # IDLE/PENDING: in full mode forward to the virtual so the touchpad keeps
-        # working normally; in nav mode it is not grabbed, so nothing to forward.
-        if path in self._virtuals:
-            self._forward(ev, path)
 
     # -- event handling -----------------------------------------------------
     def _forward(self, ev, path: str) -> None:
@@ -786,10 +598,8 @@ class InputProxy:
         tb = self.config.get("trigger_button")
         if tb == "lmb_rmb":
             return  # chords are not replayed
-        code = _tp_button_code(tb)   # touchpad trigger?
-        if code is None:
-            codes = _trigger_codes(self.config)
-            code = codes[0] if codes else None
+        codes = _trigger_codes(self.config)
+        code = codes[0] if codes else None
         if code is None:
             return
         ui = self._virtuals.get(self._press_path)
@@ -866,9 +676,6 @@ class InputProxy:
             self.state = MENU
             self._menu_rel = [0.0, 0.0]
             self._path = [(now, 0.0, 0.0)]
-            self._grab_touchpads()   # finger-on-touchpad now steers the overlay
-            for p in self._tp_last:  # fresh navigation baseline (full mode too)
-                self._tp_last[p] = [None, None]
             if self.on_hold:
                 self.on_hold()
 

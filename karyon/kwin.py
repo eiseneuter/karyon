@@ -100,7 +100,7 @@ callDBus("%(svc)s", "%(path)s", "%(iface)s", "result",
 
 _SHOW_DESKTOP_JS = """
 var wins = workspace.windowList ? workspace.windowList() : workspace.stackingOrder;
-var ignore = ["karyon", "python3", "plasmashell", "org.kde.plasmashell"];
+var ignore = ["karyon", "python3", "plasmashell", "org.kde.plasmashell", "kwin_wayland", "kwin_x11", "kwin", "org.kde.kwin_wayland", "org.kde.kwin", "xembedsniproxy"];
 var visible = []; var minimized = [];
 for (var i = 0; i < wins.length; i++) {
     var w = wins[i];

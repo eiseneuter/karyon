@@ -712,7 +712,12 @@ class RadialOverlay(QWidget):
 
     def _build_windows(self, windows: list) -> None:
         cfg = self.config
-        ignore = {"karyon", "python3", "plasmashell", "org.kde.plasmashell", "xembedsniproxy"}
+        ignore = {
+            "karyon", "python3", "plasmashell", "org.kde.plasmashell",
+            "xembedsniproxy", "kwin_wayland", "kwin_x11", "kwin",
+            "org.kde.kwin_wayland", "org.kde.kwin", "org.kde.krunner",
+            "krunner", "ksmserver", "org.kde.ksmserver"
+        }
         nodes: list[Node] = []
         # group windows by desktop_file or resourceClass; order by stacking (most-recently-used
         # first), since workspace.windowList() is NOT in MRU order.
@@ -720,7 +725,9 @@ class RadialOverlay(QWidget):
         for w in windows:
             rc = w["rc"]
             df = w.get("desktop_file", "")
-            if rc in ignore or not rc:
+            rc_low = (rc or "").lower()
+            df_low = (df or "").replace(".desktop", "").lower()
+            if not rc or rc_low in ignore or df_low in ignore:
                 continue
             if w["active"]:
                 self._active_window_id = w["id"]

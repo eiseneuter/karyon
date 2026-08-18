@@ -110,6 +110,7 @@ class _NoWheelSlider(QSlider):
 
 class SettingsPanel(QFrame):
     closed = pyqtSignal()
+    quit_requested = pyqtSignal()
 
     def __init__(self, config) -> None:
         super().__init__(None)
@@ -151,7 +152,7 @@ class SettingsPanel(QFrame):
         scroll.setWidget(inner)
         outer.addWidget(scroll)
 
-        title = QLabel("Karyon 2.3")
+        title = QLabel("Karyon 2.4")
         title.setObjectName("title")
         self._lay.addWidget(title)
 
@@ -206,38 +207,39 @@ class SettingsPanel(QFrame):
         self._add_slider("max_recent_files", "Max recent files", 1, 30, 1)
         self._add_slider("volume_steps", "Volume steps", 1, 10, 1, unit=" %")
 
-        # Checkboxes, two columns.  Left: the Show toggles + Dim area + Focus.
-        # Right: the drawn-icon toggles.  (Ring transformation is always animated.)
+        # Overlay section: divider, heading, then checkboxes
+        self._lay.addWidget(self._separator())
+        self._lay.addWidget(self._section("Overlay"))
         grid = QGridLayout()
         self._lay.addLayout(grid)
         left = [
-            ("show_windows", "Show Windows"),
-            ("show_apps", "Show Apps"),
-            ("show_recent_files", "Show Recent Files"),
-            ("mail_notification", "Icon Letter Notification"),
-            ("show_tray", "Icon Tray"),
+            ("show_windows", "Category Windows"),
+            ("show_apps", "Category Apps"),
+            ("show_recent_files", "Category Recent Files"),
+            ("mail_notification", "Show Letter Notification"),
+            ("show_tray", "Show Tray"),
         ]
         right = [
-            ("show_desktop", "Icon Desktop"),
-            ("show_session", "Icon Session"),
-            ("show_all_apps", "Icon All Applications"),
-            ("show_favorites", "Icon Favorites"),
-            ("show_media_control", "Icons Media Control"),
+            ("show_desktop", "Show Desktop"),
+            ("show_session", "Show Session"),
+            ("show_all_apps", "Show All Applications"),
+            ("show_favorites", "Show Favorites"),
+            ("show_media_control", "Show Media Control"),
         ]
         for r, (k, lab) in enumerate(left):
             grid.addWidget(self._make_check(k, lab), r, 0)
         for r, (k, lab) in enumerate(right):
             grid.addWidget(self._make_check(k, lab), r, 1)
-        # Dependencies: >=2 main categories; Apps needs >=1 sub-option; the apps
+        # Dependencies: >=1 main categories; Apps needs >=1 sub-option; the apps
         # sub-options grey out while Apps is off; recents caps track residents.
         for k in ("show_windows", "show_apps", "show_recent_files",
                   "show_favorites", "show_all_apps", "show_session"):
             self.checks[k].toggled.connect(self._deps)
         self._deps()
 
-        # Hub displays: a divider, then the four info-card toggles (no title).
-        # All independent -- any combination, or none.
+        # Central Hub section: divider, heading, then info-card toggles
         self._lay.addWidget(self._separator())
+        self._lay.addWidget(self._section("Central Hub"))
         hgrid = QGridLayout()
         self._lay.addLayout(hgrid)
         for i, (k, lab) in enumerate([
@@ -246,9 +248,9 @@ class SettingsPanel(QFrame):
                 ("hub_show_charge", "Charge")]):
             hgrid.addWidget(self._make_check(k, lab), i // 2, i % 2)
 
-        # Gestures: a divider, then Enable, the activation-window slider, then the
-        # direction combos (no section title).
+        # Gestures section: divider, heading, then Enable and gesture controls
         self._lay.addWidget(self._separator())
+        self._lay.addWidget(self._section("Gestures"))
         self._lay.addWidget(self._make_check("gestures_enabled", "Enable gestures"))
         # The activation-window slider sits directly under "Enable gestures" in its
         # own grid (the main grid is far above), aligned to the same columns.
@@ -451,7 +453,12 @@ class SettingsPanel(QFrame):
         line.setStyleSheet("background-color: rgba(255,255,255,42); border: none;")
         return line
 
-    # -- Touchpad Mode (preset + restore) -----------------------------------
+    def _section(self, text: str) -> QLabel:
+        lab = QLabel(text)
+        lab.setObjectName("section")
+        return lab
+
+    # -- Settings snapshot / restore ----------------------------------------
     def _collect_values(self) -> dict:
         """Snapshot every editable widget value as a config dict."""
         d = {}
@@ -600,16 +607,10 @@ class SettingsPanel(QFrame):
         for direction, c in self.gesture_combos.items():
             self.config[f"gesture_{direction}"] = c.currentData()
         self.config["gesture_custom_keys"] = dict(self._gesture_keys)
-        # enforce minimum selected categories
-        is_pie = self.config.get("overlay_mode", "pie") == "pie"
-        min_req = 2 if is_pie else 1
+        # enforce at least 1 category is selected
         checked = sum(1 for k in ("show_windows", "show_apps", "show_recent_files") if self.config.get(k, True))
-        if checked < min_req:
-            if not self.config.get("show_apps", True):
-                self.config["show_apps"] = True
-                checked += 1
-            if checked < min_req and not self.config.get("show_recent_files", True):
-                self.config["show_recent_files"] = True
+        if checked < 1:
+            self.config["show_windows"] = True
         self.config.save()
         self._apply_style()
         self.hide()
@@ -620,8 +621,7 @@ class SettingsPanel(QFrame):
         self.closed.emit()
 
     def _quit_launcher(self) -> None:
-        from PyQt6.QtWidgets import QApplication
-        QApplication.instance().quit()
+        self.quit_requested.emit()
 
     def closeEvent(self, event):  # noqa: N802
         event.ignore()

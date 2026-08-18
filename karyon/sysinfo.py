@@ -11,17 +11,100 @@ def battery_status() -> dict | None:
     base = Path("/sys/class/power_supply")
     if not base.is_dir():
         return None
+    
+    system_bats: list[dict] = []
+    device_bats: list[dict] = []
+    
     for entry in base.iterdir():
         try:
-            if (entry / "type").read_text().strip() != "Battery":
+            # Must be a battery device
+            type_file = entry / "type"
+            if not type_file.is_file() or type_file.read_text().strip() != "Battery":
                 continue
-            capacity = int((entry / "capacity").read_text().strip())
-            status = (entry / "status").read_text().strip()
-            return {"percent": capacity, "status": status,
-                    "charging": status.lower() == "charging"}
+            
+            # Skip unpopulated battery bays (e.g. absent second ThinkPad battery)
+            present_file = entry / "present"
+            if present_file.is_file() and present_file.read_text().strip() == "0":
+                continue
+            
+            scope_file = entry / "scope"
+            scope = scope_file.read_text().strip() if scope_file.is_file() else "System"
+            
+            # Read direct percentage if available
+            capacity = None
+            cap_file = entry / "capacity"
+            if cap_file.is_file():
+                try:
+                    capacity = int(cap_file.read_text().strip())
+                except ValueError:
+                    pass
+            
+            # Read energy or charge to calculate accurate combined dual-battery percentage
+            energy_now = energy_full = 0.0
+            for prefix in ("energy", "charge"):
+                now_f = entry / f"{prefix}_now"
+                full_f = entry / f"{prefix}_full"
+                if now_f.is_file() and full_f.is_file():
+                    try:
+                        n = float(now_f.read_text().strip())
+                        f = float(full_f.read_text().strip())
+                        if f > 0:
+                            energy_now = n
+                            energy_full = f
+                            if capacity is None:
+                                capacity = int(round((n / f) * 100))
+                            break
+                    except ValueError:
+                        pass
+            
+            status_file = entry / "status"
+            status = status_file.read_text().strip() if status_file.is_file() else "Unknown"
+            
+            if capacity is None:
+                continue
+            
+            is_system = scope != "Device" and (entry.name.startswith("BAT") or scope == "System")
+            info = {
+                "name": entry.name,
+                "percent": max(0, min(100, capacity)),
+                "status": status,
+                "charging": status.lower() in ("charging", "full"),
+                "energy_now": energy_now,
+                "energy_full": energy_full,
+                "is_system": is_system,
+            }
+            
+            if is_system:
+                system_bats.append(info)
+            else:
+                device_bats.append(info)
         except Exception:  # noqa: BLE001
             continue
-    return None
+            
+    bats = system_bats or device_bats
+    if not bats:
+        return None
+        
+    # Combined charge calculation for multi-battery laptops (e.g. ThinkPad bridge battery system)
+    total_now = sum(b["energy_now"] for b in bats)
+    total_full = sum(b["energy_full"] for b in bats)
+    if total_full > 0:
+        combined_pct = int(round((total_now / total_full) * 100))
+    else:
+        non_zero = [b for b in bats if b["percent"] > 0]
+        if non_zero:
+            combined_pct = int(round(sum(b["percent"] for b in non_zero) / len(non_zero)))
+        else:
+            combined_pct = bats[0]["percent"]
+            
+    any_charging = any(b["charging"] for b in bats)
+    status_str = "Charging" if any_charging else bats[0]["status"]
+    
+    return {
+        "percent": max(0, min(100, combined_pct)),
+        "status": status_str,
+        "charging": any_charging,
+    }
 
 
 class SystemMonitor:
