@@ -60,6 +60,13 @@ Karyon uses several advanced techniques to achieve deep system integration and m
 * **Fullscreen Overlays (Wayland & X11):** While X11 naturally allows drawing over fullscreen apps, Wayland strictly enforces window layers. Karyon bypasses this limitation by dynamically injecting specialized **KWin Window Rules** into KDE Plasma, forcing the compositor to always place the Karyon overlay in the highest possible layer, seamlessly overlapping fullscreen videos or apps.
 * **High-Performance Vector Rendering:** Karyon is purely software-rendered via Qt's `QPainter`, but highly optimized. By utilizing simple, clean vector graphics and strictly timed 30 FPS event loops, the overlay draws in just ~1-2 milliseconds per frame. This ensures buttery-smooth animations while keeping CPU usage low.
 
+## Things to keep in mind
+* **Be patient:** Give your brain and muscle memory some time to adapt. Once you do, Karyon will make your workflow much smoother.
+* **Drag & drop:** Dropping files in another window is faster than before. Grab file, call up destination window with Karyon, drop file.
+* **Icon fallbacks:** Not all window icons are guaranteed to display; missing ones are replaced by text titles.
+* **Startup caution:** do not grab any window or try to manage windows, while Karyon is booting up (KARYON intro). It will result in faulty window focus behavior!
+* **System tray:** Completely removing the system tray from your desktop can limit some KDE functions (like the clipboard). If you need Klipper, I recommend keeping the system tray active somewhere on the desktop and hiding all elements. Karyon is generally unable to invoke the actual notification flyout window (only accessable via the true system tray).
+
 ## Run (from source)
     ./run.sh [--debug]
     # or: python3 -m karyon [--debug]
@@ -76,10 +83,3 @@ This bundles a standalone Python, PyQt6 + its platform plugins, and (via `ldd`) 
 ## Permissions
     ./setup-permissions.sh    # udev uaccess for /dev/input/event* + /dev/uinput
     ./reset-permissions.sh    # remove the rule again (re-prompts on next start)
-
-## Things to keep in mind
-* **Be patient:** Give your brain and muscle memory some time to adapt. Once you do, Karyon will make your workflow much smoother.
-* **Drag & drop:** Dropping files in another window is faster than before. Grab file, call up destination window with Karyon, drop file.
-* **Icon fallbacks:** Not all window icons are guaranteed to display; missing ones are replaced by text titles.
-* **Startup caution:** do not grab any window or try to manage windows, while Karyon is booting up (KARYON intro). It will result in faulty window focus behavior!
-* **System tray:** Completely removing the system tray from your desktop can limit some KDE functions (like the clipboard). If you need Klipper, I recommend keeping the system tray active somewhere on the desktop and hiding all elements. Karyon is generally unable to invoke the actual notification flyout window (only accessable via the true system tray).
