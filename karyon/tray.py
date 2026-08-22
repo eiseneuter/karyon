@@ -497,12 +497,16 @@ class TrayManager(QObject):
         # Read the property via the standard Properties interface -- calling
         # "org.freedesktop.DBus.Properties.Get" on the SNI interface itself is
         # parsed as a method literally named "org" and fails (-> no items).
+        t0 = time.monotonic()
         props = QDBusInterface("org.kde.StatusNotifierWatcher",
                                "/StatusNotifierWatcher",
                                "org.freedesktop.DBus.Properties", self._bus)
         props.setTimeout(800)   # never block (default 25s) -> never wedge a caller
         reply = props.call("Get", "org.kde.StatusNotifierWatcher",
                            "RegisteredStatusNotifierItems")
+        dt = (time.monotonic() - t0) * 1000.0
+        if dt > 15.0:
+            log.warning("[LAG] tray._registered_services DBus call took %.1f ms", dt)
         args = reply.arguments()
         if not args:
             return []

@@ -36,7 +36,7 @@ MENU = 2
 _GESTURE_MIN_DIST = 45
 
 
-RESCAN_INTERVAL = 3.0
+RESCAN_INTERVAL = 10.0
 
 # Trigger button -> evdev key code(s)
 def _trigger_codes(config) -> tuple:
@@ -279,7 +279,20 @@ class InputProxy:
             return
         want_kb = self.config.get("trigger_button") == "custom_key" or self.capture_key
         seen_mice, seen_kb = set(), set()
+
+        # Build set of already-known paths so we can skip re-opening them.
+        known = set(self._devices) | set(self._keyboards)
+
         for path in paths:
+            # Fast path: device already tracked → just mark it as seen.
+            if path in self._devices:
+                seen_mice.add(path)
+                continue
+            if path in self._keyboards:
+                seen_kb.add(path)
+                continue
+
+            # New (unknown) device → open and classify.
             try:
                 dev = InputDevice(path)
             except Exception:  # noqa: BLE001
@@ -297,16 +310,10 @@ class InputProxy:
                     continue
                 if self._is_mouse(dev) or self._is_extra_mouse_buttons(dev):
                     seen_mice.add(path)
-                    if path not in self._devices:
-                        self._add_mouse(path, dev)
-                    else:
-                        dev.close()
+                    self._add_mouse(path, dev)
                 elif want_kb and self._is_keyboard(dev):
                     seen_kb.add(path)
-                    if path not in self._keyboards:
-                        self._keyboards[path] = dev
-                    else:
-                        dev.close()
+                    self._keyboards[path] = dev
                 else:
                     dev.close()
             except Exception:  # noqa: BLE001
@@ -409,7 +416,7 @@ class InputProxy:
         last_scan = time.monotonic()
         while not self._stop.is_set():
             now = time.monotonic()
-            if now - last_scan >= RESCAN_INTERVAL:
+            if now - last_scan >= RESCAN_INTERVAL and self.state == IDLE:
                 self._open_devices()
                 self._ensure_injection_devices()
                 last_scan = now
@@ -430,16 +437,23 @@ class InputProxy:
                 time.sleep(0.05)
                 continue
 
+            t_read0 = time.monotonic()
+            ev_count = 0
             for fd in r:
                 dev, path, kind = fds[fd]
                 try:
                     for ev in dev.read():
+                        ev_count += 1
                         if kind == "kb":
                             self._handle_kb_event(ev)
                         else:
                             self._handle_mouse_event(ev, path)
                 except OSError:
                     continue
+
+            dt_read = (time.monotonic() - t_read0) * 1000.0
+            if dt_read > 15.0 and self.state in (PENDING, MENU):
+                log.warning("[LAG] InputProxy event handling took %.1f ms (%d events)", dt_read, ev_count)
 
             self._check_hold(time.monotonic())
 
@@ -589,7 +603,7 @@ class InputProxy:
         self._press_path = path
         self._trigger_replayed = False
         self._path = [(self._press_time, 0.0, 0.0)]
-        self._gpath = [(self._press_time, 0.0, 0.0)]
+        self._gpath = [(self._press_time, 0.0, 0.0)] if self.config.get("gestures_enabled", True) else []
         if self.on_press:
             self.on_press()
 
@@ -640,7 +654,7 @@ class InputProxy:
         # A gesture is triggered by the MOVEMENT itself (a sharp flick), during
         # the motion -- never by releasing the trigger.  Detected the same way
         # whether or not the radial menu has opened yet.
-        if self.state in (PENDING, MENU):
+        if self.config.get("gestures_enabled", True) and self.state in (PENDING, MENU):
             self._gpath.append((time.monotonic(), self._rel[0], self._rel[1]))
             if len(self._gpath) > 500:
                 del self._gpath[0]

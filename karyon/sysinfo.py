@@ -1,13 +1,23 @@
 """Battery status + system-load monitor (for the optional hub info card)."""
 from __future__ import annotations
 
+import logging
 import subprocess
 import threading
 import time
 from pathlib import Path
 
+log = logging.getLogger(__name__)
+
 
 def battery_status() -> dict | None:
+    """Latest battery status dictionary. Read asynchronously from background thread."""
+    m = _get_monitor()
+    m._last_request = time.monotonic()
+    return m.battery
+
+
+def _read_battery_status() -> dict | None:
     base = Path("/sys/class/power_supply")
     if not base.is_dir():
         return None
@@ -132,6 +142,7 @@ class SystemMonitor:
         self._cpu = 0.0
         self._gpu = 0.0
         self._ram = 0.0
+        self._battery: dict | None = None
         self._gpu_vendor = ""
         self._gpu_available = False
         self._prev_cpu: tuple[int, int] | None = None
@@ -152,7 +163,7 @@ class SystemMonitor:
             self._sample()  # prime (CPU needs two samples for a delta)
         except Exception:  # noqa: BLE001
             pass
-        self._thread = threading.Thread(target=self._run, daemon=True)
+        self._thread = threading.Thread(target=self._run, daemon=True, name="karyon-sysinfo")
         self._thread.start()
 
     def stop(self) -> None:
@@ -169,6 +180,10 @@ class SystemMonitor:
     @property
     def ram(self) -> float:
         return self._ram
+
+    @property
+    def battery(self) -> dict | None:
+        return self._battery
 
     @property
     def gpu_vendor(self) -> str:
@@ -194,6 +209,17 @@ class SystemMonitor:
         self._cpu = self._read_cpu()
         self._ram = self._read_ram()
         self._read_gpu(active)
+        self._read_battery()
+
+    def _read_battery(self) -> None:
+        try:
+            t0 = time.monotonic()
+            self._battery = _read_battery_status()
+            dt = (time.monotonic() - t0) * 1000.0
+            if dt > 15.0:
+                log.debug("Background battery sysfs read took %.1f ms", dt)
+        except Exception:  # noqa: BLE001
+            pass
 
     def _read_cpu(self) -> float:
         with open("/proc/stat", encoding="ascii") as f:

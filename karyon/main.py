@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 import os
+from pathlib import Path
 import signal
 import subprocess
 import sys
@@ -192,6 +193,9 @@ class Launcher:
                                          self.progress, self.audio)
         with timed("GestureFlash"):
             self.flash = GestureFlash()
+        with timed("SystemMonitor"):
+            from .sysinfo import _get_monitor
+            _get_monitor()
         with timed("SettingsPanel"):
             from .panels import SettingsPanel
             self.settings = SettingsPanel(self.config)
@@ -336,7 +340,11 @@ class Launcher:
 
     def _on_motion(self, x: float, y: float) -> None:
         if self.overlay.isVisible():
+            t0 = time.monotonic()
             self.overlay.set_pointer(x, y)
+            dt = (time.monotonic() - t0) * 1000.0
+            if dt > 10.0:
+                log.warning("[LAG] main._on_motion -> set_pointer took %.1f ms", dt)
 
     def _on_release(self) -> None:
         # Gestures are triggered by the movement itself (during the flick), never
@@ -604,6 +612,12 @@ class Launcher:
             self.tray.stop()
         except Exception:  # noqa: BLE001
             pass
+        try:
+            from .sysinfo import _monitor
+            if _monitor is not None:
+                _monitor.stop()
+        except Exception:  # noqa: BLE001
+            pass
         self.app.quit()
         import os
         os._exit(0)
@@ -657,9 +671,7 @@ def main() -> int:
     debug = ("--debug" in sys.argv
              or os.environ.get("KARYON_DEBUG") == "1")
     level = logging.DEBUG if debug else logging.INFO
-    handlers = [logging.StreamHandler(), logging.FileHandler("/tmp/karyon.log")]
-    if debug:
-        handlers.append(logging.FileHandler("/tmp/karyon-debug.log"))
+    handlers = [logging.StreamHandler()]
     logging.basicConfig(level=level,
                         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
                         handlers=handlers)

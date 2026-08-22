@@ -710,25 +710,54 @@ class RadialOverlay(QWidget):
         self._update_hover()
         self.update()
 
+    _WINDOW_IGNORE = {
+        "karyon", "python3", "plasmashell", "org.kde.plasmashell",
+        "xembedsniproxy", "kwin_wayland", "kwin_x11", "kwin",
+        "org.kde.kwin_wayland", "org.kde.kwin", "org.kde.krunner",
+        "krunner", "ksmserver", "org.kde.ksmserver"
+    }
+
+    def _is_valid_window(self, w: dict) -> bool:
+        rc = w.get("rc", "")
+        df = w.get("desktop_file", "")
+        rc_low = (rc or "").lower()
+        df_low = (df or "").replace(".desktop", "").lower()
+        if not rc or rc_low in self._WINDOW_IGNORE or df_low in self._WINDOW_IGNORE:
+            return False
+
+        # Non-normal windows (docks, toolbars, popups, deleted)
+        if not w.get("normal", True) or w.get("deleted", False):
+            return False
+
+        # Special filtering for Spectacle:
+        # Spectacle runs in the background as a daemon. Only include if it has a real visible window.
+        if "spectacle" in rc_low or "spectacle" in df_low:
+            if w.get("skip_taskbar") or w.get("skip_switcher") or w.get("hidden"):
+                return False
+            if w.get("width", 100) <= 10 or w.get("height", 100) <= 10:
+                return False
+            caption = (w.get("caption") or "").strip()
+            if not caption:
+                return False
+
+        # Ignore windows that are flagged to skip both taskbar and switcher (background helper surfaces)
+        if w.get("skip_taskbar") and w.get("skip_switcher") and not w.get("minimized"):
+            return False
+
+        return True
+
     def _build_windows(self, windows: list) -> None:
         cfg = self.config
-        ignore = {
-            "karyon", "python3", "plasmashell", "org.kde.plasmashell",
-            "xembedsniproxy", "kwin_wayland", "kwin_x11", "kwin",
-            "org.kde.kwin_wayland", "org.kde.kwin", "org.kde.krunner",
-            "krunner", "ksmserver", "org.kde.ksmserver"
-        }
         nodes: list[Node] = []
         # group windows by desktop_file or resourceClass; order by stacking (most-recently-used
         # first), since workspace.windowList() is NOT in MRU order.
         groups_dict: dict[str, list] = {}
         for w in windows:
+            if not self._is_valid_window(w):
+                continue
             rc = w["rc"]
             df = w.get("desktop_file", "")
             rc_low = (rc or "").lower()
-            df_low = (df or "").replace(".desktop", "").lower()
-            if not rc or rc_low in ignore or df_low in ignore:
-                continue
             if w["active"]:
                 self._active_window_id = w["id"]
             
@@ -736,7 +765,6 @@ class RadialOverlay(QWidget):
             # their desktop file via startup_id, causing them to be grouped together.
             if df:
                 df_name = df.replace(".desktop", "").lower()
-                rc_low = rc.lower()
                 if df_name in ("org.kde.dolphin", "dolphin", "org.kde.konsole", "konsole"):
                     if df_name.split(".")[-1] not in rc_low:
                         df = ""
@@ -1160,6 +1188,8 @@ class RadialOverlay(QWidget):
                          glyph="star", children=self._fav_nodes())
         running = set()
         for w in windows:
+            if not self._is_valid_window(w):
+                continue
             app = self.app_index.match_window(w["rc"], w.get("desktop_file", ""),
                                               pid=int(w.get("pid", 0) or 0))
             if app:
@@ -1700,12 +1730,19 @@ class RadialOverlay(QWidget):
 
     # -- pointer input ------------------------------------------------------
     def set_pointer(self, dx: float, dy: float) -> None:
+        now = time.monotonic()
+        last = getattr(self, "_last_set_pointer_time", None)
+        self._last_set_pointer_time = now
+        if last is not None and self.isVisible():
+            gap = (now - last) * 1000.0
+            if gap > 150.0:
+                log.warning("[LAG] overlay.set_pointer arrival gap: %.1f ms", gap)
         # dx/dy are the virtual delta from the menu center (since open); the
         # persistent vertical offset keeps the start point above centre.
         x = self._center.x() + dx + getattr(self, "_cursor_ox", 0.0)
         y = self._center.y() + dy + getattr(self, "_cursor_oy", 0.0)
         self._pointer = QPointF(x, y)
-        self._path.append((time.monotonic(), x, y))
+        self._path.append((now, x, y))
         # Hit-testing is throttled to the 30 fps tick (see _tick): a high-rate
         # mouse (125-1000 Hz) would otherwise recompute the full nearest-node
         # hover search on every raw event.  We only record that the pointer moved;
@@ -1769,6 +1806,7 @@ class RadialOverlay(QWidget):
         self._check_start_mail_blink()
 
     def _update_hover(self) -> None:
+        t_hov0 = time.monotonic()
         r, a = self._pointer_polar()
 
         # Neutral centre dot: NO trigger -- keep the current selection (and its
@@ -2357,13 +2395,18 @@ class RadialOverlay(QWidget):
         return cur + d * rate
 
     def _tick(self) -> None:
+        t_tick0 = time.monotonic()
         repaint = self._frame_requested
         self._frame_requested = False
         # Throttled hit-testing: set_pointer() only flags movement; recompute the
         # hover target at most once per frame (here), not on every raw input event.
         if self._hover_dirty:
             self._hover_dirty = False
+            t_h0 = time.monotonic()
             self._update_hover()
+            dt_h = (time.monotonic() - t_h0) * 1000.0
+            if dt_h > 10.0:
+                log.warning("[LAG] overlay._update_hover took %.1f ms", dt_h)
             if getattr(self, "_deadzone_active", False):
                 if self.hover_node is not getattr(self, "_initial_hover_node", None):
                     self._deadzone_active = False
@@ -2447,6 +2490,10 @@ class RadialOverlay(QWidget):
         if not animating:
             self._schedule_next_idle_tick()
 
+        dt_tick = (time.monotonic() - t_tick0) * 1000.0
+        if dt_tick > 15.0:
+            log.warning("[LAG] overlay._tick took %.1f ms", dt_tick)
+
     def _dirty_rect(self) -> QRect:
         s = self.s
         cx, cy = self._center.x(), self._center.y()
@@ -2486,6 +2533,7 @@ class RadialOverlay(QWidget):
 
     # -- painting -----------------------------------------------------------
     def paintEvent(self, event) -> None:  # noqa: N802
+        t_paint0 = time.monotonic()
         p = QPainter(self)
         
         # Always use Antialiasing. The old performance mode was removed.
@@ -2675,6 +2723,11 @@ class RadialOverlay(QWidget):
         # virtual pointer (the real cursor is parked, so this is the only one)
         self._paint_cursor(p)
         p.end()
+
+        dt_paint = (time.monotonic() - t_paint0) * 1000.0
+        if dt_paint > 15.0:
+            log.warning("[LAG] overlay.paintEvent took %.1f ms (rect=%s, is_idle_clock=%s)",
+                        dt_paint, event.rect(), getattr(self, "_is_idle_clock", False))
 
     def _paint_title(self, p, cx, cy, node) -> None:
         box, f, text = self._title_box_and_font(cx, cy, node)

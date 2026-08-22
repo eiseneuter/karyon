@@ -46,7 +46,13 @@ for (var i = 0; i < wins.length; i++) {
         minz: w.minimizable,
         normal: w.normalWindow,
         act: w.active,
-        stk: stackIndex(w)
+        stk: stackIndex(w),
+        skiptb: (w.skipTaskbar === true),
+        skipsw: (w.skipSwitcher === true),
+        hidden: (w.hidden === true),
+        deleted: (w.deleted === true),
+        w: (w.width || (w.geometry ? w.geometry.width : 0) || 0),
+        h: (w.height || (w.geometry ? w.geometry.height : 0) || 0)
     });
 }
 var c = workspace.cursorPos;
@@ -107,6 +113,11 @@ for (var i = 0; i < wins.length; i++) {
     if (ignore.indexOf(w.resourceClass) >= 0) continue;
     if (w.normalWindow === false) continue;
     if (w.minimizable === false) continue;
+    if (w.skipTaskbar === true && w.skipSwitcher === true) continue;
+    if (w.resourceClass === "spectacle" || w.resourceClass === "org.kde.spectacle") {
+        if (w.skipTaskbar === true || w.skipSwitcher === true || w.hidden === true) continue;
+        if ((w.width || 0) <= 10 || (w.height || 0) <= 10) continue;
+    }
     if (w.minimized) minimized.push(w); else visible.push(w);
 }
 // Decide AND act on the live state (no racy cache): any window showing -> hide
@@ -286,6 +297,12 @@ class KWinBridge:
                 "normal": bool(w.get("normal", True)),
                 "active": bool(w.get("act", False)),
                 "stack": int(w.get("stk", -1)),
+                "skip_taskbar": bool(w.get("skiptb", False)),
+                "skip_switcher": bool(w.get("skipsw", False)),
+                "hidden": bool(w.get("hidden", False)),
+                "deleted": bool(w.get("deleted", False)),
+                "width": int(w.get("w", 0) or 0),
+                "height": int(w.get("h", 0) or 0),
             })
         return {"cursor": (int(cursor[0]), int(cursor[1])), "windows": windows}
 
