@@ -14,8 +14,18 @@ Item {
     readonly property real maxTrailDist: 160.0 // Etwas kompakterer, feinerer Leuchtschweif (160px)
     readonly property int numInstances: 32     // Ausgewogene Punktdichte für eine elegante Spur
 
+    Timer {
+        id: autoFinishTimer
+        interval: 220
+        repeat: false
+        onTriggered: {
+            root.finishTrail();
+        }
+    }
+
     function startTrail(sx, sy) {
         fadeAnim.stop();
+        autoFinishTimer.restart();
         isFinished = false;
         startX = sx;
         startY = sy;
@@ -33,11 +43,14 @@ Item {
     }
 
     function finishTrail() {
+        if (isFinished) return;
+        autoFinishTimer.stop();
         isFinished = true;
         fadeAnim.restart();
     }
 
     function cancelTrail() {
+        autoFinishTimer.stop();
         fadeAnim.stop();
         isFinished = true;
         globalFade = 0.0;

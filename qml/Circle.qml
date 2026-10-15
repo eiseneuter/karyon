@@ -349,22 +349,22 @@ Item {
             ringCanvas.requestPaint();
         }
 
-        // Counter-Badge Hover prüfen (nur auf Ring 1 bei echten Fenstern mit windowCount > 1)
+        // Counter-Badge Hover prüfen (nur auf Ring 1 bei echten Fenstern mit windowCount > 1, unterhalb des Ladebalkens)
         var hoveredCounter = false;
         if (selectedRing === 1 && segmentList1 && selectedIndex >= 0 && selectedIndex < segmentList1.length) {
             var curSeg = segmentList1[selectedIndex];
             if (curSeg && curSeg.isRealWindow && curSeg.windowCount > 1) {
                 var sFact = (typeof overlayScale !== "undefined") ? overlayScale : 1.0;
                 var a2 = curSeg.angle + curSeg.span / 2;
-                var badgeR = outerR1 - 11.0 * sFact;
-                var badgeAngle = a2 - (11.0 * sFact / outerR1);
+                var br = 7.0 * sFact;
+                var badgeR = outerR1 - 24.5 * sFact;
+                var badgeAngle = a2 - (11.5 * sFact / badgeR);
                 var bx = badgeR * Math.cos(badgeAngle);
                 var by = badgeR * Math.sin(badgeAngle);
 
                 var dbx = dx - bx;
                 var dby = dy - by;
-                var br = 7.5 * sFact;
-                if (Math.sqrt(dbx * dbx + dby * dby) <= (br + 3.0 * sFact)) {
+                if (Math.sqrt(dbx * dbx + dby * dby) <= (br + 3.5 * sFact)) {
                     hoveredCounter = true;
                 }
             }
@@ -746,13 +746,13 @@ Item {
 
                     // Weißes X
                     ctx.beginPath();
-                    var d = br * 0.42;
+                    var d = br * 0.40;
                     ctx.moveTo(bx - d, by - d);
                     ctx.lineTo(bx + d, by + d);
                     ctx.moveTo(bx - d, by + d);
                     ctx.lineTo(bx + d, by - d);
                     ctx.strokeStyle = "#ffffff";
-                    ctx.lineWidth = 1.6;
+                    ctx.lineWidth = 1.5;
                     ctx.lineCap = "round";
                     ctx.stroke();
                 } else {
@@ -763,7 +763,7 @@ Item {
                     ctx.stroke();
 
                     ctx.fillStyle = "#ffffff";
-                    ctx.font = "bold " + Math.round(9 * scaleFactor) + "px sans-serif";
+                    ctx.font = "bold " + Math.round(8.5 * scaleFactor) + "px sans-serif";
                     ctx.textAlign = "center";
                     ctx.textBaseline = "middle";
                     ctx.fillText(count.toString(), bx, by + 0.5);
@@ -926,12 +926,12 @@ Item {
                         drawPin(ctx, px, py, !!seg.isPinned, isThisPinHovered, pinAngle);
                     }
 
-                    // Window Counter Badge (only on Ring 1 for multi-window groups)
+                    // Window Counter Badge (only on Ring 1 for multi-window groups, unterhalb des Ladebalkens)
                     if (ringNum === 1 && seg.isRealWindow && seg.windowCount > 1) {
                         var scaleFactor = (typeof overlayScale !== "undefined") ? overlayScale : 1.0;
-                        var br = 7.5 * scaleFactor;
-                        var badgeR = outerR - 11.0 * scaleFactor;
-                        var badgeAngle = a2 - (11.0 * scaleFactor / outerR);
+                        var br = 7.0 * scaleFactor;
+                        var badgeR = outerR - 24.5 * scaleFactor;
+                        var badgeAngle = a2 - (11.5 * scaleFactor / badgeR);
                         var bx = cx + badgeR * Math.cos(badgeAngle);
                         var by = cy + badgeR * Math.sin(badgeAngle);
                         var isThisBadgeHovered = (isSel && root.isCounterBadgeHovered);

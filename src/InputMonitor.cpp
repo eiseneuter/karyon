@@ -736,7 +736,10 @@ void InputMonitor::workerLoop()
                                 int dir = GestureManager::determineDirection(deltaX, deltaY);
                                 pendingGestureDir = -1;
                                 emit gestureDetected(dir, deltaX, deltaY);
-                                // Trail bleibt aktiv und folgt der Mausbewegung weiter bis zum Release!
+                                if (trailActive) {
+                                    trailActive = false;
+                                    emit gestureFinished();
+                                }
                             } else if (dragDistance > 14.0f && elapsed > GESTURE_TIME_WINDOW_MS) {
                                 if (trailActive) {
                                     trailActive = false;

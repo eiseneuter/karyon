@@ -443,12 +443,14 @@ int main(int argc, char *argv[])
         gestureTrail.finishTrail();
     }, Qt::QueuedConnection);
 
-    // 4. Gesten-Auslösung: Direkt beim Loslassen der rechten Maustaste ausführen
+    // 4. Gesten-Auslösung: Direkt beim Erreichen des Gesten-Schwellenwerts ausführen
     QObject::connect(&monitor, &InputMonitor::gestureDetected, &gestureManager,
-                     [&gestureManager, &monitor, &kwinBridge, &overlay](int direction, int deltaX, int deltaY) {
+                     [&gestureManager, &monitor, &kwinBridge, &overlay, &gestureTrail, &inGesture](int direction, int deltaX, int deltaY) {
         if (!SettingsManager::instance().gesturesEnabled()) return;
         Q_UNUSED(deltaX);
         Q_UNUSED(deltaY);
+        inGesture = false;
+        gestureTrail.finishTrail();
         gestureManager.executeGesture(direction, &monitor, &kwinBridge, overlay.mediaManager(), overlay.volumeManager());
     }, Qt::QueuedConnection);
 
