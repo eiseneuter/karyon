@@ -1,0 +1,20 @@
+# Build output & artifacts
+build/
+bin/
+dist/
+AppDir/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+
+# Packaged binaries
+*.AppImage
+
+# Caches & temporary files
+.cache/
+squashfs-root/
+*.log
+*.karyon.lock
+
+# Internal development notes & rules
+rules.md

@@ -1,0 +1,56 @@
+FROM fedora:40
+
+ENV LANG=C.UTF-8
+ENV LC_ALL=C.UTF-8
+
+# Install all build tools, Qt6, KDE Frameworks 6, and packaging utilities
+RUN dnf install -y --setopt=install_weak_deps=False \
+    gcc-c++ \
+    cmake \
+    ninja-build \
+    make \
+    file \
+    wget \
+    curl \
+    tar \
+    desktop-file-utils \
+    patchelf \
+    librsvg2-tools \
+    qt6-qtbase-devel \
+    qt6-qtdeclarative-devel \
+    qt6-qtsvg-devel \
+    qt6-qtwayland-devel \
+    kf6-kwindowsystem-devel \
+    kf6-kservice-devel \
+    kf6-kio-devel \
+    sqlite-devel \
+    libxcb-devel \
+    xcb-util-devel \
+    xcb-util-keysyms-devel \
+    xcb-util-cursor-devel \
+    xcb-util-image-devel \
+    xcb-util-renderutil-devel \
+    xcb-util-wm-devel \
+    libxkbcommon-devel \
+    libxkbcommon-x11-devel \
+    extra-cmake-modules \
+    && dnf clean all \
+    && rm -rf /var/cache/dnf
+
+# Download and extract appimagetool so FUSE is not required inside Docker
+RUN mkdir -p /opt/appimagetool \
+    && wget -q -O /tmp/appimagetool https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage \
+    && chmod +x /tmp/appimagetool \
+    && cd /tmp && /tmp/appimagetool --appimage-extract \
+    && mv /tmp/squashfs-root/* /opt/appimagetool/ \
+    && rm -rf /tmp/appimagetool /tmp/squashfs-root \
+    && ln -s /opt/appimagetool/AppRun /usr/local/bin/appimagetool
+
+# Download uruntime for standalone FUSE-optional execution on target machines
+RUN mkdir -p /opt/uruntime \
+    && wget -q -O /opt/uruntime/uruntime-appimage-squashfs-x86_64 https://github.com/VHSgunzo/uruntime/releases/latest/download/uruntime-appimage-squashfs-x86_64 \
+    && chmod +x /opt/uruntime/uruntime-appimage-squashfs-x86_64
+
+WORKDIR /src
+
+CMD ["./build_appimage.sh"]
