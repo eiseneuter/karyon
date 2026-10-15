@@ -15,7 +15,9 @@ cmake -GNinja \
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_INSTALL_PREFIX=/usr \
     "$HERE"
-ninja
+NJOBS=$(nproc 2>/dev/null || echo 4)
+[ "$NJOBS" -gt 4 ] && NJOBS=4
+ninja -j "$NJOBS"
 
 echo "=== [2/6] Setting up AppDir directory tree ==="
 mkdir -p "$APPDIR/usr/bin"
