@@ -16,7 +16,6 @@ find_package(KF6Service REQUIRED)
 find_package(KF6KIO REQUIRED)
 
 qt_policy(SET QTP0001 NEW)
-qt_policy(SET QTP0004 NEW)
 
 qt_add_executable(karyon
     src/main.cpp

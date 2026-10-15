@@ -64,17 +64,31 @@ if [ -f "$HERE/resources/io.github.eiseneuter.karyon.metainfo.xml" ]; then
 fi
 
 echo "=== [3/6] Bundling Qt6 Plugins & QML Modules ==="
-QT6_PLUGINS="/usr/lib64/qt6/plugins"
-for pdir in platforms xcbglintegrations egldeviceintegrations wayland-shell-integration wayland-graphics-integration-client wayland-decoration-client imageformats iconengines platforminputcontexts tls; do
-    if [ -d "$QT6_PLUGINS/$pdir" ]; then
+QT6_PLUGINS=""
+for d in /usr/lib/x86_64-linux-gnu/qt6/plugins /usr/lib64/qt6/plugins /usr/lib/qt6/plugins; do
+    if [ -d "$d" ]; then
+        QT6_PLUGINS="$d"
+        break
+    fi
+done
+
+for pdir in platforms xcbglintegrations egldeviceintegrations wayland-shell-integration wayland-graphics-integration-client wayland-decoration-client imageformats iconengines platforminputcontexts tls kf6; do
+    if [ -n "$QT6_PLUGINS" ] && [ -d "$QT6_PLUGINS/$pdir" ]; then
         mkdir -p "$APPDIR/usr/plugins/$pdir"
         cp -aL "$QT6_PLUGINS/$pdir"/* "$APPDIR/usr/plugins/$pdir/" 2>/dev/null || true
     fi
 done
 
-QT6_QML="/usr/lib64/qt6/qml"
+QT6_QML=""
+for d in /usr/lib/x86_64-linux-gnu/qt6/qml /usr/lib64/qt6/qml /usr/lib/qt6/qml; do
+    if [ -d "$d" ]; then
+        QT6_QML="$d"
+        break
+    fi
+done
+
 for qmod in QtCore QtQml QtQuick; do
-    if [ -d "$QT6_QML/$qmod" ]; then
+    if [ -n "$QT6_QML" ] && [ -d "$QT6_QML/$qmod" ]; then
         mkdir -p "$APPDIR/usr/qml/$qmod"
         cp -aL "$QT6_QML/$qmod"/* "$APPDIR/usr/qml/$qmod/" 2>/dev/null || true
     fi
@@ -159,7 +173,7 @@ export QT_PLUGIN_PATH="$HERE/usr/plugins:${QT_PLUGIN_PATH:-}"
 export QML_IMPORT_PATH="$HERE/usr/qml:${QML_IMPORT_PATH:-}"
 export QML2_IMPORT_PATH="$QML_IMPORT_PATH"
 export XDG_DATA_DIRS="$HERE/usr/share:${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"
-export QT_QPA_PLATFORM="xcb"
+export QT_QPA_PLATFORM="${QT_QPA_PLATFORM:-xcb}"
 
 exec "$HERE/usr/bin/karyon" "$@"
 EOF
