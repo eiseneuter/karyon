@@ -104,13 +104,6 @@ int main(int argc, char *argv[])
     setupStderrFilter();
     qInstallMessageHandler(quietMessageHandler);
 
-    QString lockPath = QDir::tempPath() + QStringLiteral("/karyon_instance.lock");
-    QLockFile lockFile(lockPath);
-    if (!lockFile.tryLock(100)) {
-        std::cerr << "Another instance of Karyon is already running. Exiting.\n";
-        return 0;
-    }
-
     std::setlocale(LC_ALL, "");
 
     // Detect KDE Plasma system locale if configured, with system fallback
