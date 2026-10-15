@@ -104,6 +104,13 @@ int main(int argc, char *argv[])
     setupStderrFilter();
     qInstallMessageHandler(quietMessageHandler);
 
+    QString lockPath = QDir::tempPath() + QStringLiteral("/karyon_instance.lock");
+    QLockFile lockFile(lockPath);
+    if (!lockFile.tryLock(100)) {
+        std::cerr << "Another instance of Karyon is already running. Exiting.\n";
+        return 0;
+    }
+
     std::setlocale(LC_ALL, "");
 
     // Detect KDE Plasma system locale if configured, with system fallback
@@ -469,9 +476,14 @@ int main(int argc, char *argv[])
         overlay.showAt(pos, kwinBridge.lastWindows(), &monitor);
     }, Qt::QueuedConnection);
 
-    // Aiming wird sowohl im Normalbetrieb (MouseArea) als auch bei aktivem Drag & Drop (DropArea)
-    // flackerfrei und direkt im Overlay anhand der echten Compositor-Cursorposition erfasst (Regel 4).
-    // Keine konkurrierenden Roh-evdev-Deltas via cursorMoved, um Koordinaten-Kollisionen und Flackern auszuschließen.
+    // Aiming im Normalbetrieb erfolgt flackerfrei über MouseArea/DropArea in QML anhand der Compositor-Cursorposition.
+    // Bei aktivem Drag & Drop (gehaltene LMT beim Ziehen einer Datei) liefert das Fenstersystem unter XWayland
+    // oft keine Events an Override-Redirect-Fenster. cursorMoved steuert das Segment-Aiming direkt über evdev-Mausdaten:
+    QObject::connect(&monitor, &InputMonitor::cursorMoved, &overlay, [&overlay, &monitor](int aimX, int aimY) {
+        if (monitor.isLeftDown()) {
+            overlay.updateAim(aimX, aimY);
+        }
+    }, Qt::QueuedConnection);
 
     // Synchronisation des Overlay-Zustands mit der KWinBridge (schützt MRU vor Hintergrund-Fokuswechseln)
     QObject::connect(&overlay, &CircleOverlay::overlayShown, &kwinBridge, [&kwinBridge]() {

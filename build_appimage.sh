@@ -196,5 +196,4 @@ else
 fi
 
 chmod +x "$OUTPUT_APPIMAGE"
-cp -f "$OUTPUT_APPIMAGE" "$DIST_DIR/Karyon.AppImage" 2>/dev/null || true
 echo "=== Success! AppImage created at: $OUTPUT_APPIMAGE ==="

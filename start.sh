@@ -13,37 +13,19 @@ if command -v cmake >/dev/null 2>&1; then
 fi
 
 # Determine executable to run:
-# If dist/Karyon-x86_64.AppImage exists, use it (fully bundled and guaranteed to match build)
 if [ -f "$SCRIPT_DIR/dist/Karyon-x86_64.AppImage" ]; then
     APP_BIN="$SCRIPT_DIR/dist/Karyon-x86_64.AppImage"
-elif [ -f "$SCRIPT_DIR/dist/Karyon.AppImage" ]; then
-    APP_BIN="$SCRIPT_DIR/dist/Karyon.AppImage"
 elif [ -f "$SCRIPT_DIR/build/bin/karyon" ]; then
     APP_BIN="$SCRIPT_DIR/build/bin/karyon"
 else
-    echo "Kein Binary oder AppImage gefunden. Starte Docker-Build..."
-    "$SCRIPT_DIR/build_appimage_docker.sh"
-    APP_BIN="$SCRIPT_DIR/dist/Karyon-x86_64.AppImage"
+    echo "Kein Binary oder AppImage gefunden. Bitte zuerst bauen!"
+    exit 1
 fi
 
 # Terminate existing Karyon instances for exclusive mouse access
-if pgrep -f 'python.*karyon' >/dev/null 2>&1; then
-    echo "Stopping existing Python-Karyon instance for exclusive mouse access..."
-    pkill -f 'python.*karyon' || true
-    sleep 0.3
-fi
-
-if pgrep -f 'bin/karyon' >/dev/null 2>&1; then
-    echo "Stopping previous Karyon C++ instance..."
-    pkill -f 'bin/karyon' || true
-    sleep 0.2
-fi
-
-if pgrep -f 'Karyon.*AppImage' >/dev/null 2>&1; then
-    echo "Stopping previous Karyon AppImage instance..."
-    pkill -f 'Karyon.*AppImage' || true
-    sleep 0.2
-fi
+echo "Stopping previous Karyon instances..."
+pkill -9 -f 'karyon' 2>/dev/null || true
+sleep 0.3
 
 # QT_QPA_PLATFORM=xcb for KWin/XWayland (synchronous cursor positioning & override-redirect without animations)
 export QT_QPA_PLATFORM=xcb
