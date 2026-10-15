@@ -663,12 +663,8 @@ void InputMonitor::workerLoop()
 
                         if (state == State::Gesture) {
                             state = State::Idle;
-                            if (pendingGestureDir >= 0) {
-                                int dir = pendingGestureDir;
-                                pendingGestureDir = -1;
-                                emit gestureDetected(dir, deltaX, deltaY);
-                            }
-                            // Release verschlucken
+                            pendingGestureDir = -1;
+                            // Geste wurde bereits beim Schwellenwert direkt ausgelöst. Release verschlucken.
                             continue;
                         } else if (state == State::Cancelled) {
                             state = State::Idle;
@@ -711,7 +707,6 @@ void InputMonitor::workerLoop()
                         if (trailActive) {
                             if (elapsed <= GESTURE_TIME_WINDOW_MS) {
                                 emit gesturePointAdded(deltaX, deltaY);
-                                pendingGestureDir = GestureManager::determineDirection(deltaX, deltaY);
                             } else {
                                 trailActive = false;
                                 emit gestureFinished();
@@ -738,8 +733,10 @@ void InputMonitor::workerLoop()
                             if (dispSq >= GESTURE_MIN_DISPLACEMENT * GESTURE_MIN_DISPLACEMENT && elapsed <= GESTURE_TIME_WINDOW_MS) {
                                 gestureFired = true;
                                 state = State::Gesture;
-                                pendingGestureDir = GestureManager::determineDirection(deltaX, deltaY);
-                                // Trail bleibt aktiv und folgt der Mausbewegung weiter!
+                                int dir = GestureManager::determineDirection(deltaX, deltaY);
+                                pendingGestureDir = -1;
+                                emit gestureDetected(dir, deltaX, deltaY);
+                                // Trail bleibt aktiv und folgt der Mausbewegung weiter bis zum Release!
                             } else if (dragDistance > 14.0f && elapsed > GESTURE_TIME_WINDOW_MS) {
                                 if (trailActive) {
                                     trailActive = false;

@@ -553,6 +553,14 @@ int main(int argc, char *argv[])
             overlay.hideOverlay();
             return;
         }
+        if (overlay.isCounterBadgeHovered()) {
+            QStringList groupIds = overlay.currentGroupWindowIds();
+            for (const QString &wid : groupIds) {
+                kwinBridge.closeWindow(wid);
+            }
+            overlay.hideOverlay();
+            return;
+        }
         QString selectedWinId = overlay.selectedWindowId();
         overlay.hideOverlay();
         if (selectedWinId == QLatin1String("__SHOW_DESKTOP__")) {

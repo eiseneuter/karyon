@@ -17,36 +17,34 @@ Karyon is fully capable of entirely replacing your KDE Plasma Panel (Task Manage
 * **Trigger & Select:** Hold the right mouse button to open the overlay. Hover over the desired item and let the right mouse button go to select it.
 * **Cancel:** Left-click anywhere while the overlay is open to cancel and close it without making a selection.
 * **Category Switching:** Use your mouse wheel inside the central hub to switch between categories (**Windows**, **Apps**, and **Files**).
-* **Volume Control:** Use your mouse wheel to adjust the system volume in the dedicated Volume Control Area at the bottom of the central hub, or drag along the volume ring.
-* **Media Controls:** When media is actively playing or paused, smart media controls (Previous, Play/Pause, Next) appear dynamically. Click them to control playback.
+* **Volume Control:** Use your mouse wheel to adjust the system volume in the dedicated Volume Control Area at the bottom of the central hub.
+* **Media Controls:** When media is actively playing or paused, smart media controls (Previous, Play/Pause, Next) appear dynamically. Activate them (hover and release) to control playback.
 * **Mute Audio:** Middle-click anywhere in the central hub to toggle system mute.
-* **Window Management:** Hover directly over an open window segment and scroll the mouse wheel **Up** to Maximize (or Restore) the window, and **Down** to Minimize it. Middle-click directly on the segment closes the window.
+* **Window Management:** Hover directly over an open window segment and scroll the mouse wheel **Up** to Maximize (or Restore) the window, and **Down** to Minimize (or Restore) it. Middle-click directly on the segment closes the window.
 
 ### 2. Navigation & Window Management
 * **Smart Ring Layout:** Karyon arranges your open windows, frequent apps, and recent files in concentric rings around your cursor. Windows and applications are strictly ordered based on usage (Most Recently Used), so your current context is always exactly where you need it.
-* **Segment Bars (Cyan):** Hovering over the edges of segments reveals interactive colored bars:
-  * **Cyan Bar (Drill-Down):** Appears on segments that contain deeper options or application sub-menus. Hovering over it drills down into the respective app or category.
+* **Interactive Segment Bars (Drill-Down):** Hovering over the outer edge of segments reveals interactive bars:
+  * **Drill-Down Bar:** Appears on segments that contain deeper options or application sub-menus. Hovering over it drills down into the respective app or category.
 * **Contextual Badges:**
-  * **Window Counter Badge:** A numerical badge on application segments that indicates how many open windows belong to that application. Hovering over this badge transforms it into a close button (X), allowing you to close the entire application group by releasing the right mouse button.
+  * **Window Counter Badge:** A numerical badge on application segments indicating how many open windows belong to that application. Hovering over this badge transforms it into a close button (X), allowing you to close the entire application group by releasing the right mouse button.
   * **Pin Badge:** Hover over the pin icon and release to permanently pin an application or file to your overlay. Pinned items stay in place even when closed, ensuring your most vital tools are always exactly where you expect them.
-  * **Audio Mute Badge:** If a window is currently playing audio, a speaker badge appears. Hover and release to instantly mute or unmute that specific application's audio stream. (A line through the symbol indicates a muted stream).
   * **Job Progress Indicators:** When file operations or downloads are running via KDE Frameworks (KIO), segments pulse or display active progress rings.
 
 ### 3. Gestures (Fast-Action)
-* **Mouse Gestures:** Flick your mouse in any of the 8 directions while holding the right mouse button to invoke gestures (like *copy*, *paste*, *maximize*, *virtual desktop switch*, or custom shortcuts).
-* **Visual Trail:** Responsive visual gesture trails give instant feedback on your movement path.
+* **Mouse Gestures:** Flick your mouse in any of the 8 directions while holding the right mouse button to invoke gestures (like *copy*, *paste*, *maximize*, *virtual desktop switch*, or custom shortcuts). Actions trigger immediately upon flicking.
 * **Important:** Gestures are designed to be extremely fast. They must be initiated *without* opening the visual overlay. Press the right mouse button and immediately flick your mouse to execute the gesture seamlessly.
 
 ### 4. Embedded Utilities & System Hub
-* **Central Hub:** The center of the radial menu acts as an orientation guide and information center. It prominently displays an icon indicating the currently active category (Windows, Apps, or Files), along with real-time system information (clock, date, and battery status).
+* **Central Hub:** The center of the radial menu acts as an orientation guide and information center. It prominently displays an icon indicating the currently active category (Windows, Apps, or Files), along with real-time system information (clock and date).
 * **System Tray:** Access your system's tray icons directly within Karyon. Hovering over a tray icon and releasing the right mouse button opens its native Plasma flyout window (just like the real system tray), giving you full access to its controls.
-* **Session Controls:** Access quick power options to lock the screen, suspend, hibernate, reboot, or shut down cleanly.
-* **Volume Control:** Adjust the system volume instantly using your mouse wheel inside the dedicated Volume Control Area at the bottom of the hub, or by dragging the volume slider.
+* **Session Controls:** Access quick power options to lock the screen, switch user, log out, sleep, restart, or shut down cleanly.
+* **Volume Control:** Adjust the system volume instantly using your mouse wheel inside the dedicated Volume Control Area at the bottom of the hub.
 
-### 5. Smart Game Mode & Deep Sleep
+### 5. Game Mode & Deep Sleep
 Karyon is built to never get in your way when gaming.
-* **Automatic Detection:** Karyon automatically detects active games through `.desktop` categories, Steam, Lutris, and Heroic. If you switch to a game, Karyon instantly enters Game Mode without requiring manual whitelists.
-* **Deep Sleep:** While Game Mode is active, Karyon suspends all background polling and forwards your mouse inputs 1:1. This "Deep Sleep" guarantees that 100% of your CPU and RAM are freed up for your game. As soon as you alt-tab out, Karyon instantly wakes up.
+* **Automatic Detection:** Karyon automatically detects active games (via `.desktop` categories, Steam, Lutris, and Heroic). When a game is focused, Karyon enters Game Mode without requiring manual configuration.
+* **Deep Sleep:** While Game Mode is active, Karyon suspends all background polling and forwards your mouse inputs 1:1 with zero overhead. As soon as you switch back to desktop applications, Karyon wakes up instantly.
 
 ---
 

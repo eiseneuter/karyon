@@ -361,6 +361,7 @@ void KWinBridge::activateWindow(const QString &winId)
         "for (var i = 0; i < wins.length; i++) {\n"
         "    if (wins[i].internalId.toString() === \"%1\") {\n"
         "        wins[i].minimized = false;\n"
+        "        if (workspace.raiseWindow) workspace.raiseWindow(wins[i]);\n"
         "        workspace.activeWindow = wins[i];\n"
         "        break;\n"
         "    }\n"
@@ -370,9 +371,14 @@ void KWinBridge::activateWindow(const QString &winId)
     // Shot 1: Sofort
     runScriptAsync(js, QStringLiteral("karyon_act"));
 
-    // Shot 2: Nach 50ms nochmals bekräftigen (gewinnt garantiert gegen KWin Focus-Restore beim Window-Hide)
-    QTimer::singleShot(50, this, [this, js]() {
+    // Shot 2: Nach 60ms bekräftigen
+    QTimer::singleShot(60, this, [this, js]() {
         runScriptAsync(js, QStringLiteral("karyon_act2"));
+    });
+
+    // Shot 3: Nach 160ms nochmals bekräftigen (gewinnt garantiert gegen asynchronen Focus-Restore beim Window-Hide)
+    QTimer::singleShot(160, this, [this, js]() {
+        runScriptAsync(js, QStringLiteral("karyon_act3"));
     });
 }
 

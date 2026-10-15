@@ -39,6 +39,8 @@ struct OverlaySegment {
     bool isPinned = false; // true if currently pinned
     int progressPercent = -1; // 0 to 100, or -1 if no active job
     QString trayProgramKey;   // Non-empty ("service|path") if segment mirrors a running tray program
+    int windowCount = 1;
+    QStringList groupWindowIds;
 };
 
 enum class OverlayMode {
@@ -114,6 +116,9 @@ public:
     void togglePinForCurrentSelection();
     void markFileLaunched(const QString &filePath);
 
+    bool isCounterBadgeHovered() const { return m_isCounterBadgeHovered; }
+    QStringList currentGroupWindowIds() const;
+
     bool isCursorInVolumeArea() const { return m_showVolumeControlEnabled && m_isVolumeHovered; }
     bool volumeScrolledThisSession() const { return m_volumeScrolledThisSession; }
     void stepVolume(int stepPercent);
@@ -128,7 +133,7 @@ public:
 
 public slots:
     void hideOverlay();
-    void handleAimChanged(int offsetX, int offsetY, bool isDrilldown, const QString &curId, int selRing, int selIdx, bool isPinHovered = false, bool isVolumeHovered = false);
+    void handleAimChanged(int offsetX, int offsetY, bool isDrilldown, const QString &curId, int selRing, int selIdx, bool isPinHovered = false, bool isVolumeHovered = false, bool isCounterBadgeHovered = false);
 
 signals:
     void overlayShown();
@@ -222,6 +227,7 @@ private:
     RecentFilesManager m_recentFilesManager;
     PinnedManager m_pinnedManager;
     bool m_isPinHovered = false;
+    bool m_isCounterBadgeHovered = false;
     int m_selectedRing = -1;
     int m_selectedIndex = -1;
     QList<AppEntry> m_cachedRecentApps;

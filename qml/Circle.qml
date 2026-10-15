@@ -43,6 +43,7 @@ Item {
     property int selectedRing: -1    // 1 für Ring 1, 2 für Ring 2, 3 für Ring 3, -1 für keine Auswahl
     property int selectedIndex: -1   // Index im jeweiligen Ring, -1 für keine Auswahl
     property bool isPinHovered: false
+    property bool isCounterBadgeHovered: false
     property real aimOffsetX: 0
     property real aimOffsetY: -20
 
@@ -201,7 +202,7 @@ Item {
         aimOffsetY = oy;
         updateSelection();
         if (typeof overlayController !== "undefined" && overlayController) {
-            overlayController.handleAimChanged(ox, oy, isDrilldownActive, selectedWindowId, selectedRing, selectedIndex, isPinHovered, isCursorInVolumeArea);
+            overlayController.handleAimChanged(ox, oy, isDrilldownActive, selectedWindowId, selectedRing, selectedIndex, isPinHovered, isCursorInVolumeArea, isCounterBadgeHovered);
         }
     }
 
@@ -345,6 +346,32 @@ Item {
 
         if (isPinHovered !== hoveredPin) {
             isPinHovered = hoveredPin;
+            ringCanvas.requestPaint();
+        }
+
+        // Counter-Badge Hover prüfen (nur auf Ring 1 bei echten Fenstern mit windowCount > 1)
+        var hoveredCounter = false;
+        if (selectedRing === 1 && segmentList1 && selectedIndex >= 0 && selectedIndex < segmentList1.length) {
+            var curSeg = segmentList1[selectedIndex];
+            if (curSeg && curSeg.isRealWindow && curSeg.windowCount > 1) {
+                var sFact = (typeof overlayScale !== "undefined") ? overlayScale : 1.0;
+                var a2 = curSeg.angle + curSeg.span / 2;
+                var badgeR = outerR1 - 11.0 * sFact;
+                var badgeAngle = a2 - (11.0 * sFact / outerR1);
+                var bx = badgeR * Math.cos(badgeAngle);
+                var by = badgeR * Math.sin(badgeAngle);
+
+                var dbx = dx - bx;
+                var dby = dy - by;
+                var br = 7.5 * sFact;
+                if (Math.sqrt(dbx * dbx + dby * dby) <= (br + 3.0 * sFact)) {
+                    hoveredCounter = true;
+                }
+            }
+        }
+
+        if (isCounterBadgeHovered !== hoveredCounter) {
+            isCounterBadgeHovered = hoveredCounter;
             ringCanvas.requestPaint();
         }
     }
@@ -638,6 +665,7 @@ Item {
         property bool isDrillActive: isDrilldownActive
 
         property bool pinHovered: isPinHovered
+        property bool counterHovered: isCounterBadgeHovered
         onSegmentData1Changed: requestPaint()
         onSegmentData2Changed: requestPaint()
         onSegmentData3Changed: requestPaint()
@@ -647,6 +675,7 @@ Item {
         onRing3ActiveChanged: requestPaint()
         onIsDrillActiveChanged: requestPaint()
         onPinHoveredChanged: requestPaint()
+        onCounterHoveredChanged: requestPaint()
 
         onPaint: {
             var ctx = getContext("2d");
@@ -700,6 +729,45 @@ Item {
                     ctx.stroke();
                 }
 
+                ctx.restore();
+            }
+
+            function drawCounterBadge(ctx, bx, by, br, count, isHovered, scaleFactor) {
+                ctx.save();
+                ctx.beginPath();
+                ctx.arc(bx, by, br, 0, Math.PI * 2, false);
+
+                if (isHovered) {
+                    ctx.fillStyle = "#e06c75";
+                    ctx.fill();
+                    ctx.strokeStyle = "#16181d";
+                    ctx.lineWidth = 1.0;
+                    ctx.stroke();
+
+                    // Weißes X
+                    ctx.beginPath();
+                    var d = br * 0.42;
+                    ctx.moveTo(bx - d, by - d);
+                    ctx.lineTo(bx + d, by + d);
+                    ctx.moveTo(bx - d, by + d);
+                    ctx.lineTo(bx + d, by - d);
+                    ctx.strokeStyle = "#ffffff";
+                    ctx.lineWidth = 1.6;
+                    ctx.lineCap = "round";
+                    ctx.stroke();
+                } else {
+                    ctx.fillStyle = "#282c34";
+                    ctx.fill();
+                    ctx.strokeStyle = "rgba(255, 255, 255, 0.4)";
+                    ctx.lineWidth = 1.0;
+                    ctx.stroke();
+
+                    ctx.fillStyle = "#ffffff";
+                    ctx.font = "bold " + Math.round(9 * scaleFactor) + "px sans-serif";
+                    ctx.textAlign = "center";
+                    ctx.textBaseline = "middle";
+                    ctx.fillText(count.toString(), bx, by + 0.5);
+                }
                 ctx.restore();
             }
 
@@ -856,6 +924,18 @@ Item {
                         var py = cy + pinR * Math.sin(pinAngle);
                         var isThisPinHovered = (isSel && root.isPinHovered);
                         drawPin(ctx, px, py, !!seg.isPinned, isThisPinHovered, pinAngle);
+                    }
+
+                    // Window Counter Badge (only on Ring 1 for multi-window groups)
+                    if (ringNum === 1 && seg.isRealWindow && seg.windowCount > 1) {
+                        var scaleFactor = (typeof overlayScale !== "undefined") ? overlayScale : 1.0;
+                        var br = 7.5 * scaleFactor;
+                        var badgeR = outerR - 11.0 * scaleFactor;
+                        var badgeAngle = a2 - (11.0 * scaleFactor / outerR);
+                        var bx = cx + badgeR * Math.cos(badgeAngle);
+                        var by = cy + badgeR * Math.sin(badgeAngle);
+                        var isThisBadgeHovered = (isSel && root.isCounterBadgeHovered);
+                        drawCounterBadge(ctx, bx, by, br, seg.windowCount, isThisBadgeHovered, scaleFactor);
                     }
                 }
             }

@@ -808,6 +808,12 @@ void CircleOverlay::partitionWindows(const QList<WindowInfo> &mru,
         return w.desktopFileName.isEmpty() ? w.resourceClass : w.desktopFileName;
     };
 
+    QHash<QString, QStringList> appGroupWindowIds;
+    for (const auto &w : mru) {
+        QString key = getAppKey(w);
+        appGroupWindowIds[key].append(w.id);
+    }
+
     auto getMruIdx = [&](const WindowInfo &w) {
         for (int i = 0; i < mru.size(); ++i) {
             if (mru[i].id == w.id) return i;
@@ -894,6 +900,9 @@ void CircleOverlay::partitionWindows(const QList<WindowInfo> &mru,
         seg.tooltipText = formatWindowTooltip(displayName, w.caption, w.resourceClass);
         seg.segmentType = QStringLiteral("window");
         seg.isRealWindow = true;
+        QString appGroupKey = getAppKey(w);
+        seg.groupWindowIds = appGroupWindowIds.value(appGroupKey);
+        seg.windowCount = seg.groupWindowIds.size();
         configurePinStatus(seg, w);
 
         // Wenn das Fenster zu einer im Tray residierenden App gehört, Live-Tray-Icon verknüpfen
@@ -2218,6 +2227,8 @@ void CircleOverlay::populateSegments(const QList<WindowInfo> &windows, bool &out
             m[QStringLiteral("canPin")] = seg.canPin;
             m[QStringLiteral("isPinned")] = seg.isPinned;
             m[QStringLiteral("progressPercent")] = seg.progressPercent;
+            m[QStringLiteral("windowCount")] = seg.windowCount;
+            m[QStringLiteral("groupWindowIds")] = seg.groupWindowIds;
             result.append(m);
         }
         return result;
@@ -3521,6 +3532,9 @@ void CircleOverlay::showAt(const QPoint &cursorPos, const QList<WindowInfo> &win
 
     emit overlayShown();
 
+    m_isPinHovered = false;
+    m_isCounterBadgeHovered = false;
+
     // Initiale Mausposition: cursorOffsetY über dem Zentrum -> Vorauswahl von Ring 1
     m_lastAimX = 0;
     m_lastAimY = -curOffsetY;
@@ -3556,12 +3570,13 @@ void CircleOverlay::updateAim(int offsetX, int offsetY)
                               Q_ARG(QVariant, offsetY));
 }
 
-void CircleOverlay::handleAimChanged(int offsetX, int offsetY, bool isDrilldown, const QString &curId, int selRing, int selIdx, bool isPinHovered, bool isVolumeHovered)
+void CircleOverlay::handleAimChanged(int offsetX, int offsetY, bool isDrilldown, const QString &curId, int selRing, int selIdx, bool isPinHovered, bool isVolumeHovered, bool isCounterBadgeHovered)
 {
     m_lastAimX = offsetX;
     m_lastAimY = offsetY;
     m_isPinHovered = isPinHovered;
     m_isVolumeHovered = isVolumeHovered;
+    m_isCounterBadgeHovered = isCounterBadgeHovered;
     m_selectedRing = selRing;
     m_selectedIndex = selIdx;
 
@@ -3935,6 +3950,8 @@ bool CircleOverlay::isVisible() const
 void CircleOverlay::hideOverlay()
 {
     m_volumeScrolledThisSession = false;
+    m_isPinHovered = false;
+    m_isCounterBadgeHovered = false;
     if (m_view && m_view->rootObject()) {
         m_view->rootObject()->setProperty("volumeScrolledThisSession", false);
     }
@@ -3944,6 +3961,20 @@ void CircleOverlay::hideOverlay()
     m_view->setVisible(false);
 
     emit overlayHidden();
+}
+
+QStringList CircleOverlay::currentGroupWindowIds() const
+{
+    if (m_selectedRing == 1 && m_selectedIndex >= 0 && m_selectedIndex < m_currentRing1.size()) {
+        const auto &seg = m_currentRing1[m_selectedIndex];
+        if (!seg.groupWindowIds.isEmpty()) {
+            return seg.groupWindowIds;
+        }
+        if (seg.isRealWindow && !seg.windowId.isEmpty()) {
+            return { seg.windowId };
+        }
+    }
+    return {};
 }
 
 void CircleOverlay::stepVolume(int stepPercent)
