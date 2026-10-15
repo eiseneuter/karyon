@@ -6,19 +6,18 @@ cd "$SCRIPT_DIR"
 
 echo "=== Karyon C++ Test Start ==="
 
-# Build project if cmake is available on host
-if command -v cmake >/dev/null 2>&1; then
-    cmake -B build -S .
-    cmake --build build -j"$(nproc)"
-fi
-
 # Determine executable to run:
 if [ -f "$SCRIPT_DIR/dist/Karyon-x86_64.AppImage" ]; then
     APP_BIN="$SCRIPT_DIR/dist/Karyon-x86_64.AppImage"
 elif [ -f "$SCRIPT_DIR/build/bin/karyon" ]; then
     APP_BIN="$SCRIPT_DIR/build/bin/karyon"
+elif command -v cmake >/dev/null 2>&1; then
+    echo "Kein AppImage gefunden. Versuche lokalen Host-Build..."
+    cmake -B build -S .
+    cmake --build build -j"$(nproc)"
+    APP_BIN="$SCRIPT_DIR/build/bin/karyon"
 else
-    echo "Kein Binary oder AppImage gefunden. Bitte zuerst bauen!"
+    echo "Kein Binary oder AppImage gefunden. Bitte zuerst './build_appimage_docker.sh' ausführen!"
     exit 1
 fi
 
