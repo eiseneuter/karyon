@@ -6,18 +6,19 @@ cd "$SCRIPT_DIR"
 
 echo "=== Karyon C++ Test Start ==="
 
-# Determine executable to run:
-if [ -f "$SCRIPT_DIR/dist/Karyon-x86_64.AppImage" ]; then
-    APP_BIN="$SCRIPT_DIR/dist/Karyon-x86_64.AppImage"
+# Build and run locally if cmake is available on host
+if command -v cmake >/dev/null 2>&1; then
+    cmake -B build -S .
+    cmake --build build -j4
+    APP_BIN="$SCRIPT_DIR/build/bin/karyon"
 elif [ -f "$SCRIPT_DIR/build/bin/karyon" ]; then
     APP_BIN="$SCRIPT_DIR/build/bin/karyon"
-elif command -v cmake >/dev/null 2>&1; then
-    echo "Kein AppImage gefunden. Versuche lokalen Host-Build..."
-    cmake -B build -S .
-    cmake --build build -j"$(nproc)"
-    APP_BIN="$SCRIPT_DIR/build/bin/karyon"
+elif [ -f "$SCRIPT_DIR/dist/Karyon-x86_64.AppImage" ]; then
+    APP_BIN="$SCRIPT_DIR/dist/Karyon-x86_64.AppImage"
 else
-    echo "Kein Binary oder AppImage gefunden. Bitte zuerst './build_appimage_docker.sh' ausführen!"
+    echo "Fehler: 'cmake' ist auf deinem System nicht installiert."
+    echo "Für schnelles lokales Kompilieren & Testen (ohne AppImage) bitte ausführen:"
+    echo "  sudo pacman -S cmake"
     exit 1
 fi
 
