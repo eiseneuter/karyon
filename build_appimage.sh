@@ -189,12 +189,14 @@ rm -f "$OUTPUT_APPIMAGE"
 export ARCH=x86_64
 export APPIMAGE_EXTRACT_AND_RUN=1
 
+UPDATE_INFO="gh-releases-zsync|eiseneuter|karyon|latest|Karyon-*x86_64.AppImage.zsync"
+
 if [ -f "$URUNTIME" ]; then
     echo "Embedding FUSE-optional uruntime..."
-    appimagetool --no-appstream --runtime-file "$URUNTIME" "$APPDIR" "$OUTPUT_APPIMAGE"
+    appimagetool -u "$UPDATE_INFO" --no-appstream --runtime-file "$URUNTIME" "$APPDIR" "$OUTPUT_APPIMAGE"
 else
     echo "Packaging with standard runtime..."
-    appimagetool --no-appstream "$APPDIR" "$OUTPUT_APPIMAGE"
+    appimagetool -u "$UPDATE_INFO" --no-appstream "$APPDIR" "$OUTPUT_APPIMAGE"
 fi
 
 chmod +x "$OUTPUT_APPIMAGE"

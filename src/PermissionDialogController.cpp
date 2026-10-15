@@ -1,10 +1,13 @@
 #include "PermissionDialogController.h"
 #include "PermissionManager.h"
+#include "ProcessUtils.h"
 
 #include <QQmlContext>
 #include <QScreen>
 #include <QGuiApplication>
 #include <QEventLoop>
+#include <KWindowSystem>
+#include <KX11Extras>
 
 PermissionDialogController::PermissionDialogController(QObject *parent)
     : QObject(parent)
@@ -77,11 +80,19 @@ void PermissionDialogController::startWindowDrag()
 bool PermissionDialogController::execDialog()
 {
     m_view = new QQuickView();
+    m_view->setTitle(QStringLiteral("Karyon"));
+    m_view->setIcon(ProcessUtils::karyonIcon());
     m_view->setFlags(Qt::Dialog | Qt::FramelessWindowHint);
     m_view->setColor(QColor(Qt::transparent));
     m_view->setResizeMode(QQuickView::SizeRootObjectToView);
     m_view->rootContext()->setContextProperty(QStringLiteral("permController"), this);
     m_view->setSource(QUrl(QStringLiteral("qrc:/qt/qml/karyon/qml/PermissionDialog.qml")));
+    m_view->create();
+
+    if (KWindowSystem::isPlatformX11()) {
+        KX11Extras::setOnAllDesktops(m_view->winId(), true);
+        KX11Extras::setType(m_view->winId(), NET::Dialog);
+    }
 
     QScreen *screen = QGuiApplication::primaryScreen();
     if (screen) {
