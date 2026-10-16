@@ -14,6 +14,13 @@
 #include <iostream>
 #include <cstring>
 #include <algorithm>
+#include <QDBusConnection>
+#include <QDBusMessage>
+#include <QDBusVariant>
+#include <QDBusArgument>
+#include <QMetaObject>
+#include <QStringList>
+#include <QVariantMap>
 
 namespace fs = std::filesystem;
 
@@ -250,6 +257,7 @@ void InputMonitor::tryGrabPendingDevices()
         return;
     }
 
+    bool newlyGrabbed = false;
     for (auto &dev : m_devices) {
         if (dev.grabbed || dev.fd < 0) continue;
 
@@ -267,10 +275,160 @@ void InputMonitor::tryGrabPendingDevices()
                 continue;
             }
             dev.grabbed = true;
+            newlyGrabbed = true;
             m_leftDown.store(false);
             std::cout << "[InputMonitor] Mouse grabbed safely (all buttons released): "
                       << dev.path << " [" << dev.name << "]\n";
         }
+    }
+
+    if (newlyGrabbed) {
+        QMetaObject::invokeMethod(this, [this]() {
+            syncKWinMouseSettings();
+        }, Qt::QueuedConnection);
+    }
+}
+
+void InputMonitor::syncKWinMouseSettings()
+{
+    QStringList grabbedSysNames;
+    for (const auto &dev : m_devices) {
+        if (dev.grabbed && !dev.path.empty()) {
+            std::string fname = fs::path(dev.path).filename().string();
+            if (!fname.empty()) {
+                grabbedSysNames.append(QString::fromStdString(fname));
+            }
+        }
+    }
+    if (grabbedSysNames.isEmpty()) return;
+
+    QDBusConnection bus = QDBusConnection::sessionBus();
+    if (!bus.isConnected()) return;
+
+    QDBusMessage listMsg = QDBusMessage::createMethodCall(
+        QStringLiteral("org.kde.KWin"),
+        QStringLiteral("/org/kde/KWin/InputDevice"),
+        QStringLiteral("org.freedesktop.DBus.Properties"),
+        QStringLiteral("Get"));
+    listMsg << QStringLiteral("org.kde.KWin.InputDeviceManager")
+            << QStringLiteral("devicesSysNames");
+
+    QDBusMessage listReply = bus.call(listMsg, QDBus::Block, 500);
+    if (listReply.type() != QDBusMessage::ReplyMessage || listReply.arguments().isEmpty()) {
+        return;
+    }
+
+    QStringList allSysNames = listReply.arguments().first().value<QDBusVariant>().variant().toStringList();
+    if (allSysNames.isEmpty()) return;
+
+    auto getDeviceProps = [&](const QString &sysName) -> QVariantMap {
+        QDBusMessage msg = QDBusMessage::createMethodCall(
+            QStringLiteral("org.kde.KWin"),
+            QStringLiteral("/org/kde/KWin/InputDevice/") + sysName,
+            QStringLiteral("org.freedesktop.DBus.Properties"),
+            QStringLiteral("GetAll"));
+        msg << QStringLiteral("org.kde.KWin.InputDevice");
+        QDBusMessage reply = bus.call(msg, QDBus::Block, 300);
+        if (reply.type() != QDBusMessage::ReplyMessage || reply.arguments().isEmpty()) {
+            return {};
+        }
+        QVariant firstArg = reply.arguments().first();
+        if (firstArg.canConvert<QDBusArgument>()) {
+            QVariantMap map;
+            const QDBusArgument dbusArg = firstArg.value<QDBusArgument>();
+            dbusArg >> map;
+            return map;
+        }
+        return firstArg.toMap();
+    };
+
+    QString virtualMouseSysName;
+    for (const QString &sysName : allSysNames) {
+        QVariantMap props = getDeviceProps(sysName);
+        if (props.value(QStringLiteral("name")).toString() == QStringLiteral("karyon-virtual mouse")) {
+            virtualMouseSysName = sysName;
+            break;
+        }
+    }
+    if (virtualMouseSysName.isEmpty()) return;
+
+    // Beste physische Maus unter den gegrabbten Geräten auswählen:
+    // 1. Bevorzuge externe Mäuse mit benutzerdefinierten Einstellungen (PointerAcceleration != 0, Flat-Profil, etc.)
+    // 2. Sonst erste echte externe Maus (keine internen I2C-Touchpad-Begleitgeräte wie ELAN*)
+    QVariantMap bestProps;
+    int bestScore = -1;
+
+    for (const QString &sysName : grabbedSysNames) {
+        if (!allSysNames.contains(sysName)) continue;
+        QVariantMap props = getDeviceProps(sysName);
+        if (props.isEmpty()) continue;
+        if (!props.value(QStringLiteral("pointer")).toBool()) continue;
+        if (props.value(QStringLiteral("touchpad")).toBool()) continue;
+        if (props.value(QStringLiteral("isVirtual")).toBool()) continue;
+
+        QString devName = props.value(QStringLiteral("name")).toString();
+        if (devName.startsWith(QStringLiteral("karyon-virtual"))) continue;
+
+        int score = 1;
+        bool isInternalElan = devName.contains(QStringLiteral("ELAN"), Qt::CaseInsensitive) ||
+                              devName.contains(QStringLiteral("SYNA"), Qt::CaseInsensitive);
+        if (!isInternalElan) {
+            score += 10;
+        }
+
+        double accel = props.value(QStringLiteral("pointerAcceleration"), 0.0).toDouble();
+        bool flat = props.value(QStringLiteral("pointerAccelerationProfileFlat"), false).toBool();
+        bool leftHanded = props.value(QStringLiteral("leftHanded"), false).toBool();
+        bool natScroll = props.value(QStringLiteral("naturalScroll"), false).toBool();
+        double scrollFac = props.value(QStringLiteral("scrollFactor"), 1.0).toDouble();
+
+        if (std::abs(accel) > 0.001 || flat || leftHanded || natScroll || std::abs(scrollFac - 1.0) > 0.001) {
+            score += 100;
+        }
+
+        if (score > bestScore) {
+            bestScore = score;
+            bestProps = props;
+        }
+    }
+
+    if (bestProps.isEmpty()) return;
+
+    auto setVirtualProp = [&](const QString &propName, const QVariant &val) {
+        QDBusMessage msg = QDBusMessage::createMethodCall(
+            QStringLiteral("org.kde.KWin"),
+            QStringLiteral("/org/kde/KWin/InputDevice/") + virtualMouseSysName,
+            QStringLiteral("org.freedesktop.DBus.Properties"),
+            QStringLiteral("Set"));
+        msg << QStringLiteral("org.kde.KWin.InputDevice")
+            << propName
+            << QVariant::fromValue(QDBusVariant(val));
+        bus.call(msg, QDBus::NoBlock);
+    };
+
+    if (bestProps.contains(QStringLiteral("pointerAcceleration"))) {
+        setVirtualProp(QStringLiteral("pointerAcceleration"),
+                       bestProps.value(QStringLiteral("pointerAcceleration")).toDouble());
+    }
+    if (bestProps.contains(QStringLiteral("pointerAccelerationProfileFlat"))) {
+        setVirtualProp(QStringLiteral("pointerAccelerationProfileFlat"),
+                       bestProps.value(QStringLiteral("pointerAccelerationProfileFlat")).toBool());
+    }
+    if (bestProps.contains(QStringLiteral("pointerAccelerationProfileAdaptive"))) {
+        setVirtualProp(QStringLiteral("pointerAccelerationProfileAdaptive"),
+                       bestProps.value(QStringLiteral("pointerAccelerationProfileAdaptive")).toBool());
+    }
+    if (bestProps.contains(QStringLiteral("leftHanded"))) {
+        setVirtualProp(QStringLiteral("leftHanded"),
+                       bestProps.value(QStringLiteral("leftHanded")).toBool());
+    }
+    if (bestProps.contains(QStringLiteral("naturalScroll"))) {
+        setVirtualProp(QStringLiteral("naturalScroll"),
+                       bestProps.value(QStringLiteral("naturalScroll")).toBool());
+    }
+    if (bestProps.contains(QStringLiteral("scrollFactor"))) {
+        setVirtualProp(QStringLiteral("scrollFactor"),
+                       bestProps.value(QStringLiteral("scrollFactor")).toDouble());
     }
 }
 
@@ -611,6 +769,77 @@ void InputMonitor::workerLoop()
                 continue;
             }
 
+            int32_t passthruRelX = 0;
+            int32_t passthruRelY = 0;
+            bool hasPassthruRel = false;
+            bool nonRelPassthruSinceSyn = false;
+
+            int32_t trigRelX = 0;
+            int32_t trigRelY = 0;
+            bool trigBatchDirty = false;
+
+            auto flushPassthruRel = [&]() {
+                if (!hasPassthruRel) return;
+                hasPassthruRel = false;
+                if (dev.grabbed && m_uinputFd >= 0) {
+                    struct input_event outEvs[3]{};
+                    int n = 0;
+                    if (passthruRelX != 0) {
+                        outEvs[n].type = EV_REL;
+                        outEvs[n].code = REL_X;
+                        outEvs[n].value = passthruRelX;
+                        ++n;
+                    }
+                    if (passthruRelY != 0) {
+                        outEvs[n].type = EV_REL;
+                        outEvs[n].code = REL_Y;
+                        outEvs[n].value = passthruRelY;
+                        ++n;
+                    }
+                    if (n > 0) {
+                        outEvs[n].type = EV_SYN;
+                        outEvs[n].code = SYN_REPORT;
+                        outEvs[n].value = 0;
+                        ++n;
+                        [[maybe_unused]] auto w = write(m_uinputFd, outEvs, n * sizeof(struct input_event));
+                    }
+                }
+                passthruRelX = 0;
+                passthruRelY = 0;
+            };
+
+            auto flushTriggeredRel = [&]() {
+                if (!trigBatchDirty) return;
+                trigBatchDirty = false;
+                aimDirty = false;
+                if (dev.grabbed && m_uinputFd >= 0) {
+                    struct input_event outEvs[3]{};
+                    int n = 0;
+                    if (trigRelX != 0) {
+                        outEvs[n].type = EV_REL;
+                        outEvs[n].code = REL_X;
+                        outEvs[n].value = trigRelX;
+                        ++n;
+                    }
+                    if (trigRelY != 0) {
+                        outEvs[n].type = EV_REL;
+                        outEvs[n].code = REL_Y;
+                        outEvs[n].value = trigRelY;
+                        ++n;
+                    }
+                    if (n > 0) {
+                        outEvs[n].type = EV_SYN;
+                        outEvs[n].code = SYN_REPORT;
+                        outEvs[n].value = 0;
+                        ++n;
+                        [[maybe_unused]] auto w = write(m_uinputFd, outEvs, n * sizeof(struct input_event));
+                    }
+                }
+                trigRelX = 0;
+                trigRelY = 0;
+                emit cursorMoved(aimX, aimY);
+            };
+
             size_t count = bytes / sizeof(struct input_event);
             for (size_t k = 0; k < count; ++k) {
                 const auto &ev = events[k];
@@ -623,6 +852,12 @@ void InputMonitor::workerLoop()
                         emitSyn(m_uinputKbdFd);
                     }
                     continue;
+                }
+
+                // Vor jedem Maustasten-Event etwaige aufgelaufene Bewegungen zuerst abschicken
+                if (ev.type == EV_KEY) {
+                    flushPassthruRel();
+                    flushTriggeredRel();
                 }
 
                 // Linksklick während gedrückter rechter Maustaste -> Schließt Overlay sofort!
@@ -794,6 +1029,7 @@ void InputMonitor::workerLoop()
                                 }
                                 state = State::Dragging;
                                 pendingGestureDir = -1;
+                                flushPassthruRel();
                                 if (dev.grabbed && m_uinputFd >= 0) {
                                     emitEvent(m_uinputFd, EV_KEY, BTN_RIGHT, 1);
                                     emitSyn(m_uinputFd);
@@ -824,13 +1060,12 @@ void InputMonitor::workerLoop()
                                     subpixel = target - outVal;
                                     effDelta = outVal;
 
-                                    if (outVal != 0) {
-                                        emitEvent(m_uinputFd, EV_REL, ev.code, outVal);
-                                    }
+                                    if (ev.code == REL_X) trigRelX += outVal;
+                                    else if (ev.code == REL_Y) trigRelY += outVal;
                                 }
 
-                                if (ev.code == REL_X) { aimX += effDelta; aimDirty = true; }
-                                else if (ev.code == REL_Y) { aimY += effDelta; aimDirty = true; }
+                                if (ev.code == REL_X) { aimX += effDelta; aimDirty = true; trigBatchDirty = true; }
+                                else if (ev.code == REL_Y) { aimY += effDelta; aimDirty = true; trigBatchDirty = true; }
                                 continue;
                             } else if (ev.code == REL_WHEEL || ev.code == REL_WHEEL_HI_RES) {
                                 if (ev.code == REL_WHEEL) {
@@ -839,20 +1074,34 @@ void InputMonitor::workerLoop()
                                 continue; // Wheel verschlucken
                             }
                         } else if (ev.type == EV_SYN && aimDirty) {
-                            aimDirty = false;
-                            if (dev.grabbed && m_uinputFd >= 0) {
-                                emitSyn(m_uinputFd);
-                            }
-                            emit cursorMoved(aimX, aimY);
-                            continue;
+                            continue; // Am Ende des Read-Batches gebündelt emittieren
                         }
                     }
 
                     if (dev.grabbed && m_uinputFd >= 0 && state != State::Cancelled) {
-                        [[maybe_unused]] auto w = write(m_uinputFd, &ev, sizeof(ev));
+                        if (ev.type == EV_REL && (ev.code == REL_X || ev.code == REL_Y)) {
+                            if (ev.code == REL_X) passthruRelX += ev.value;
+                            else passthruRelY += ev.value;
+                            hasPassthruRel = true;
+                        } else if (ev.type == EV_MSC) {
+                            // EV_MSC (MSC_SCAN) wird auf dem virtuellen uinput-Mausgerät nicht benötigt
+                        } else if (ev.type == EV_SYN && ev.code == SYN_REPORT) {
+                            if (nonRelPassthruSinceSyn) {
+                                flushPassthruRel();
+                                emitSyn(m_uinputFd);
+                                nonRelPassthruSinceSyn = false;
+                            }
+                        } else {
+                            flushPassthruRel();
+                            [[maybe_unused]] auto w = write(m_uinputFd, &ev, sizeof(ev));
+                            nonRelPassthruSinceSyn = true;
+                        }
                     }
                 }
             }
+
+            flushPassthruRel();
+            flushTriggeredRel();
         }
     }
 }

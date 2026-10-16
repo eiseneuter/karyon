@@ -65,6 +65,7 @@ private:
     void scanDevices();
     bool rescanDevices();
     void tryGrabPendingDevices();
+    void syncKWinMouseSettings();
     void setupUInput();
     void cleanup();
 
