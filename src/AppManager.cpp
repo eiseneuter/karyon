@@ -138,32 +138,46 @@ QString AppManager::findDesktopFilePathCaseInsensitive(const QString &name)
 {
     if (name.isEmpty()) return {};
     if (name.endsWith(QLatin1String(".desktop"), Qt::CaseInsensitive) && QFile::exists(name)) return name;
-    if (QFile::exists(name)) return name;
+    if (!name.endsWith(QLatin1String(".desktop"), Qt::CaseInsensitive) && QFile::exists(name + QStringLiteral(".desktop"))) {
+        return name + QStringLiteral(".desktop");
+    }
+    if (QFile::exists(name) && name.endsWith(QLatin1String(".desktop"), Qt::CaseInsensitive)) return name;
 
     QString direct = findDesktopFilePath(name);
     if (!direct.isEmpty()) return direct;
+
+    // Falls ein vollständiger Pfad übergeben wurde (z.B. /usr/share/applications/brave-browser),
+    // auch den Dateinamen-Teil extrahieren und prüfen
+    QString basePart = name.contains(QLatin1Char('/')) ? name.section(QLatin1Char('/'), -1) : name;
+    if (basePart != name) {
+        QString directBase = findDesktopFilePath(basePart);
+        if (!directBase.isEmpty()) return directBase;
+    }
 
     if (!s_desktopIndex.initialized) {
         buildDesktopIndex(s_desktopIndex);
     }
 
-    QString low = name.toLower();
-    if (s_desktopIndex.keyToPath.contains(low)) {
-        return s_desktopIndex.keyToPath.value(low);
-    }
-
-    if (low.endsWith(QLatin1String(".desktop"))) {
-        QString stripped = low.left(low.length() - 8);
-        if (s_desktopIndex.keyToPath.contains(stripped)) {
-            return s_desktopIndex.keyToPath.value(stripped);
+    for (const QString &candidate : {name, basePart}) {
+        if (candidate.isEmpty()) continue;
+        QString low = candidate.toLower();
+        if (s_desktopIndex.keyToPath.contains(low)) {
+            return s_desktopIndex.keyToPath.value(low);
         }
-    }
 
-    QString norm = low;
-    norm.remove(QLatin1String(".desktop"));
-    norm.remove(QLatin1Char('_')).remove(QLatin1Char('-')).remove(QLatin1Char(' '));
-    if (s_desktopIndex.keyToPath.contains(norm)) {
-        return s_desktopIndex.keyToPath.value(norm);
+        if (low.endsWith(QLatin1String(".desktop"))) {
+            QString stripped = low.left(low.length() - 8);
+            if (s_desktopIndex.keyToPath.contains(stripped)) {
+                return s_desktopIndex.keyToPath.value(stripped);
+            }
+        }
+
+        QString norm = low;
+        norm.remove(QLatin1String(".desktop"));
+        norm.remove(QLatin1Char('_')).remove(QLatin1Char('-')).remove(QLatin1Char(' '));
+        if (s_desktopIndex.keyToPath.contains(norm)) {
+            return s_desktopIndex.keyToPath.value(norm);
+        }
     }
 
     return {};
@@ -1619,21 +1633,55 @@ bool AppManager::launchApp(const QString &execLine)
     if (execLine.trimmed().isEmpty()) return false;
     QString cmd = execLine.trimmed();
 
-    // Check if cmd is a desktop file or service name
+    if (cmd.startsWith(QLatin1String("app:"))) {
+        cmd = cmd.mid(4).trimmed();
+    }
+
+    // Falls QSettings (IniFormat) oder eine .desktop-Datei den gesamten Befehl in äußere
+    // Anführungszeichen gehüllt hat (z.B. "env LD_PRELOAD=... /usr/bin/dolphin"), diese entfernen,
+    // sofern es kein einzelner existierender Dateipfad mit Leerzeichen ist.
+    if (cmd.length() >= 2 &&
+        ((cmd.startsWith(QLatin1Char('"')) && cmd.endsWith(QLatin1Char('"')) && cmd.count(QLatin1Char('"')) == 2) ||
+         (cmd.startsWith(QLatin1Char('\'')) && cmd.endsWith(QLatin1Char('\'')) && cmd.count(QLatin1Char('\'')) == 2))) {
+        QString unquoted = cmd.mid(1, cmd.length() - 2).trimmed();
+        if (!QFile::exists(unquoted)) {
+            cmd = unquoted;
+        }
+    }
+
+    // Prüfen, ob cmd eine .desktop-Datei, ein Applications-Pfad (auch ohne .desktop-Endung) oder ein Service-Name ist
     KService::Ptr s;
-    if (cmd.endsWith(QLatin1String(".desktop"))) {
-        s = KService::serviceByDesktopPath(cmd);
+    QString resolvedDfPath;
+    if (cmd.endsWith(QLatin1String(".desktop"), Qt::CaseInsensitive) ||
+        cmd.contains(QLatin1String("/applications/"), Qt::CaseInsensitive)) {
+        resolvedDfPath = findDesktopFilePathCaseInsensitive(cmd);
+        s = KService::serviceByDesktopPath(resolvedDfPath.isEmpty() ? cmd : resolvedDfPath);
         if (!s) {
-            QString stripped = cmd.section(QLatin1Char('/'), -1);
-            stripped.chop(8);
+            QString stripped = (resolvedDfPath.isEmpty() ? cmd : resolvedDfPath).section(QLatin1Char('/'), -1);
+            if (stripped.endsWith(QLatin1String(".desktop"), Qt::CaseInsensitive)) {
+                stripped.chop(8);
+            }
             s = KService::serviceByDesktopName(stripped);
         }
     } else if (!cmd.contains(QLatin1Char(' '))) {
         s = KService::serviceByDesktopName(cmd);
+        if (!s && (!cmd.startsWith(QLatin1Char('/')) || !QFile::exists(cmd))) {
+            resolvedDfPath = findDesktopFilePathCaseInsensitive(cmd);
+            if (!resolvedDfPath.isEmpty()) {
+                s = KService::serviceByDesktopPath(resolvedDfPath);
+            }
+        }
     }
 
     if (s && s->isValid() && !s->exec().trimmed().isEmpty()) {
         cmd = s->exec().trimmed();
+    } else if (!resolvedDfPath.isEmpty() && QFile::exists(resolvedDfPath)) {
+        QSettings ini(resolvedDfPath, QSettings::IniFormat);
+        ini.beginGroup(QStringLiteral("Desktop Entry"));
+        QString dfExec = ini.value(QStringLiteral("Exec")).toString().trimmed();
+        if (!dfExec.isEmpty()) {
+            cmd = dfExec;
+        }
     }
 
     static const QRegularExpression re(QStringLiteral("%[a-zA-Z]"));
@@ -1643,20 +1691,31 @@ bool AppManager::launchApp(const QString &execLine)
     QStringList args = QProcess::splitCommand(cmd);
     if (args.isEmpty()) return false;
 
+    // Falls der Befehl mit Umgebungsvariablen ohne vorangestelltes "env" beginnt (z.B. FOO=1 /usr/bin/app)
+    if (args.first().contains(QLatin1Char('=')) && !QFile::exists(args.first())) {
+        args.prepend(QStringLiteral("env"));
+    }
+
     QString prog = args.takeFirst();
     QProcess p;
     p.setProgram(prog);
     p.setArguments(args);
     p.setProcessEnvironment(ProcessUtils::cleanHostEnvironment());
     bool ok = p.startDetached();
-    if (!ok && !s) {
-        // Fallback: try KService with prog name if binary wasn't found directly
-        s = KService::serviceByDesktopName(prog);
-        if (s && s->isValid()) {
-            QString sCmd = s->exec().remove(re).trimmed();
+    if (!ok) {
+        // Allgemeingültiger Fallback: Über AppManager::findApp nach Desktop-Eintrag / Binary suchen
+        AppEntry fallbackApp = findApp(prog, prog.section(QLatin1Char('/'), -1));
+        if (!fallbackApp.exec.trimmed().isEmpty()) {
+            QString sCmd = fallbackApp.exec;
+            sCmd.remove(re);
+            sCmd = sCmd.trimmed();
             QStringList sArgs = QProcess::splitCommand(sCmd);
             if (!sArgs.isEmpty()) {
-                p.setProgram(sArgs.takeFirst());
+                if (sArgs.first().contains(QLatin1Char('=')) && !QFile::exists(sArgs.first())) {
+                    sArgs.prepend(QStringLiteral("env"));
+                }
+                prog = sArgs.takeFirst();
+                p.setProgram(prog);
                 p.setArguments(sArgs);
                 p.setProcessEnvironment(ProcessUtils::cleanHostEnvironment());
                 ok = p.startDetached();
@@ -1666,6 +1725,10 @@ bool AppManager::launchApp(const QString &execLine)
     if (ok) {
         if (s && s->isValid()) {
             recordAppUsage(s->entryPath(), s->desktopEntryName());
+        } else if (!resolvedDfPath.isEmpty()) {
+            QString base = resolvedDfPath.section(QLatin1Char('/'), -1);
+            if (base.endsWith(QLatin1String(".desktop"), Qt::CaseInsensitive)) base.chop(8);
+            recordAppUsage(resolvedDfPath, base);
         } else if (isAppImage(prog)) {
             AppEntry ai = resolveAppImageFromPath(prog);
             if (!ai.id.isEmpty()) {

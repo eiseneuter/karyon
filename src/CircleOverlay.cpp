@@ -983,13 +983,31 @@ void CircleOverlay::partitionWindows(const QList<WindowInfo> &mru,
                 seg.trayProgramKey = QStringLiteral("%1|%2").arg(trayMatch->service, trayMatch->path);
             } else {
                 QString exec = item.execOrPath.trimmed();
+                QString df = item.desktopFile;
+                QString icon = item.icon;
+                if (exec.isEmpty() ||
+                    exec.endsWith(QLatin1String(".desktop"), Qt::CaseInsensitive) ||
+                    exec.contains(QLatin1String("/applications/"), Qt::CaseInsensitive)) {
+                    AppEntry resolved = AppManager::findApp(
+                        !df.isEmpty() ? df : (!item.id.isEmpty() ? item.id : exec),
+                        item.name);
+                    if (!resolved.exec.trimmed().isEmpty()) {
+                        exec = resolved.exec.trimmed();
+                    }
+                    if (df.isEmpty() && !resolved.desktopFile.isEmpty()) {
+                        df = resolved.desktopFile;
+                    }
+                    if (icon.isEmpty() && !resolved.icon.isEmpty()) {
+                        icon = resolved.icon;
+                    }
+                }
                 if (exec.isEmpty()) {
-                    exec = item.desktopFile.isEmpty() ? item.id : item.desktopFile;
+                    exec = df.isEmpty() ? item.id : df;
                 }
                 seg.windowId = QStringLiteral("app:") + exec;
                 seg.appKey = item.id;
-                seg.resourceClass = item.icon.isEmpty() ? item.id : item.icon;
-                seg.desktopFileName = item.desktopFile.isEmpty() ? item.id : item.desktopFile;
+                seg.resourceClass = icon.isEmpty() ? item.id : icon;
+                seg.desktopFileName = df.isEmpty() ? item.id : df;
                 seg.caption = item.name;
                 seg.tooltipText = item.name;
                 seg.segmentType = QStringLiteral("app");
@@ -3841,38 +3859,51 @@ void CircleOverlay::togglePinForCurrentSelection()
         }
 
         if (!unpinnedFile) {
-            QString dfName = seg->desktopFileName.isEmpty() ? seg->resourceClass : seg->desktopFileName;
-            if (dfName.endsWith(QLatin1String(".desktop"))) {
-                dfName.chop(8);
-            }
-            KService::Ptr service = KService::serviceByDesktopName(dfName);
-            if (!service && !seg->resourceClass.isEmpty()) {
-                service = KService::serviceByDesktopName(seg->resourceClass);
-            }
-
-            QString desktopFile;
-            QString exec;
-            QString name;
-            QString icon;
-
-            if (service && service->isValid()) {
-                desktopFile = service->entryPath();
-                exec = service->exec();
-                name = service->name();
-                icon = service->icon();
-            } else {
-                desktopFile = findDesktopFile(dfName);
-                if (!desktopFile.isEmpty()) {
-                    QSettings desktop(desktopFile, QSettings::IniFormat);
-                    desktop.beginGroup(QStringLiteral("Desktop Entry"));
-                    exec = desktop.value(QStringLiteral("Exec")).toString();
-                    name = desktop.value(QStringLiteral("Name")).toString();
-                    icon = desktop.value(QStringLiteral("Icon")).toString();
+            // Fenster-Metadaten (inkl. PID für AppImages/Steam) über AppManager::resolveWindowApp auflösen,
+            // damit Pins aus der Windows-Kategorie exakt dieselben validen Startbefehle erhalten wie aus der Apps-Kategorie.
+            AppEntry app;
+            for (const auto &w : m_cachedWindows) {
+                if (w.id == seg->windowId) {
+                    app = AppManager::resolveWindowApp(w.desktopFileName, w.resourceClass, w.pid, w.caption);
+                    break;
                 }
+            }
+            if (app.exec.trimmed().isEmpty()) {
+                app = AppManager::findApp(seg->desktopFileName, seg->resourceClass);
+            }
+            if (app.exec.trimmed().isEmpty() && !seg->appKey.isEmpty()) {
+                app = AppManager::findApp(seg->appKey, seg->caption);
+            }
+
+            QString desktopFile = app.desktopFile;
+            QString exec = app.exec;
+            QString name = app.name;
+            QString icon = app.icon;
+            QString pinId = !app.id.isEmpty() ? app.id : seg->appKey;
+
+            if (desktopFile.isEmpty()) {
+                desktopFile = findDesktopFile(seg->desktopFileName.isEmpty() ? seg->resourceClass : seg->desktopFileName);
+            }
+            if (exec.isEmpty() && !desktopFile.isEmpty()) {
+                QSettings desktop(desktopFile, QSettings::IniFormat);
+                desktop.beginGroup(QStringLiteral("Desktop Entry"));
+                exec = desktop.value(QStringLiteral("Exec")).toString();
+                if (name.isEmpty()) name = desktop.value(QStringLiteral("Name")).toString();
+                if (icon.isEmpty()) icon = desktop.value(QStringLiteral("Icon")).toString();
+            }
+
+            if (pinId.isEmpty()) {
+                pinId = seg->desktopFileName.isEmpty() ? seg->resourceClass : seg->desktopFileName;
+            }
+            if (pinId.contains(QLatin1Char('/')) && !AppManager::isAppImage(pinId)) {
+                pinId = pinId.section(QLatin1Char('/'), -1);
+            }
+            if (pinId.endsWith(QLatin1String(".desktop"), Qt::CaseInsensitive)) {
+                pinId.chop(8);
             }
 
             if (exec.isEmpty()) {
-                exec = dfName;
+                exec = !desktopFile.isEmpty() ? desktopFile : pinId;
             }
             static const QRegularExpression re(QStringLiteral("%[a-zA-Z]"));
             exec.remove(re);
@@ -3882,10 +3913,19 @@ void CircleOverlay::togglePinForCurrentSelection()
                 name = resolveAppName(seg->desktopFileName, seg->resourceClass);
             }
             if (icon.isEmpty()) {
-                icon = seg->resourceClass.isEmpty() ? dfName : seg->resourceClass;
+                icon = seg->resourceClass.isEmpty() ? pinId : seg->resourceClass;
             }
 
-            m_pinnedManager.toggleAppPin(dfName, seg->resourceClass, name, exec, icon, desktopFile);
+            // Falls bereits (auch unter altem Pfad-Key) angepinnt, zuerst sauber entpinnen
+            if (m_pinnedManager.isAppPinned(seg->desktopFileName, seg->resourceClass) ||
+                m_pinnedManager.isAppPinned(seg->appKey, seg->resourceClass) ||
+                m_pinnedManager.isAppPinned(pinId, icon)) {
+                m_pinnedManager.unpinApp(seg->desktopFileName, seg->resourceClass);
+                m_pinnedManager.unpinApp(seg->appKey, seg->resourceClass);
+                m_pinnedManager.unpinApp(pinId, icon);
+            } else {
+                m_pinnedManager.pinApp(pinId, name, exec, icon, desktopFile);
+            }
         }
     } else if (seg->segmentType == QLatin1String("app")) {
         QString exec = seg->windowId.startsWith(QLatin1String("app:")) ? seg->windowId.mid(4) : seg->appKey;
