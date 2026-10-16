@@ -52,11 +52,11 @@ Item {
         case 8:  return yy + s + mm + s + dd;
         case 9:  return ddd + " " + yy + s + mm + s + dd;
         case 10: return dddd + " " + yy + s + mm + s + dd;
-        case 11: return ddd + " " + yy + ". " + mmm + " " + dd;
-        case 12: return dddd + " " + yy + ". " + mmm + " " + dd;
-        case 13: return ddd + " " + yy + ". " + mmmm + " " + dd;
-        case 14: return yy + ". " + mmm + " " + dd;
-        case 15: return yy + ". " + mmmm + " " + dd;
+        case 11: return ddd + " " + yy + " " + mmm + " " + dd;
+        case 12: return dddd + " " + yy + " " + mmm + " " + dd;
+        case 13: return ddd + " " + yy + " " + mmmm + " " + dd;
+        case 14: return yy + " " + mmm + " " + dd;
+        case 15: return yy + " " + mmmm + " " + dd;
         default: return dd + s + mm + s + yy;
         }
     }

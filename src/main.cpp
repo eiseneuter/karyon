@@ -106,7 +106,7 @@ int main(int argc, char *argv[])
 
     std::setlocale(LC_ALL, "");
 
-    // Detect KDE Plasma system locale if configured, with system fallback
+    // Detect KDE Plasma / system locale with full fallbacks
     QString klang;
     QString plasmaLocaleRc = QDir::homePath() + QStringLiteral("/.config/plasma-localerc");
     if (QFile::exists(plasmaLocaleRc)) {
@@ -115,6 +115,12 @@ int main(int argc, char *argv[])
         if (klang.isEmpty()) {
             klang = plasmarc.value(QStringLiteral("Formats/LANG")).toString();
         }
+        if (klang.isEmpty()) {
+            klang = plasmarc.value(QStringLiteral("Translations/LANGUAGE")).toString().section(QLatin1Char(':'), 0, 0);
+        }
+    }
+    if (klang.isEmpty()) {
+        klang = QString::fromLocal8Bit(qgetenv("LC_ALL"));
     }
     if (klang.isEmpty()) {
         klang = QString::fromLocal8Bit(qgetenv("LC_TIME"));
@@ -122,21 +128,32 @@ int main(int argc, char *argv[])
     if (klang.isEmpty()) {
         klang = QString::fromLocal8Bit(qgetenv("LANG"));
     }
+    if (klang.isEmpty()) {
+        klang = QString::fromLocal8Bit(qgetenv("LANGUAGE")).section(QLatin1Char(':'), 0, 0);
+    }
 
-    if (!klang.isEmpty()) {
+    QLocale resolvedLocale = QLocale::system();
+    if (!klang.isEmpty() && klang.compare(QStringLiteral("C"), Qt::CaseInsensitive) != 0
+        && !klang.startsWith(QStringLiteral("C."), Qt::CaseInsensitive)) {
         std::setlocale(LC_ALL, klang.toUtf8().constData());
         std::setlocale(LC_TIME, klang.toUtf8().constData());
-        QLocale sysLocale(klang);
-        QLocale::setDefault(sysLocale);
-    } else {
-        QLocale::setDefault(QLocale::system());
+        QString cleanLang = klang.section(QLatin1Char('.'), 0, 0).section(QLatin1Char('@'), 0, 0).trimmed();
+        if (!cleanLang.isEmpty()) {
+            QLocale candidate(cleanLang);
+            if (candidate.language() != QLocale::C) {
+                resolvedLocale = candidate;
+            }
+        }
     }
+    QLocale::setDefault(resolvedLocale);
 
     // Enforce QT_QPA_PLATFORM=xcb for direct X11/XWayland Override-Redirect (Rule 1)
     // Synchronous cursor positioning and frameless overlay window placement under cursor
     qputenv("QT_QPA_PLATFORM", "xcb");
 
     QApplication app(argc, argv);
+    // Re-apply default QLocale after QApplication constructor (which calls setlocale internally)
+    QLocale::setDefault(resolvedLocale);
     app.setApplicationName(QStringLiteral("Karyon"));
     app.setApplicationDisplayName(QStringLiteral("Karyon"));
     app.setDesktopFileName(QStringLiteral("karyon"));
