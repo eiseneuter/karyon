@@ -47,7 +47,6 @@ bool isMouseDevice(int fd)
 
     if (!testBit(relBits, REL_X) || !testBit(relBits, REL_Y)) return false;
     if (!testBit(keyBits, BTN_LEFT) && !testBit(keyBits, BTN_RIGHT)) return false;
-    if (testBit(keyBits, KEY_A) && testBit(keyBits, KEY_Z)) return false;
 
     return true;
 }
@@ -116,11 +115,11 @@ void InputMonitor::setupUInput()
         ioctl(m_uinputFd, UI_SET_EVBIT, EV_REL);
         ioctl(m_uinputFd, UI_SET_EVBIT, EV_SYN);
 
-        for (int rel : {REL_X, REL_Y, REL_WHEEL, REL_HWHEEL, REL_DIAL}) {
+        for (int rel : {REL_X, REL_Y, REL_WHEEL, REL_HWHEEL, REL_DIAL, REL_WHEEL_HI_RES, REL_HWHEEL_HI_RES}) {
             ioctl(m_uinputFd, UI_SET_RELBIT, rel);
         }
 
-        for (int btn : {BTN_LEFT, BTN_RIGHT, BTN_MIDDLE, BTN_SIDE, BTN_EXTRA, BTN_FORWARD, BTN_BACK, BTN_TASK}) {
+        for (int btn = BTN_MOUSE; btn < BTN_JOYSTICK; ++btn) {
             ioctl(m_uinputFd, UI_SET_KEYBIT, btn);
         }
 
@@ -162,13 +161,13 @@ void InputMonitor::setupUInput()
         ioctl(m_uinputAbsFd, UI_DEV_CREATE);
     }
 
-    // 3. Virtuelles Keyboard für Gesten-Tastenkombinationen
+    // 3. Virtuelles Keyboard für Gesten-Tastenkombinationen und Passthrough von Maus-Makro-/Tastaturtasten
     m_uinputKbdFd = open("/dev/uinput", O_WRONLY | O_NONBLOCK | O_CLOEXEC);
     if (m_uinputKbdFd >= 0) {
         ioctl(m_uinputKbdFd, UI_SET_EVBIT, EV_KEY);
         ioctl(m_uinputKbdFd, UI_SET_EVBIT, EV_SYN);
 
-        for (int key = 1; key <= 248; ++key) {
+        for (int key = 1; key < BTN_MISC; ++key) {
             ioctl(m_uinputKbdFd, UI_SET_KEYBIT, key);
         }
 
@@ -577,6 +576,16 @@ void InputMonitor::workerLoop()
             size_t count = bytes / sizeof(struct input_event);
             for (size_t k = 0; k < count; ++k) {
                 const auto &ev = events[k];
+
+                // Tastatur-/Makro-Events von Mäusen (z.B. Logitech MX / Bolt / Unifying HID++)
+                // direkt an das virtuelle Keyboard weiterleiten, damit sie durch EVIOCGRAB nicht verloren gehen
+                if (ev.type == EV_KEY && ev.code < BTN_MISC) {
+                    if (dev.grabbed && m_uinputKbdFd >= 0) {
+                        emitEvent(m_uinputKbdFd, EV_KEY, ev.code, ev.value);
+                        emitSyn(m_uinputKbdFd);
+                    }
+                    continue;
+                }
 
                 // Linksklick während gedrückter rechter Maustaste -> Schließt Overlay sofort!
                 if (ev.type == EV_KEY && ev.code == BTN_LEFT) {
