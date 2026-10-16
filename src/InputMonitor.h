@@ -64,6 +64,7 @@ private:
     void workerLoop();
     void scanDevices();
     bool rescanDevices();
+    void tryGrabPendingDevices();
     void setupUInput();
     void cleanup();
 
@@ -94,6 +95,7 @@ private:
     std::vector<DeviceInfo> m_devices;
     std::string m_lastReportedMouse;
     std::chrono::steady_clock::time_point m_lastReportedTime{};
+    std::chrono::steady_clock::time_point m_uinputCreatedTime{};
     int m_uinputFd = -1;
     int m_uinputAbsFd = -1;
     int m_uinputKbdFd = -1;

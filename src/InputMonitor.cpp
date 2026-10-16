@@ -51,6 +51,20 @@ bool isMouseDevice(int fd)
     return true;
 }
 
+bool hasPressedKeysOrButtons(int fd)
+{
+    unsigned long keyBits[(KEY_CNT + sizeof(long) * 8 - 1) / (sizeof(long) * 8)] = {0};
+    if (ioctl(fd, EVIOCGKEY(sizeof(keyBits)), keyBits) < 0) {
+        return false;
+    }
+    for (size_t i = 0; i < sizeof(keyBits) / sizeof(keyBits[0]); ++i) {
+        if (keyBits[i] != 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
 void emitEvent(int fd, uint16_t type, uint16_t code, int32_t value)
 {
     if (fd < 0) return;
@@ -180,6 +194,8 @@ void InputMonitor::setupUInput()
         ioctl(m_uinputKbdFd, UI_DEV_SETUP, &usetup_kbd);
         ioctl(m_uinputKbdFd, UI_DEV_CREATE);
     }
+
+    m_uinputCreatedTime = std::chrono::steady_clock::now();
 }
 
 void InputMonitor::warpCursor(int targetX, int targetY, int screenW, int screenH)
@@ -221,6 +237,43 @@ void InputMonitor::sendKeyCombo(const std::vector<int> &keys)
     emitSyn(m_uinputKbdFd);
 }
 
+void InputMonitor::tryGrabPendingDevices()
+{
+    if (m_uinputFd < 0) return;
+
+    // Nach dem Erstellen der virtuellen uinput-Geräte kurz (250ms) warten, damit udev und
+    // KWin/libinput die virtuellen Geräte vollständig geöffnet haben, bevor die physische
+    // Maus per EVIOCGRAB übernommen wird.
+    auto now = std::chrono::steady_clock::now();
+    auto sinceUinput = std::chrono::duration_cast<std::chrono::milliseconds>(now - m_uinputCreatedTime).count();
+    if (sinceUinput < 250) {
+        return;
+    }
+
+    for (auto &dev : m_devices) {
+        if (dev.grabbed || dev.fd < 0) continue;
+
+        // NIEMALS EVIOCGRAB ausführen, solange eine Maustaste oder Taste physisch gedrückt ist!
+        // Sonst hat libinput/KWin das Press-Event noch auf dem physischen Gerät registriert,
+        // bekommt aber das Release-Event dort nie mehr, wodurch die Taste im Compositor
+        // dauerhaft als "gedrückt" hängen bleibt.
+        if (hasPressedKeysOrButtons(dev.fd)) {
+            continue;
+        }
+
+        if (ioctl(dev.fd, EVIOCGRAB, 1) == 0) {
+            if (hasPressedKeysOrButtons(dev.fd)) {
+                ioctl(dev.fd, EVIOCGRAB, 0);
+                continue;
+            }
+            dev.grabbed = true;
+            m_leftDown.store(false);
+            std::cout << "[InputMonitor] Mouse grabbed safely (all buttons released): "
+                      << dev.path << " [" << dev.name << "]\n";
+        }
+    }
+}
+
 void InputMonitor::scanDevices()
 {
     std::error_code ec;
@@ -234,31 +287,18 @@ void InputMonitor::scanDevices()
         if (fd < 0) continue;
 
         if (isMouseDevice(fd)) {
-            unsigned long keyBits[KEY_CNT / (sizeof(long) * 8) + 1] = {0};
-            if (ioctl(fd, EVIOCGKEY(sizeof(keyBits)), keyBits) >= 0) {
-                if (keyBits[BTN_LEFT / (sizeof(long) * 8)] & (1UL << (BTN_LEFT % (sizeof(long) * 8)))) {
-                    m_leftDown.store(true);
-                }
-            }
-
-            bool grabbed = false;
-            if (m_uinputFd >= 0) {
-                if (ioctl(fd, EVIOCGRAB, 1) == 0) {
-                    grabbed = true;
-                }
-            }
-
             char devName[256] = {0};
             ioctl(fd, EVIOCGNAME(sizeof(devName)), devName);
             std::string sName = (devName[0] != '\0') ? std::string(devName) : entry.path().string();
 
-            m_devices.push_back({fd, entry.path().string(), grabbed, sName});
+            // Zunächst ungrabbed registrieren; tryGrabPendingDevices() übernimmt den EVIOCGRAB,
+            // sobald uinput bereit ist und garantiert keine Maustaste gedrückt gehalten wird.
+            m_devices.push_back({fd, entry.path().string(), false, sName});
             m_lastReportedMouse = sName;
             m_lastReportedTime = std::chrono::steady_clock::now();
 
             std::cout << "Mouse registered: " << entry.path().string() 
-                      << " [" << sName << "]"
-                      << (grabbed ? " (exclusive)" : " (read-only)") << "\n";
+                      << " [" << sName << "] (pending safe grab)\n";
         } else {
             close(fd);
         }
@@ -317,36 +357,23 @@ bool InputMonitor::rescanDevices()
             if (fd < 0) continue;
 
             if (isMouseDevice(fd)) {
-                unsigned long keyBits[KEY_CNT / (sizeof(long) * 8) + 1] = {0};
-                if (ioctl(fd, EVIOCGKEY(sizeof(keyBits)), keyBits) >= 0) {
-                    if (keyBits[BTN_LEFT / (sizeof(long) * 8)] & (1UL << (BTN_LEFT % (sizeof(long) * 8)))) {
-                        m_leftDown.store(true);
-                    }
-                }
-
-                bool grabbed = false;
-                if (m_uinputFd >= 0) {
-                    if (ioctl(fd, EVIOCGRAB, 1) == 0) {
-                        grabbed = true;
-                    }
-                }
-
                 char devName[256] = {0};
                 ioctl(fd, EVIOCGNAME(sizeof(devName)), devName);
                 std::string sName = (devName[0] != '\0') ? std::string(devName) : path;
 
-                m_devices.push_back({fd, path, grabbed, sName});
+                m_devices.push_back({fd, path, false, sName});
                 changed = true;
                 newlyConnectedName = sName;
 
                 std::cout << "[InputMonitor] Mouse registered (hotplug): " << path 
-                          << " [" << sName << "]"
-                          << (grabbed ? " (exclusive)" : " (read-only)") << "\n";
+                          << " [" << sName << "] (pending safe grab)\n";
             } else {
                 close(fd);
             }
         }
     }
+
+    tryGrabPendingDevices();
 
     if (!newlyConnectedName.empty()) {
         auto now = std::chrono::steady_clock::now();
@@ -444,6 +471,8 @@ void InputMonitor::workerLoop()
                 rebuildPfds();
             }
         }
+
+        tryGrabPendingDevices();
 
         int pollTimeout = (state == State::Pending) ? 5 : 25;
         int ret = poll(pfds.data(), pfds.size(), pollTimeout);
@@ -570,6 +599,15 @@ void InputMonitor::workerLoop()
                     rebuildPfds();
                     break;
                 }
+                continue;
+            }
+
+            // Solange das Gerät noch auf den sicheren EVIOCGRAB wartet (während der ersten 250ms nach
+            // uinput-Start oder solange noch eine Maustaste vom Startklick gehalten wird), laufen alle
+            // Klicks direkt über das physische Gerät an KWin/libinput. Wir verwerfen die gelesenen
+            // Events hier nur aus dem Puffer und prüfen sofort, ob die Taste inzwischen losgelassen wurde.
+            if (!dev.grabbed && m_uinputFd >= 0) {
+                tryGrabPendingDevices();
                 continue;
             }
 
