@@ -192,7 +192,8 @@ private:
                             QList<OverlaySegment> &outRing3);
 
     void partitionTray(QList<OverlaySegment> &outRing1,
-                       QList<OverlaySegment> &outRing2);
+                       QList<OverlaySegment> &outRing2,
+                       QList<OverlaySegment> &outRing3);
 
     void partitionSession(QList<OverlaySegment> &outRing1,
                           QList<OverlaySegment> &outRing2);

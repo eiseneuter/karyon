@@ -3000,10 +3000,11 @@ void CircleOverlay::partitionFavorites(QList<OverlaySegment> &outRing1,
     }
 }
 
-void CircleOverlay::partitionTray(QList<OverlaySegment> &outRing1, QList<OverlaySegment> &outRing2)
+void CircleOverlay::partitionTray(QList<OverlaySegment> &outRing1, QList<OverlaySegment> &outRing2, QList<OverlaySegment> &outRing3)
 {
     outRing1.clear();
     outRing2.clear();
+    outRing3.clear();
 
     const double availArc = 1.5 * M_PI; // 270° Bogen (-225° bis +45°)
     const int r1Outer = hubRadius() + ringGap() + ringDepth();
@@ -3018,12 +3019,12 @@ void CircleOverlay::partitionTray(QList<OverlaySegment> &outRing1, QList<Overlay
     // 2. Ring 1 zusammenstellen:
     // - Maximal 11 Segmente auf Ring 1:
     //   - Index 0: "..." Segment ganz links
-    //   - Programme: Auf der rechten Flanke (maximal 6 Plätze, damit links immer mind. 4 Tray-Plätze + "..." bleiben)
-    //   - Traysymbole: Füllen alle Plätze zwischen "..." und den Programmen auf der linken Flanke auf.
+    //   - Programme: Auf der rechten Flanke (bis zu 10 Plätze; verdrängte System-Applets wandern nach links in "...")
+    //   - Traysymbole: Füllen alle verbleibenden Plätze zwischen "..." und den Programmen auf der linken Flanke auf.
     //   - REIHENFOLGE: Von "..." nach rechts laufen die Traysymbole zur 12-Uhr-Mitte hin (Network steht direkt vor den Programmicons,
     //     weitere Tray-Symbole wie Clipboard stehen direkt nach "...").
     //   - HINTER DEN PROGRAMMEN STEHT NIEMALS EIN TRAY-SYMBOL!
-    int numProgs = std::min((int)progs.size(), 6);
+    int numProgs = std::min((int)progs.size(), 10);
     int numTray = std::min((int)primApplets.size(), 10 - numProgs);
 
     QList<OverlaySegment> r1Items;
@@ -3094,44 +3095,117 @@ void CircleOverlay::partitionTray(QList<OverlaySegment> &outRing1, QList<Overlay
         outRing1[i].span = segAng1;
     }
 
-    // 3. Ring 2:
+    // 3. Ring 2 (und ggf. Ring 3 bei Drilldown eines Überlauf-Tray-Programms in "..."):
     const int r2Outer = r1Outer + ring2Gap() + ring2Depth();
     const double gapAng2 = (double)segGap() / r2Outer;
 
     if (m_trayMoreHovered) {
         // Alles, was sich aus "..." öffnet, öffnet sich von links nach rechts,
         // anfangend direkt über dem "..."-Symbol (outRing1[0].angle)
-        QList<SystemTrayApplet> moreApplets;
+        QList<OverlaySegment> moreSegs;
         for (const auto &applet : secApplets) {
-            moreApplets.append(applet);
+            OverlaySegment seg;
+            seg.windowId = QStringLiteral("tray_sys:%1").arg(applet.pluginId);
+            seg.appKey = applet.glyphName;
+            seg.resourceClass = applet.glyphName;
+            seg.desktopFileName = applet.glyphName;
+            seg.caption = applet.name;
+            seg.tooltipText = applet.name;
+            seg.ring = 2;
+            seg.hasDrilldown = false;
+            seg.segmentType = QStringLiteral("tray_sys");
+            seg.canPin = false;
+            seg.isPinned = false;
+            moreSegs.append(seg);
         }
         for (int i = numTray; i < primApplets.size(); ++i) {
-            moreApplets.append(primApplets[i]);
+            const auto &applet = primApplets[i];
+            OverlaySegment seg;
+            seg.windowId = QStringLiteral("tray_sys:%1").arg(applet.pluginId);
+            seg.appKey = applet.glyphName;
+            seg.resourceClass = applet.glyphName;
+            seg.desktopFileName = applet.glyphName;
+            seg.caption = applet.name;
+            seg.tooltipText = applet.name;
+            seg.ring = 2;
+            seg.hasDrilldown = false;
+            seg.segmentType = QStringLiteral("tray_sys");
+            seg.canPin = false;
+            seg.isPinned = false;
+            moreSegs.append(seg);
+        }
+        for (int i = numProgs; i < progs.size(); ++i) {
+            const auto &p = progs[i];
+            OverlaySegment seg;
+            seg.windowId = QStringLiteral("tray_prog|%1|%2").arg(p.service, p.path);
+            seg.appKey = QStringLiteral("tray_prog_%1").arg(p.id);
+            seg.resourceClass = p.id;
+            seg.desktopFileName = QStringLiteral("tray_prog|") + QStringLiteral("%1|%2").arg(p.service, p.path);
+            seg.caption = p.title;
+            seg.tooltipText = p.title;
+            seg.ring = 2;
+            seg.hasDrilldown = true;
+            seg.segmentType = QStringLiteral("tray");
+            seg.canPin = false;
+            seg.isPinned = false;
+            moreSegs.append(seg);
         }
 
-        int r2Count = moreApplets.size();
+        int r2Count = moreSegs.size();
         if (r2Count > 0 && !outRing1.isEmpty()) {
-            double segAng2 = segmentWidth() / r2Outer;
+            double segAng2 = (availArc - (r2Count - 1) * gapAng2) / std::max(1, r2Count);
+            if (segAng2 > segmentWidth() / r2Outer) segAng2 = segmentWidth() / r2Outer;
             double step2 = segAng2 + gapAng2;
             double r2Start = outRing1[0].angle; // Anfangend direkt über dem "..."-Symbol
+            const double arcMax = -M_PI / 2.0 + availArc / 2.0;
+            if (r2Start + (r2Count - 1) * step2 + segAng2 / 2.0 > arcMax) {
+                r2Start = arcMax - segAng2 / 2.0 - (r2Count - 1) * step2;
+            }
 
             for (int j = 0; j < r2Count; ++j) {
-                const auto &applet = moreApplets[j];
+                moreSegs[j].angle = r2Start + j * step2; // Von links nach rechts
+                moreSegs[j].span = segAng2;
+                outRing2.append(moreSegs[j]);
+            }
+        }
+
+        // Falls ein Überlauf-Programm in "..." auf Ring 2 gehovert wird -> dessen Menü auf Ring 3 öffnen
+        if (!m_activeTrayProgramKey.isEmpty() && !m_cachedMenuActions.isEmpty()) {
+            const int r3Outer = r2Outer + ring3Gap() + ring3Depth();
+            const double gapAng3 = (double)segGap() / r3Outer;
+            int optCount = m_cachedMenuActions.size();
+            double segAng3 = (availArc - (optCount - 1) * gapAng3) / std::max(1, optCount);
+            if (segAng3 > 0.20) segAng3 = 0.20;
+            double step3 = segAng3 + gapAng3;
+            int optCenter = (optCount - 1) / 2;
+
+            double centerProgAngle = -M_PI / 2.0;
+            for (const auto &s : outRing2) {
+                if ((s.windowId.startsWith(QLatin1String("tray_prog|")) || s.windowId.startsWith(QLatin1String("tray_prog:"))) &&
+                    s.windowId.mid(10) == m_activeTrayProgramKey) {
+                    centerProgAngle = s.angle;
+                    break;
+                }
+            }
+
+            for (int k = 0; k < optCount; ++k) {
+                const auto &act = m_cachedMenuActions[k];
                 OverlaySegment seg;
-                seg.windowId = QStringLiteral("tray_sys:%1").arg(applet.pluginId);
-                seg.appKey = applet.glyphName;
-                seg.resourceClass = applet.glyphName;
-                seg.desktopFileName = applet.glyphName;
-                seg.caption = applet.name;
-                seg.tooltipText = applet.name;
-                seg.ring = 2;
-                seg.hasDrilldown = false;
-                seg.segmentType = QStringLiteral("tray_sys");
+                seg.windowId = QStringLiteral("tray_opt|%1|%2|%3").arg(act.service, act.menuPath, QString::number(act.id));
+                seg.appKey = QStringLiteral("tray_opt_%1").arg(act.id);
+                seg.resourceClass = QStringLiteral("tray-option");
+                seg.desktopFileName = QStringLiteral("tray-option");
+                seg.caption = act.label;
+                seg.label = act.label;
+                seg.tooltipText = act.label;
+                seg.isTextSegment = true;
+                seg.ring = 3;
+                seg.segmentType = QStringLiteral("tray_opt");
                 seg.canPin = false;
                 seg.isPinned = false;
-                seg.angle = r2Start + j * step2; // Von links nach rechts
-                seg.span = segAng2;
-                outRing2.append(seg);
+                seg.angle = centerProgAngle + (k - optCenter) * step3;
+                seg.span = segAng3;
+                outRing3.append(seg);
             }
         }
     } else if (!m_activeTrayProgramKey.isEmpty() && !m_cachedMenuActions.isEmpty()) {
@@ -3188,7 +3262,7 @@ void CircleOverlay::populateRecentAppsSegments(bool &outHasRing2, bool &outHasRi
         partitionCategories(ring1Segs, m_activeCategoryIndex, ring2Segs, ring3Segs);
         centerIndex = ring1Segs.size() / 2;
     } else if (m_recentStage == RecentAppsStage::Tray) {
-        partitionTray(ring1Segs, ring2Segs);
+        partitionTray(ring1Segs, ring2Segs, ring3Segs);
         centerIndex = ring1Segs.size() / 2;
     } else if (m_recentStage == RecentAppsStage::Session) {
         partitionSession(ring1Segs, ring2Segs);
@@ -3654,7 +3728,7 @@ void CircleOverlay::handleAimChanged(int offsetX, int offsetY, bool isDrilldown,
                 refreshCurrentMode();
             } else {
                 if (selRing == 1 && curId == QLatin1String("__TRAY_MORE__") && isDrilldown) {
-                    if (!m_trayMoreHovered) {
+                    if (!m_trayMoreHovered || !m_activeTrayProgramKey.isEmpty()) {
                         m_trayMoreHovered = true;
                         m_activeTrayProgramKey.clear();
                         m_cachedMenuActions.clear();
@@ -3662,9 +3736,22 @@ void CircleOverlay::handleAimChanged(int offsetX, int offsetY, bool isDrilldown,
                     }
                 } else if (selRing == 1 && (curId.startsWith(QLatin1String("tray_prog|")) || curId.startsWith(QLatin1String("tray_prog:"))) && isDrilldown) {
                     QString progKey = curId.mid(10);
-                    if (m_activeTrayProgramKey != progKey) {
+                    if (m_activeTrayProgramKey != progKey || m_trayMoreHovered) {
                         m_activeTrayProgramKey = progKey;
                         m_trayMoreHovered = false;
+                        for (const auto &prog : m_cachedTrayPrograms) {
+                            if (QStringLiteral("%1|%2").arg(prog.service, prog.path) == progKey ||
+                                QStringLiteral("%1:%2").arg(prog.service, prog.path) == progKey) {
+                                m_cachedMenuActions = m_trayManager.fetchMenuActions(prog.service, prog.menuPath);
+                                break;
+                            }
+                        }
+                        refreshCurrentMode();
+                    }
+                } else if (selRing == 2 && m_trayMoreHovered && (curId.startsWith(QLatin1String("tray_prog|")) || curId.startsWith(QLatin1String("tray_prog:"))) && isDrilldown) {
+                    QString progKey = curId.mid(10);
+                    if (m_activeTrayProgramKey != progKey) {
+                        m_activeTrayProgramKey = progKey;
                         for (const auto &prog : m_cachedTrayPrograms) {
                             if (QStringLiteral("%1|%2").arg(prog.service, prog.path) == progKey ||
                                 QStringLiteral("%1:%2").arg(prog.service, prog.path) == progKey) {

@@ -107,16 +107,30 @@ QList<TrayProgramItem> TrayManager::runningPrograms()
             path.prepend(QLatin1Char('/'));
         }
 
+        uint servicePid = 0;
+        QDBusInterface dbusIface(QStringLiteral("org.freedesktop.DBus"),
+                                 QStringLiteral("/org/freedesktop/DBus"),
+                                 QStringLiteral("org.freedesktop.DBus"),
+                                 bus);
+        QDBusReply<uint> pidReply = dbusIface.call(QStringLiteral("GetConnectionUnixProcessID"), service);
+        if (pidReply.isValid()) {
+            servicePid = pidReply.value();
+        }
+
         // Eigenes Karyon-Tray-Item sofort ohne blockierenden D-Bus-Self-Call übernehmen
-        if (service == bus.baseService() || service == QLatin1String("org.kde.karyon") || service.contains(QStringLiteral("karyon"))) {
+        if ((servicePid > 0 && servicePid == static_cast<uint>(QCoreApplication::applicationPid())) ||
+            service == bus.baseService() ||
+            service == QLatin1String("org.kde.karyon") ||
+            service.contains(QStringLiteral("karyon"), Qt::CaseInsensitive)) {
             TrayProgramItem prog;
-            prog.service = service;
+            prog.service = QStringLiteral("org.kde.karyon");
             prog.path = path;
             prog.id = QStringLiteral("karyon");
             prog.title = QStringLiteral("Karyon");
             prog.iconName = QStringLiteral("karyon");
             prog.menuPath = QStringLiteral("/MenuBar");
             prog.icon = ProcessUtils::karyonIcon();
+            prog.pid = servicePid;
             items.append(prog);
             continue;
         }
@@ -302,25 +316,39 @@ QList<TrayProgramItem> TrayManager::runningPrograms()
             icon = QIcon::fromTheme(QStringLiteral("application-x-executable"));
         }
 
-        // Service PID für 1:1 Zuordnung ermitteln
-        uint servicePid = 0;
-        QDBusInterface dbusIface(QStringLiteral("org.freedesktop.DBus"),
-                                 QStringLiteral("/org/freedesktop/DBus"),
-                                 QStringLiteral("org.freedesktop.DBus"),
-                                 bus);
-        QDBusReply<uint> pidReply = dbusIface.call(QStringLiteral("GetConnectionUnixProcessID"), service);
-        if (pidReply.isValid()) {
-            servicePid = pidReply.value();
+        // Falls derselbe Prozess mehrere identische SNI-Items registriert (z.B. xdg-desktop-portal-kde),
+        // Duplikate zusammenfassen
+        if (servicePid > 0) {
+            bool isDuplicate = false;
+            for (const auto &existing : items) {
+                if (existing.pid == servicePid &&
+                    existing.id.compare(id, Qt::CaseInsensitive) == 0 &&
+                    existing.title.compare(title, Qt::CaseInsensitive) == 0) {
+                    isDuplicate = true;
+                    break;
+                }
+            }
+            if (isDuplicate) {
+                continue;
+            }
         }
 
         TrayProgramItem prog;
-        prog.service = service;
+        prog.service = (id.compare(QLatin1String("karyon"), Qt::CaseInsensitive) == 0)
+            ? QStringLiteral("org.kde.karyon")
+            : service;
         prog.path = path;
-        prog.id = id;
+        prog.id = (id.compare(QLatin1String("karyon"), Qt::CaseInsensitive) == 0)
+            ? QStringLiteral("karyon")
+            : id;
         prog.title = title;
         prog.iconName = iconName;
-        prog.menuPath = menuPath;
-        prog.icon = icon;
+        prog.menuPath = (prog.id == QLatin1String("karyon") && menuPath.isEmpty())
+            ? QStringLiteral("/MenuBar")
+            : menuPath;
+        prog.icon = (prog.id == QLatin1String("karyon"))
+            ? ProcessUtils::karyonIcon()
+            : icon;
         prog.pid = servicePid;
 
         items.append(prog);
@@ -328,20 +356,21 @@ QList<TrayProgramItem> TrayManager::runningPrograms()
 
     bool hasKaryon = false;
     for (const auto &it : items) {
-        if (it.id == QLatin1String("karyon")) {
+        if (it.id.compare(QLatin1String("karyon"), Qt::CaseInsensitive) == 0) {
             hasKaryon = true;
             break;
         }
     }
     if (!hasKaryon) {
         TrayProgramItem prog;
-        prog.service = bus.baseService().isEmpty() ? QStringLiteral("org.kde.karyon") : bus.baseService();
+        prog.service = QStringLiteral("org.kde.karyon");
         prog.path = QStringLiteral("/StatusNotifierItem");
         prog.id = QStringLiteral("karyon");
         prog.title = QStringLiteral("Karyon");
         prog.iconName = QStringLiteral("karyon");
         prog.menuPath = QStringLiteral("/MenuBar");
         prog.icon = ProcessUtils::karyonIcon();
+        prog.pid = static_cast<uint>(QCoreApplication::applicationPid());
         items.append(prog);
     }
 
