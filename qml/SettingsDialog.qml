@@ -28,7 +28,7 @@ Item {
     }
 
     function formatSampleDate(fmtIdx, sep) {
-        var d = new Date(2026, 11, 24, 23, 59, 0);
+        var d = new Date(1999, 11, 24, 23, 59, 0);
         var locName = (settingsController && settingsController.detectedLocaleName) ? settingsController.detectedLocaleName : "";
         var loc = locName ? Qt.locale(locName) : Qt.locale();
         var s = (sep === "/" || sep === "-") ? sep : ".";
@@ -44,25 +44,25 @@ Item {
         case 0:  return dd + s + mm + s + yy;
         case 1:  return ddd + " " + dd + s + mm + s + yy;
         case 2:  return dddd + " " + dd + s + mm + s + yy;
-        case 3:  return ddd + " " + dd + s + " " + mmm + " " + yy;
-        case 4:  return dddd + " " + dd + s + " " + mmm + " " + yy;
-        case 5:  return ddd + " " + dd + s + " " + mmmm + " " + yy;
-        case 6:  return dd + s + " " + mmm + " " + yy;
-        case 7:  return dd + s + " " + mmmm + " " + yy;
+        case 3:  return ddd + " " + dd + ". " + mmm + " " + yy;
+        case 4:  return dddd + " " + dd + ". " + mmm + " " + yy;
+        case 5:  return ddd + " " + dd + ". " + mmmm + " " + yy;
+        case 6:  return dd + ". " + mmm + " " + yy;
+        case 7:  return dd + ". " + mmmm + " " + yy;
         case 8:  return yy + s + mm + s + dd;
         case 9:  return ddd + " " + yy + s + mm + s + dd;
         case 10: return dddd + " " + yy + s + mm + s + dd;
-        case 11: return ddd + " " + yy + s + " " + mmm + " " + dd;
-        case 12: return dddd + " " + yy + s + " " + mmm + " " + dd;
-        case 13: return ddd + " " + yy + s + " " + mmmm + " " + dd;
-        case 14: return yy + s + " " + mmm + " " + dd;
-        case 15: return yy + s + " " + mmmm + " " + dd;
+        case 11: return ddd + " " + yy + ". " + mmm + " " + dd;
+        case 12: return dddd + " " + yy + ". " + mmm + " " + dd;
+        case 13: return ddd + " " + yy + ". " + mmmm + " " + dd;
+        case 14: return yy + ". " + mmm + " " + dd;
+        case 15: return yy + ". " + mmmm + " " + dd;
         default: return dd + s + mm + s + yy;
         }
     }
 
     function formatSampleTime(fmtIdx) {
-        var d = new Date(2026, 11, 24, 23, 59, 0);
+        var d = new Date(1999, 11, 24, 23, 59, 0);
         var h = d.getHours();
         var m = ("0" + d.getMinutes()).slice(-2);
         if (fmtIdx === 1) {
