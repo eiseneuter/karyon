@@ -58,7 +58,7 @@ void SettingsManager::load()
     m_showClock = m_settings.value(QStringLiteral("show_clock"), true).toBool();
     m_showDate = m_settings.value(QStringLiteral("show_date"), true).toBool();
     m_showVolumeControl = m_settings.value(QStringLiteral("show_volume_control"), true).toBool();
-    m_dateFormatIndex = std::clamp(m_settings.value(QStringLiteral("date_format_index"), 0).toInt(), 0, 13);
+    m_dateFormatIndex = std::clamp(m_settings.value(QStringLiteral("date_format_index"), 0).toInt(), 0, 15);
     m_dateSeparator = m_settings.value(QStringLiteral("date_separator"), QStringLiteral(".")).toString();
     if (m_dateSeparator != QLatin1String(".") && m_dateSeparator != QLatin1String("/") && m_dateSeparator != QLatin1String("-")) {
         m_dateSeparator = QStringLiteral(".");
@@ -438,7 +438,7 @@ int SettingsManager::dateFormatIndex() const
 
 void SettingsManager::setDateFormatIndex(int index)
 {
-    int clamped = std::clamp(index, 0, 13);
+    int clamped = std::clamp(index, 0, 15);
     if (m_dateFormatIndex != clamped) {
         m_dateFormatIndex = clamped;
         save();

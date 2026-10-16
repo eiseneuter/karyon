@@ -44,17 +44,19 @@ Item {
         case 0:  return dd + s + mm + s + yy;
         case 1:  return ddd + " " + dd + s + mm + s + yy;
         case 2:  return dddd + " " + dd + s + mm + s + yy;
-        case 3:  return ddd + " " + dd + s + mmm + " " + yy;
-        case 4:  return dddd + " " + dd + s + mmmm + s + yy;
-        case 5:  return dd + s + mmm + " " + yy;
-        case 6:  return dd + s + mmmm + " " + yy;
-        case 7:  return yy + s + mm + s + dd;
-        case 8:  return ddd + " " + yy + s + mm + s + dd;
-        case 9:  return dddd + " " + yy + s + mm + s + dd;
-        case 10: return ddd + " " + yy + s + mmm + " " + dd;
-        case 11: return dddd + " " + yy + s + mmmm + s + dd;
-        case 12: return yy + s + mmm + " " + dd;
-        case 13: return yy + s + mmmm + " " + dd;
+        case 3:  return ddd + " " + dd + s + " " + mmm + " " + yy;
+        case 4:  return dddd + " " + dd + s + " " + mmm + " " + yy;
+        case 5:  return ddd + " " + dd + s + " " + mmmm + " " + yy;
+        case 6:  return dd + s + " " + mmm + " " + yy;
+        case 7:  return dd + s + " " + mmmm + " " + yy;
+        case 8:  return yy + s + mm + s + dd;
+        case 9:  return ddd + " " + yy + s + mm + s + dd;
+        case 10: return dddd + " " + yy + s + mm + s + dd;
+        case 11: return ddd + " " + yy + s + " " + mmm + " " + dd;
+        case 12: return dddd + " " + yy + s + " " + mmm + " " + dd;
+        case 13: return ddd + " " + yy + s + " " + mmmm + " " + dd;
+        case 14: return yy + s + " " + mmm + " " + dd;
+        case 15: return yy + s + " " + mmmm + " " + dd;
         default: return dd + s + mm + s + yy;
         }
     }
@@ -1319,7 +1321,7 @@ Item {
                             }
                             onExited: sliderTooltip.hide()
                             onClicked: {
-                                settingsController.dateFormatIndex = (settingsController.dateFormatIndex + 1) % 14;
+                                settingsController.dateFormatIndex = (settingsController.dateFormatIndex + 1) % 16;
                             }
                         }
                     }
