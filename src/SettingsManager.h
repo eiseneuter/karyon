@@ -70,6 +70,15 @@ public:
     bool showVolumeControl() const;
     void setShowVolumeControl(bool enabled);
 
+    int dateFormatIndex() const;
+    void setDateFormatIndex(int index);
+
+    QString dateSeparator() const;
+    void setDateSeparator(const QString &sep);
+
+    int timeFormatIndex() const;
+    void setTimeFormatIndex(int index);
+
     bool gesturesEnabled() const;
     void setGesturesEnabled(bool enabled);
 
@@ -141,6 +150,9 @@ private:
     bool m_showClock = true;
     bool m_showDate = true;
     bool m_showVolumeControl = true;
+    int m_dateFormatIndex = 0;
+    QString m_dateSeparator = QStringLiteral(".");
+    int m_timeFormatIndex = 0;
 
     bool m_gesturesEnabled = true;
     QString m_gestureLeft = QStringLiteral("select_all");

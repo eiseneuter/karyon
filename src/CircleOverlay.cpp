@@ -143,6 +143,9 @@ void CircleOverlay::prewarm()
     m_view->rootContext()->setContextProperty(QStringLiteral("showClock"), SettingsManager::instance().showClock());
     m_view->rootContext()->setContextProperty(QStringLiteral("showDate"), SettingsManager::instance().showDate());
     m_view->rootContext()->setContextProperty(QStringLiteral("showVolumeControl"), SettingsManager::instance().showVolumeControl());
+    m_view->rootContext()->setContextProperty(QStringLiteral("dateFormatIndex"), SettingsManager::instance().dateFormatIndex());
+    m_view->rootContext()->setContextProperty(QStringLiteral("dateSeparator"), SettingsManager::instance().dateSeparator());
+    m_view->rootContext()->setContextProperty(QStringLiteral("timeFormatIndex"), SettingsManager::instance().timeFormatIndex());
     m_view->rootContext()->setContextProperty(QStringLiteral("detectedLocaleName"), QLocale().name());
     m_view->rootContext()->setContextProperty(QStringLiteral("overlayController"), this);
 
@@ -284,6 +287,9 @@ void CircleOverlay::updateScaleProperties()
     ctx->setContextProperty(QStringLiteral("showClock"), SettingsManager::instance().showClock());
     ctx->setContextProperty(QStringLiteral("showDate"), SettingsManager::instance().showDate());
     ctx->setContextProperty(QStringLiteral("showVolumeControl"), SettingsManager::instance().showVolumeControl());
+    ctx->setContextProperty(QStringLiteral("dateFormatIndex"), SettingsManager::instance().dateFormatIndex());
+    ctx->setContextProperty(QStringLiteral("dateSeparator"), SettingsManager::instance().dateSeparator());
+    ctx->setContextProperty(QStringLiteral("timeFormatIndex"), SettingsManager::instance().timeFormatIndex());
     ctx->setContextProperty(QStringLiteral("detectedLocaleName"), QLocale().name());
 
     if (m_view->rootObject()) {
@@ -293,6 +299,9 @@ void CircleOverlay::updateScaleProperties()
         m_view->rootObject()->setProperty("showClock", SettingsManager::instance().showClock());
         m_view->rootObject()->setProperty("showDate", SettingsManager::instance().showDate());
         m_view->rootObject()->setProperty("showVolumeControl", SettingsManager::instance().showVolumeControl());
+        m_view->rootObject()->setProperty("dateFormatIdx", SettingsManager::instance().dateFormatIndex());
+        m_view->rootObject()->setProperty("dateSep", SettingsManager::instance().dateSeparator());
+        m_view->rootObject()->setProperty("timeFormatIdx", SettingsManager::instance().timeFormatIndex());
         m_view->rootObject()->setProperty("overlayTransparencyVal", SettingsManager::instance().overlayTransparency());
     }
 }

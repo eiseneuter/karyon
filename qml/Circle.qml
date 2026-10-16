@@ -20,8 +20,63 @@ Item {
     property string categoryMode: (typeof categoryMode !== "undefined") ? categoryMode : "windows"
 
     property string systemLocaleName: (typeof detectedLocaleName !== "undefined" && detectedLocaleName !== "") ? detectedLocaleName : ""
+    property int dateFormatIdx: (typeof dateFormatIndex !== "undefined") ? dateFormatIndex : 0
+    property string dateSep: (typeof dateSeparator !== "undefined" && dateSeparator !== "") ? dateSeparator : "."
+    property int timeFormatIdx: (typeof timeFormatIndex !== "undefined") ? timeFormatIndex : 0
     property string currentTimeStr: ""
     property string currentDateStr: ""
+
+    onDateFormatIdxChanged: updateClockAndDate()
+    onDateSepChanged: updateClockAndDate()
+    onTimeFormatIdxChanged: updateClockAndDate()
+
+    function formatHubDate(d, loc, fmtIdx, sep) {
+        var s = (sep === "/" || sep === "-") ? sep : ".";
+        var dd = ("0" + d.getDate()).slice(-2);
+        var mm = ("0" + (d.getMonth() + 1)).slice(-2);
+        var yy = ("0" + (d.getFullYear() % 100)).slice(-2);
+        var ddd = d.toLocaleDateString(loc, "ddd").replace(/\.+$/, "") + ".";
+        var dddd = d.toLocaleDateString(loc, "dddd");
+        var mmm = d.toLocaleDateString(loc, "MMM").replace(/\.+$/, "") + ".";
+        var mmmm = d.toLocaleDateString(loc, "MMMM");
+
+        switch (fmtIdx) {
+        case 0:  return dd + s + mm + s + yy;
+        case 1:  return ddd + " " + dd + s + mm + s + yy;
+        case 2:  return dddd + " " + dd + s + mm + s + yy;
+        case 3:  return ddd + " " + dd + s + mmm + " " + yy;
+        case 4:  return dddd + " " + dd + s + mmmm + s + yy;
+        case 5:  return dd + s + mmm + " " + yy;
+        case 6:  return dd + s + mmmm + " " + yy;
+        case 7:  return yy + s + mm + s + dd;
+        case 8:  return ddd + " " + yy + s + mm + s + dd;
+        case 9:  return dddd + " " + yy + s + mm + s + dd;
+        case 10: return ddd + " " + yy + s + mmm + " " + dd;
+        case 11: return dddd + " " + yy + s + mmmm + s + dd;
+        case 12: return yy + s + mmm + " " + dd;
+        case 13: return yy + s + mmmm + " " + dd;
+        default: return dd + s + mm + s + yy;
+        }
+    }
+
+    function formatHubTime(d, fmtIdx) {
+        var h = d.getHours();
+        var m = ("0" + d.getMinutes()).slice(-2);
+        if (fmtIdx === 1) {
+            var ampm = (h < 12) ? "am" : "pm";
+            var h12 = h % 12;
+            if (h12 === 0) h12 = 12;
+            return ("0" + h12).slice(-2) + ":" + m + " " + ampm;
+        }
+        return ("0" + h).slice(-2) + ":" + m;
+    }
+
+    function updateClockAndDate() {
+        var now = new Date();
+        var loc = root.systemLocaleName ? Qt.locale(root.systemLocaleName) : Qt.locale();
+        root.currentTimeStr = formatHubTime(now, root.timeFormatIdx);
+        root.currentDateStr = formatHubDate(now, loc, root.dateFormatIdx, root.dateSep);
+    }
 
     Timer {
         id: clockTimer
@@ -29,12 +84,7 @@ Item {
         running: true
         repeat: true
         triggeredOnStart: true
-        onTriggered: {
-            var now = new Date();
-            var loc = root.systemLocaleName ? Qt.locale(root.systemLocaleName) : Qt.locale();
-            root.currentTimeStr = now.toLocaleTimeString(loc, "HH:mm");
-            root.currentDateStr = now.toLocaleDateString(loc, "ddd, dd.MM.yy");
-        }
+        onTriggered: root.updateClockAndDate()
     }
 
     property int systemVolume: (typeof volumeLevel !== "undefined") ? volumeLevel : 50
@@ -512,9 +562,13 @@ Item {
             Text {
                 id: hubTimeText
                 anchors.horizontalCenter: parent.horizontalCenter
+                width: Math.round(130 * ((typeof circleRadius !== "undefined" ? circleRadius : 75) / 75.0))
+                horizontalAlignment: Text.AlignHCenter
                 text: root.currentTimeStr
                 color: "#ffffff"
                 font.pixelSize: Math.round(22 * ((typeof circleRadius !== "undefined" ? circleRadius : 75) / 75.0))
+                minimumPixelSize: Math.round(12 * ((typeof circleRadius !== "undefined" ? circleRadius : 75) / 75.0))
+                fontSizeMode: Text.HorizontalFit
                 font.bold: true
                 font.family: "Noto Sans"
                 visible: root.showClock
@@ -523,9 +577,13 @@ Item {
             Text {
                 id: hubDateText
                 anchors.horizontalCenter: parent.horizontalCenter
+                width: Math.round(136 * ((typeof circleRadius !== "undefined" ? circleRadius : 75) / 75.0))
+                horizontalAlignment: Text.AlignHCenter
                 text: root.currentDateStr
                 color: "#9faec0"
                 font.pixelSize: Math.round(13.5 * ((typeof circleRadius !== "undefined" ? circleRadius : 75) / 75.0))
+                minimumPixelSize: Math.round(8 * ((typeof circleRadius !== "undefined" ? circleRadius : 75) / 75.0))
+                fontSizeMode: Text.HorizontalFit
                 font.weight: Font.Medium
                 font.family: "Noto Sans"
                 visible: root.showDate

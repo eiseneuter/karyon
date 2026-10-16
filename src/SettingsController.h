@@ -27,6 +27,10 @@ class SettingsController : public QObject
     Q_PROPERTY(bool showClock READ showClock WRITE setShowClock NOTIFY showClockChanged)
     Q_PROPERTY(bool showDate READ showDate WRITE setShowDate NOTIFY showDateChanged)
     Q_PROPERTY(bool showVolumeControl READ showVolumeControl WRITE setShowVolumeControl NOTIFY showVolumeControlChanged)
+    Q_PROPERTY(int dateFormatIndex READ dateFormatIndex WRITE setDateFormatIndex NOTIFY dateFormatIndexChanged)
+    Q_PROPERTY(QString dateSeparator READ dateSeparator WRITE setDateSeparator NOTIFY dateSeparatorChanged)
+    Q_PROPERTY(int timeFormatIndex READ timeFormatIndex WRITE setTimeFormatIndex NOTIFY timeFormatIndexChanged)
+    Q_PROPERTY(QString detectedLocaleName READ detectedLocaleName CONSTANT)
 
     Q_PROPERTY(bool gesturesEnabled READ gesturesEnabled WRITE setGesturesEnabled NOTIFY gesturesEnabledChanged)
     Q_PROPERTY(bool isRecordingKey READ isRecordingKey WRITE setIsRecordingKey NOTIFY isRecordingKeyChanged)
@@ -104,6 +108,17 @@ public:
     bool showVolumeControl() const;
     void setShowVolumeControl(bool enabled);
 
+    int dateFormatIndex() const;
+    void setDateFormatIndex(int index);
+
+    QString dateSeparator() const;
+    void setDateSeparator(const QString &sep);
+
+    int timeFormatIndex() const;
+    void setTimeFormatIndex(int index);
+
+    QString detectedLocaleName() const;
+
     bool gesturesEnabled() const;
     void setGesturesEnabled(bool enabled);
 
@@ -180,6 +195,9 @@ signals:
     void showClockChanged();
     void showDateChanged();
     void showVolumeControlChanged();
+    void dateFormatIndexChanged();
+    void dateSeparatorChanged();
+    void timeFormatIndexChanged();
     void gesturesEnabledChanged();
     void isRecordingKeyChanged();
     void gestureLeftChanged();

@@ -58,6 +58,12 @@ void SettingsManager::load()
     m_showClock = m_settings.value(QStringLiteral("show_clock"), true).toBool();
     m_showDate = m_settings.value(QStringLiteral("show_date"), true).toBool();
     m_showVolumeControl = m_settings.value(QStringLiteral("show_volume_control"), true).toBool();
+    m_dateFormatIndex = std::clamp(m_settings.value(QStringLiteral("date_format_index"), 0).toInt(), 0, 13);
+    m_dateSeparator = m_settings.value(QStringLiteral("date_separator"), QStringLiteral(".")).toString();
+    if (m_dateSeparator != QLatin1String(".") && m_dateSeparator != QLatin1String("/") && m_dateSeparator != QLatin1String("-")) {
+        m_dateSeparator = QStringLiteral(".");
+    }
+    m_timeFormatIndex = std::clamp(m_settings.value(QStringLiteral("time_format_index"), 0).toInt(), 0, 1);
 
     m_gestureLeft = m_settings.value(QStringLiteral("gesture_left"), QStringLiteral("select_all")).toString();
     m_gestureRight = m_settings.value(QStringLiteral("gesture_right"), QStringLiteral("paste")).toString();
@@ -99,6 +105,9 @@ void SettingsManager::save()
     m_settings.setValue(QStringLiteral("show_clock"), m_showClock);
     m_settings.setValue(QStringLiteral("show_date"), m_showDate);
     m_settings.setValue(QStringLiteral("show_volume_control"), m_showVolumeControl);
+    m_settings.setValue(QStringLiteral("date_format_index"), m_dateFormatIndex);
+    m_settings.setValue(QStringLiteral("date_separator"), m_dateSeparator);
+    m_settings.setValue(QStringLiteral("time_format_index"), m_timeFormatIndex);
     m_settings.setValue(QStringLiteral("gestures_enabled"), m_gesturesEnabled);
     m_settings.setValue(QStringLiteral("gesture_left"), m_gestureLeft);
     m_settings.setValue(QStringLiteral("gesture_right"), m_gestureRight);
@@ -422,6 +431,54 @@ void SettingsManager::setShowVolumeControl(bool enabled)
     }
 }
 
+int SettingsManager::dateFormatIndex() const
+{
+    return m_dateFormatIndex;
+}
+
+void SettingsManager::setDateFormatIndex(int index)
+{
+    int clamped = std::clamp(index, 0, 13);
+    if (m_dateFormatIndex != clamped) {
+        m_dateFormatIndex = clamped;
+        save();
+        emit settingsChanged();
+    }
+}
+
+QString SettingsManager::dateSeparator() const
+{
+    return m_dateSeparator;
+}
+
+void SettingsManager::setDateSeparator(const QString &sep)
+{
+    QString validSep = sep;
+    if (validSep != QLatin1String(".") && validSep != QLatin1String("/") && validSep != QLatin1String("-")) {
+        validSep = QStringLiteral(".");
+    }
+    if (m_dateSeparator != validSep) {
+        m_dateSeparator = validSep;
+        save();
+        emit settingsChanged();
+    }
+}
+
+int SettingsManager::timeFormatIndex() const
+{
+    return m_timeFormatIndex;
+}
+
+void SettingsManager::setTimeFormatIndex(int index)
+{
+    int clamped = std::clamp(index, 0, 1);
+    if (m_timeFormatIndex != clamped) {
+        m_timeFormatIndex = clamped;
+        save();
+        emit settingsChanged();
+    }
+}
+
 QString SettingsManager::gestureLeft() const { return m_gestureLeft; }
 void SettingsManager::setGestureLeft(const QString &action)
 {
@@ -624,6 +681,9 @@ void SettingsManager::resetDefaults()
     m_showClock = true;
     m_showDate = true;
     m_showVolumeControl = true;
+    m_dateFormatIndex = 0;
+    m_dateSeparator = QStringLiteral(".");
+    m_timeFormatIndex = 0;
 
     m_gesturesEnabled = true;
     m_gestureLeft = QStringLiteral("select_all");

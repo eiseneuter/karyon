@@ -11,6 +11,7 @@
 #include <QUrl>
 #include <QEvent>
 #include <QKeyEvent>
+#include <QLocale>
 #include <QRegularExpression>
 
 #include <KWindowSystem>
@@ -60,6 +61,9 @@ SettingsController::SettingsController(QObject *parent)
         emit showClockChanged();
         emit showDateChanged();
         emit showVolumeControlChanged();
+        emit dateFormatIndexChanged();
+        emit dateSeparatorChanged();
+        emit timeFormatIndexChanged();
         emit gesturesEnabledChanged();
         emit gestureLeftChanged();
         emit gestureRightChanged();
@@ -279,6 +283,41 @@ bool SettingsController::showVolumeControl() const
 void SettingsController::setShowVolumeControl(bool enabled)
 {
     SettingsManager::instance().setShowVolumeControl(enabled);
+}
+
+int SettingsController::dateFormatIndex() const
+{
+    return SettingsManager::instance().dateFormatIndex();
+}
+
+void SettingsController::setDateFormatIndex(int index)
+{
+    SettingsManager::instance().setDateFormatIndex(index);
+}
+
+QString SettingsController::dateSeparator() const
+{
+    return SettingsManager::instance().dateSeparator();
+}
+
+void SettingsController::setDateSeparator(const QString &sep)
+{
+    SettingsManager::instance().setDateSeparator(sep);
+}
+
+int SettingsController::timeFormatIndex() const
+{
+    return SettingsManager::instance().timeFormatIndex();
+}
+
+void SettingsController::setTimeFormatIndex(int index)
+{
+    SettingsManager::instance().setTimeFormatIndex(index);
+}
+
+QString SettingsController::detectedLocaleName() const
+{
+    return QLocale().name();
 }
 
 QString SettingsController::gestureLeft() const { return SettingsManager::instance().gestureLeft(); }
@@ -589,7 +628,7 @@ void SettingsController::showSettings(const QPoint &cursorPos)
     if (!m_view) return;
 
     const int dlgWidth = 580;
-    const int dlgHeight = 600;
+    const int dlgHeight = 640;
     m_view->resize(dlgWidth, dlgHeight);
 
     QScreen *screen = nullptr;

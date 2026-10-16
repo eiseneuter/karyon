@@ -3,7 +3,7 @@ import QtQuick
 Item {
     id: root
     width: 580
-    height: 600
+    height: 640
 
     readonly property color accentColor: "#0d7cd6"
     readonly property color accentHoverColor: "#298fe6"
@@ -25,6 +25,51 @@ Item {
         if (settingsController.categoryAppsEnabled) count++;
         if (settingsController.categoryFilesEnabled) count++;
         return count;
+    }
+
+    function formatSampleDate(fmtIdx, sep) {
+        var d = new Date(2026, 11, 24, 23, 59, 0);
+        var locName = (settingsController && settingsController.detectedLocaleName) ? settingsController.detectedLocaleName : "";
+        var loc = locName ? Qt.locale(locName) : Qt.locale();
+        var s = (sep === "/" || sep === "-") ? sep : ".";
+        var dd = ("0" + d.getDate()).slice(-2);
+        var mm = ("0" + (d.getMonth() + 1)).slice(-2);
+        var yy = ("0" + (d.getFullYear() % 100)).slice(-2);
+        var ddd = d.toLocaleDateString(loc, "ddd").replace(/\.+$/, "") + ".";
+        var dddd = d.toLocaleDateString(loc, "dddd");
+        var mmm = d.toLocaleDateString(loc, "MMM").replace(/\.+$/, "") + ".";
+        var mmmm = d.toLocaleDateString(loc, "MMMM");
+
+        switch (fmtIdx) {
+        case 0:  return dd + s + mm + s + yy;
+        case 1:  return ddd + " " + dd + s + mm + s + yy;
+        case 2:  return dddd + " " + dd + s + mm + s + yy;
+        case 3:  return ddd + " " + dd + s + mmm + " " + yy;
+        case 4:  return dddd + " " + dd + s + mmmm + s + yy;
+        case 5:  return dd + s + mmm + " " + yy;
+        case 6:  return dd + s + mmmm + " " + yy;
+        case 7:  return yy + s + mm + s + dd;
+        case 8:  return ddd + " " + yy + s + mm + s + dd;
+        case 9:  return dddd + " " + yy + s + mm + s + dd;
+        case 10: return ddd + " " + yy + s + mmm + " " + dd;
+        case 11: return dddd + " " + yy + s + mmmm + s + dd;
+        case 12: return yy + s + mmm + " " + dd;
+        case 13: return yy + s + mmmm + " " + dd;
+        default: return dd + s + mm + s + yy;
+        }
+    }
+
+    function formatSampleTime(fmtIdx) {
+        var d = new Date(2026, 11, 24, 23, 59, 0);
+        var h = d.getHours();
+        var m = ("0" + d.getMinutes()).slice(-2);
+        if (fmtIdx === 1) {
+            var ampm = (h < 12) ? "am" : "pm";
+            var h12 = h % 12;
+            if (h12 === 0) h12 = 12;
+            return ("0" + h12).slice(-2) + ":" + m + " " + ampm;
+        }
+        return ("0" + h).slice(-2) + ":" + m;
     }
 
     // WheelHandler über dem gesamten Dialog verschluckt jegliche Mausrad-Eingaben
@@ -1235,6 +1280,152 @@ Item {
                         onToggled: function(val) {
                             settingsController.showVolumeControl = val;
                         }
+                    }
+                }
+
+                // Datumsformat: Button "Switch Date" + Trennzeichen-Button "." + Beispieldatum (24.12.26)
+                Row {
+                    width: parent.width
+                    height: 20
+                    spacing: 5
+
+                    Rectangle {
+                        id: switchDateBtn
+                        width: 74
+                        height: 20
+                        radius: 4
+                        color: switchDateMa.containsMouse ? "#353b45" : "#282c34"
+                        border.color: switchDateMa.containsMouse ? root.accentHoverColor : "#3e4451"
+                        border.width: 1
+
+                        Text {
+                            anchors.centerIn: parent
+                            text: "Switch Date"
+                            color: switchDateMa.containsMouse ? "#ffffff" : "#cdd3de"
+                            font.pixelSize: 10
+                            font.bold: true
+                        }
+
+                        MouseArea {
+                            id: switchDateMa
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            onEntered: {
+                                if (!card.isDraggingSlider) {
+                                    var pt = mapToItem(card, width / 2, 0);
+                                    sliderTooltip.show("Cycle date format in Karyon hub", pt.x, pt.y);
+                                }
+                            }
+                            onExited: sliderTooltip.hide()
+                            onClicked: {
+                                settingsController.dateFormatIndex = (settingsController.dateFormatIndex + 1) % 14;
+                            }
+                        }
+                    }
+
+                    Rectangle {
+                        id: dateSepBtn
+                        width: 20
+                        height: 20
+                        radius: 4
+                        color: dateSepMa.containsMouse ? "#353b45" : "#282c34"
+                        border.color: dateSepMa.containsMouse ? root.accentHoverColor : "#3e4451"
+                        border.width: 1
+
+                        Text {
+                            anchors.centerIn: parent
+                            text: settingsController.dateSeparator
+                            color: dateSepMa.containsMouse ? "#ffffff" : "#cdd3de"
+                            font.pixelSize: 11
+                            font.bold: true
+                        }
+
+                        MouseArea {
+                            id: dateSepMa
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            onEntered: {
+                                if (!card.isDraggingSlider) {
+                                    var pt = mapToItem(card, width / 2, 0);
+                                    sliderTooltip.show("Cycle date separator (. / -)", pt.x, pt.y);
+                                }
+                            }
+                            onExited: sliderTooltip.hide()
+                            onClicked: {
+                                var cur = settingsController.dateSeparator;
+                                if (cur === ".") {
+                                    settingsController.dateSeparator = "/";
+                                } else if (cur === "/") {
+                                    settingsController.dateSeparator = "-";
+                                } else {
+                                    settingsController.dateSeparator = ".";
+                                }
+                            }
+                        }
+                    }
+
+                    Text {
+                        width: parent.width - switchDateBtn.width - dateSepBtn.width - 12
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: root.formatSampleDate(settingsController.dateFormatIndex, settingsController.dateSeparator)
+                        color: "#9faec0"
+                        font.pixelSize: 11
+                        minimumPixelSize: 8
+                        fontSizeMode: Text.HorizontalFit
+                        font.bold: true
+                        elide: Text.ElideRight
+                    }
+                }
+
+                // Zeitformat: Button "Switch Time" + Beispielzeit (23:59)
+                Row {
+                    width: parent.width
+                    height: 20
+                    spacing: 5
+
+                    Rectangle {
+                        id: switchTimeBtn
+                        width: 74
+                        height: 20
+                        radius: 4
+                        color: switchTimeMa.containsMouse ? "#353b45" : "#282c34"
+                        border.color: switchTimeMa.containsMouse ? root.accentHoverColor : "#3e4451"
+                        border.width: 1
+
+                        Text {
+                            anchors.centerIn: parent
+                            text: "Switch Time"
+                            color: switchTimeMa.containsMouse ? "#ffffff" : "#cdd3de"
+                            font.pixelSize: 10
+                            font.bold: true
+                        }
+
+                        MouseArea {
+                            id: switchTimeMa
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            onEntered: {
+                                if (!card.isDraggingSlider) {
+                                    var pt = mapToItem(card, width / 2, 0);
+                                    sliderTooltip.show("Cycle time format in Karyon hub", pt.x, pt.y);
+                                }
+                            }
+                            onExited: sliderTooltip.hide()
+                            onClicked: {
+                                settingsController.timeFormatIndex = (settingsController.timeFormatIndex + 1) % 2;
+                            }
+                        }
+                    }
+
+                    Text {
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: root.formatSampleTime(settingsController.timeFormatIndex)
+                        color: "#9faec0"
+                        font.pixelSize: 11
+                        font.bold: true
                     }
                 }
 
