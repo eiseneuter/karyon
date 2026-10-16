@@ -64,23 +64,28 @@ Item {
     }
 
     readonly property bool isDrilldownActive: {
-        if (selectedRing !== 1 || selectedIndex < 0 || !segmentList1 || selectedIndex >= segmentList1.length) return false;
-        var seg = segmentList1[selectedIndex];
+        var seg = null;
+        var outerR = 0;
+        if (selectedRing === 1 && selectedIndex >= 0 && segmentList1 && selectedIndex < segmentList1.length) {
+            seg = segmentList1[selectedIndex];
+            outerR = circleRadius + ringGap + ringDepth;
+        } else if (selectedRing === 2 && selectedIndex >= 0 && segmentList2 && selectedIndex < segmentList2.length) {
+            seg = segmentList2[selectedIndex];
+            outerR = circleRadius + ringGap + ringDepth + ring2Gap + ring2Depth;
+        }
         if (!seg || !seg.hasDrilldown) return false;
 
         var dx = aimOffsetX;
         var dy = aimOffsetY;
         var dist = Math.sqrt(dx * dx + dy * dy);
-        var innerR1 = circleRadius + ringGap;
-        var outerR1 = innerR1 + ringDepth;
 
-        if (dist < outerR1 - 15 || dist > outerR1 + 35) return false;
+        if (dist < outerR - 15 || dist > outerR + 35) return false;
 
         var angle = Math.atan2(dy, dx);
         var diff = angle - seg.angle;
         while (diff > Math.PI) diff -= 2 * Math.PI;
         while (diff < -Math.PI) diff += 2 * Math.PI;
-        return Math.abs(diff) <= (seg.span / 2.0 + 0.04);
+        return Math.abs(diff) <= (seg.span / 2.0);
     }
 
     function requestPaintCanvas() {
@@ -154,15 +159,15 @@ Item {
 
         if (!seg) return false;
 
-        // Radius-Prüfung: Muss im Bereich des Rings liegen (+- 3px Toleranz)
-        if (dist < innerR - 3 || dist > outerR + 3) return false;
+        // Exakte Radius-Prüfung: Muss im gezeichneten Ring liegen
+        if (dist < innerR || dist > outerR) return false;
 
-        // Winkel-Prüfung: Muss im Winkelbereich des Segments liegen
+        // Exakte Winkel-Prüfung: Muss im gezeichneten Winkelbereich des Segments liegen
         var diff = angle - seg.angle;
         while (diff > Math.PI) diff -= 2 * Math.PI;
         while (diff < -Math.PI) diff += 2 * Math.PI;
 
-        return Math.abs(diff) <= (seg.span / 2.0 + 0.04);
+        return Math.abs(diff) <= (seg.span / 2.0);
     }
 
     function setSegmentLists(s1, s2, s3, r2Active, r3Active) {
@@ -222,15 +227,15 @@ Item {
         var foundRing = -1;
         var foundIndex = -1;
 
-        // Prüfe Ring 3 (falls aktiv)
+        // Prüfe Ring 3 (falls aktiv) — exakte Pixelgrenzen identisch zur Canvas-Zeichnung
         var numSegs3 = (hasRing3Active && segmentList3 && segmentList3.length) ? segmentList3.length : 0;
-        if (numSegs3 > 0 && dist >= innerR3 - 3 && dist <= outerR3 + 3) {
+        if (numSegs3 > 0 && dist >= innerR3 && dist <= outerR3) {
             for (var k = 0; k < numSegs3; k++) {
                 var seg3 = segmentList3[k];
                 var diff3 = angle - seg3.angle;
                 while (diff3 > Math.PI) diff3 -= 2 * Math.PI;
                 while (diff3 < -Math.PI) diff3 += 2 * Math.PI;
-                if (Math.abs(diff3) <= (seg3.span / 2.0 + 0.04)) {
+                if (Math.abs(diff3) <= (seg3.span / 2.0)) {
                     foundRing = 3;
                     foundIndex = k;
                     break;
@@ -241,13 +246,13 @@ Item {
         // Prüfe Ring 2 (falls aktiv und noch nicht auf Ring 3)
         if (foundRing === -1) {
             var numSegs2 = (hasRing2Active && segmentList2 && segmentList2.length) ? segmentList2.length : 0;
-            if (numSegs2 > 0 && dist >= innerR2 - 3 && dist <= outerR2 + 3) {
+            if (numSegs2 > 0 && dist >= innerR2 && dist <= outerR2) {
                 for (var j = 0; j < numSegs2; j++) {
                     var seg2 = segmentList2[j];
                     var diff2 = angle - seg2.angle;
                     while (diff2 > Math.PI) diff2 -= 2 * Math.PI;
                     while (diff2 < -Math.PI) diff2 += 2 * Math.PI;
-                    if (Math.abs(diff2) <= (seg2.span / 2.0 + 0.04)) {
+                    if (Math.abs(diff2) <= (seg2.span / 2.0)) {
                         foundRing = 2;
                         foundIndex = j;
                         break;
@@ -261,7 +266,7 @@ Item {
         if (foundRing === -1) {
             var numSegs1 = (segmentList1 && segmentList1.length) ? segmentList1.length : 0;
             var deadR = (typeof deadzoneRadius !== "undefined") ? deadzoneRadius : 20;
-            if (numSegs1 > 0 && dist >= deadR && dist <= outerR1 + 3) {
+            if (numSegs1 > 0 && dist >= deadR && dist <= outerR1) {
                 for (var i = 0; i < numSegs1; i++) {
                     var seg1 = segmentList1[i];
                     if (volumeScrolledThisSession && (seg1.segmentType === "media" || (seg1.windowId && seg1.windowId.indexOf("__MEDIA_") === 0))) {
@@ -270,7 +275,7 @@ Item {
                     var diff1 = angle - seg1.angle;
                     while (diff1 > Math.PI) diff1 -= 2 * Math.PI;
                     while (diff1 < -Math.PI) diff1 += 2 * Math.PI;
-                    if (Math.abs(diff1) <= (seg1.span / 2.0 + 0.04)) {
+                    if (Math.abs(diff1) <= (seg1.span / 2.0)) {
                         foundRing = 1;
                         foundIndex = i;
                         break;
