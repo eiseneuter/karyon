@@ -97,8 +97,8 @@ for qmod in QtCore QtQml QtQuick; do
 done
 
 echo "=== [4/6] Resolving and Bundling Shared Libraries ==="
-# Exclude low-level glibc & GPU driver libraries that must come from the host
-EXCLUDE_RE='^(libc\.so|libm\.so|libpthread\.so|libdl\.so|librt\.so|libresolv\.so|libutil\.so|ld-linux|libGL\.so|libGLX\.so|libOpenGL\.so|libEGL\.so|libGLESv2\.so|libglapi\.so|libgbm\.so|libdrm\.so|libasound\.so|libGLdispatch\.so|libvulkan\.so)'
+# Exclude low-level glibc & GPU driver / X11 / XCB libraries that must come from the host
+EXCLUDE_RE='^(libc\.so|libm\.so|libpthread\.so|libdl\.so|librt\.so|libresolv\.so|libutil\.so|ld-linux|libGL\.so|libGLX\.so|libOpenGL\.so|libEGL\.so|libGLESv2\.so|libglapi\.so|libgbm\.so|libdrm\.so|libasound\.so|libGLdispatch\.so|libvulkan\.so|libX11\.so|libX11-xcb\.so|libxcb\.so|libxcb-.*\.so|libwayland-client\.so)'
 
 copy_lib() {
     local lib="$1"

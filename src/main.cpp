@@ -36,7 +36,6 @@
 
 #include <thread>
 #include <cstring>
-#include <xcb/xcb.h>
 #include <dlfcn.h>
 
 namespace {
@@ -154,27 +153,45 @@ int main(int argc, char *argv[])
     qputenv("QT_QPA_PLATFORM", "xcb");
 
     // Automatische Erkennung, ob GLX auf dem X11/XWayland-Server funktionsfähig ist.
-    // Falls GLX fehlt oder blockiert ist (z.B. Wayland mit NVIDIA, VMs, fehlender GLX-Treiber),
-    // automatisch auf EGL (xcb_egl) umschalten, um "Fatal: Could not initialize GLX" zu verhindern.
+    // Falls GLX fehlt oder blockiert ist (z.B. Wayland mit NVIDIA/Mesa DRI-Inkompatibilität, VMs, fehlender GLX-Treiber),
+    // automatisch auf QT_XCB_GL_INTEGRATION=none umschalten, um "Fatal: Could not initialize GLX" zu verhindern.
     if (!qEnvironmentVariableIsSet("QT_XCB_GL_INTEGRATION")) {
         bool glxAvailable = false;
+        void *libx11 = dlopen("libX11.so.6", RTLD_LAZY);
+        if (!libx11) libx11 = dlopen("libX11.so", RTLD_LAZY);
         void *libglx = dlopen("libGLX.so.0", RTLD_LAZY);
         if (!libglx) libglx = dlopen("libGL.so.1", RTLD_LAZY);
-        if (libglx) {
-            xcb_connection_t *conn = xcb_connect(nullptr, nullptr);
-            if (conn && !xcb_connection_has_error(conn)) {
-                xcb_query_extension_cookie_t cookie = xcb_query_extension(conn, 3, "GLX");
-                xcb_query_extension_reply_t *reply = xcb_query_extension_reply(conn, cookie, nullptr);
-                if (reply && reply->present) {
-                    glxAvailable = true;
+        if (!libglx) libglx = dlopen("libGL.so", RTLD_LAZY);
+
+        if (libx11 && libglx) {
+            typedef void* (*XOpenDisplayFn)(const char*);
+            typedef int (*XCloseDisplayFn)(void*);
+            typedef int (*glXQueryExtensionFn)(void*, int*, int*);
+            typedef int (*glXQueryVersionFn)(void*, int*, int*);
+
+            auto xOpenDisplay = reinterpret_cast<XOpenDisplayFn>(dlsym(libx11, "XOpenDisplay"));
+            auto xCloseDisplay = reinterpret_cast<XCloseDisplayFn>(dlsym(libx11, "XCloseDisplay"));
+            auto glXQueryExt = reinterpret_cast<glXQueryExtensionFn>(dlsym(libglx, "glXQueryExtension"));
+            auto glXQueryVer = reinterpret_cast<glXQueryVersionFn>(dlsym(libglx, "glXQueryVersion"));
+
+            if (xOpenDisplay && xCloseDisplay && glXQueryExt && glXQueryVer) {
+                void *dpy = xOpenDisplay(nullptr);
+                if (dpy) {
+                    int errorBase = 0, eventBase = 0, major = 0, minor = 0;
+                    if (glXQueryExt(dpy, &errorBase, &eventBase) &&
+                        glXQueryVer(dpy, &major, &minor) &&
+                        (major > 1 || (major == 1 && minor >= 3))) {
+                        glxAvailable = true;
+                    }
+                    xCloseDisplay(dpy);
                 }
-                free(reply);
-                xcb_disconnect(conn);
             }
-            dlclose(libglx);
         }
+        if (libx11) dlclose(libx11);
+        if (libglx) dlclose(libglx);
+
         if (!glxAvailable) {
-            qputenv("QT_XCB_GL_INTEGRATION", "xcb_egl");
+            qputenv("QT_XCB_GL_INTEGRATION", "none");
         }
     }
 
