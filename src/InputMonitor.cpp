@@ -99,9 +99,18 @@ InputMonitor::~InputMonitor()
     stop();
 }
 
+void InputMonitor::setOverlayMouseSpeed(double speed)
+{
+    m_overlayMouseSpeed.store(speed);
+    std::cout << "[InputMonitor] Overlay mouse speed updated: " << speed << "\n";
+}
+
 bool InputMonitor::start()
 {
     if (m_running.load()) return true;
+
+    std::cout << "[InputMonitor] Starting (overlayMouseSpeed: " << m_overlayMouseSpeed.load()
+              << ", holdTrigger: " << m_holdTriggerMs.load() << "ms)\n";
 
     setupUInput();
     scanDevices();
@@ -203,6 +212,7 @@ void InputMonitor::setupUInput()
     }
 
     m_uinputCreatedTime = std::chrono::steady_clock::now();
+    std::cout << "[InputMonitor] Virtual input devices initialized (mouse, abs, keyboard)\n";
 }
 
 void InputMonitor::warpCursor(int targetX, int targetY, int screenW, int screenH)
@@ -430,6 +440,15 @@ void InputMonitor::syncKWinMouseSettings()
         setVirtualProp(QStringLiteral("scrollFactor"),
                        bestProps.value(QStringLiteral("scrollFactor")).toDouble());
     }
+
+    std::cout << "[InputMonitor] Synced KWin mouse settings from \""
+              << bestProps.value(QStringLiteral("name")).toString().toStdString()
+              << "\" to karyon-virtual mouse (accel="
+              << bestProps.value(QStringLiteral("pointerAcceleration"), 0.0).toDouble()
+              << ", flat=" << (bestProps.value(QStringLiteral("pointerAccelerationProfileFlat"), false).toBool() ? "true" : "false")
+              << ", adaptive=" << (bestProps.value(QStringLiteral("pointerAccelerationProfileAdaptive"), true).toBool() ? "true" : "false")
+              << ", scrollFactor=" << bestProps.value(QStringLiteral("scrollFactor"), 1.0).toDouble()
+              << ")\n";
 }
 
 void InputMonitor::scanDevices()
@@ -455,7 +474,7 @@ void InputMonitor::scanDevices()
             m_lastReportedMouse = sName;
             m_lastReportedTime = std::chrono::steady_clock::now();
 
-            std::cout << "Mouse registered: " << entry.path().string() 
+            std::cout << "[InputMonitor] Mouse registered: " << entry.path().string() 
                       << " [" << sName << "] (pending safe grab)\n";
         } else {
             close(fd);

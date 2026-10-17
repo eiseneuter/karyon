@@ -25,7 +25,7 @@ public:
     void setHoldTriggerMs(int ms) { m_holdTriggerMs.store(ms); }
     int holdTriggerMs() const { return m_holdTriggerMs.load(); }
 
-    void setOverlayMouseSpeed(double speed) { m_overlayMouseSpeed.store(speed); }
+    void setOverlayMouseSpeed(double speed);
     double overlayMouseSpeed() const { return m_overlayMouseSpeed.load(); }
 
     bool isLeftDown() const { return m_leftDown.load(); }
