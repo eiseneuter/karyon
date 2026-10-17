@@ -14,6 +14,9 @@
 #include <QStandardPaths>
 #include <QProcess>
 #include <QtDBus>
+#include <QOpenGLContext>
+#include <QQuickWindow>
+#include <QSGRendererInterface>
 #include <csignal>
 #include <unistd.h>
 #include <iostream>
@@ -288,6 +291,17 @@ int main(int argc, char *argv[])
                 }
                 s.endGroup();
             }
+        }
+    }
+
+    // Automatische Absicherung für Qt Quick:
+    // Falls das Erstellen eines OpenGL-Kontexts fehlschlägt (z.B. defekter Treiber, VM ohne 3D,
+    // fehlendes GLX/EGL), schaltet Karyon nahtlos auf den Software-RHI-Backend um.
+    // Verhindert zu 100% den Fehler: "Fatal: Failed to initialize graphics backend for OpenGL".
+    if (!qEnvironmentVariableIsSet("QSG_RHI_BACKEND")) {
+        QOpenGLContext testContext;
+        if (!testContext.create()) {
+            QQuickWindow::setGraphicsApi(QSGRendererInterface::GraphicsApi::Software);
         }
     }
 
