@@ -36,6 +36,8 @@
 
 #include <thread>
 #include <cstring>
+#include <xcb/xcb.h>
+#include <dlfcn.h>
 
 namespace {
 void handleSignal(int /*sig*/)
@@ -150,6 +152,31 @@ int main(int argc, char *argv[])
     // Enforce QT_QPA_PLATFORM=xcb for direct X11/XWayland Override-Redirect (Rule 1)
     // Synchronous cursor positioning and frameless overlay window placement under cursor
     qputenv("QT_QPA_PLATFORM", "xcb");
+
+    // Automatische Erkennung, ob GLX auf dem X11/XWayland-Server funktionsfähig ist.
+    // Falls GLX fehlt oder blockiert ist (z.B. Wayland mit NVIDIA, VMs, fehlender GLX-Treiber),
+    // automatisch auf EGL (xcb_egl) umschalten, um "Fatal: Could not initialize GLX" zu verhindern.
+    if (!qEnvironmentVariableIsSet("QT_XCB_GL_INTEGRATION")) {
+        bool glxAvailable = false;
+        void *libglx = dlopen("libGLX.so.0", RTLD_LAZY);
+        if (!libglx) libglx = dlopen("libGL.so.1", RTLD_LAZY);
+        if (libglx) {
+            xcb_connection_t *conn = xcb_connect(nullptr, nullptr);
+            if (conn && !xcb_connection_has_error(conn)) {
+                xcb_query_extension_cookie_t cookie = xcb_query_extension(conn, 3, "GLX");
+                xcb_query_extension_reply_t *reply = xcb_query_extension_reply(conn, cookie, nullptr);
+                if (reply && reply->present) {
+                    glxAvailable = true;
+                }
+                free(reply);
+                xcb_disconnect(conn);
+            }
+            dlclose(libglx);
+        }
+        if (!glxAvailable) {
+            qputenv("QT_XCB_GL_INTEGRATION", "xcb_egl");
+        }
+    }
 
     QApplication app(argc, argv);
     // Re-apply default QLocale after QApplication constructor (which calls setlocale internally)

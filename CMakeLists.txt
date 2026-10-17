@@ -91,4 +91,5 @@ target_link_libraries(karyon
         sqlite3
         xcb
         xcb-shape
+        ${CMAKE_DL_LIBS}
 )

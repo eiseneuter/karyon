@@ -95,6 +95,18 @@ inline QProcessEnvironment cleanHostEnvironment()
         env.remove(QStringLiteral("QT_QPA_PLATFORM"));
     }
 
+    if (env.contains(QStringLiteral("APPIMAGE_ORIGINAL_QT_XCB_GL_INTEGRATION"))) {
+        QString origGl = env.value(QStringLiteral("APPIMAGE_ORIGINAL_QT_XCB_GL_INTEGRATION"));
+        if (origGl.isEmpty()) {
+            env.remove(QStringLiteral("QT_XCB_GL_INTEGRATION"));
+        } else {
+            env.insert(QStringLiteral("QT_XCB_GL_INTEGRATION"), origGl);
+        }
+        env.remove(QStringLiteral("APPIMAGE_ORIGINAL_QT_XCB_GL_INTEGRATION"));
+    } else {
+        env.remove(QStringLiteral("QT_XCB_GL_INTEGRATION"));
+    }
+
     env.remove(QStringLiteral("APPDIR"));
 
     // AppImage-Identität darf NIE an gestartete Programme vererbt werden:
