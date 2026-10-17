@@ -44,13 +44,15 @@ void handleSignal(int /*sig*/)
     _exit(0);
 }
 
+static int g_origStderr = -1;
+
 void setupStderrFilter()
 {
     int pipeFds[2];
     if (pipe(pipeFds) != 0) return;
 
-    int origStderr = dup(STDERR_FILENO);
-    if (origStderr < 0) {
+    g_origStderr = dup(STDERR_FILENO);
+    if (g_origStderr < 0) {
         close(pipeFds[0]);
         close(pipeFds[1]);
         return;
@@ -59,12 +61,13 @@ void setupStderrFilter()
     if (dup2(pipeFds[1], STDERR_FILENO) < 0) {
         close(pipeFds[0]);
         close(pipeFds[1]);
-        close(origStderr);
+        close(g_origStderr);
+        g_origStderr = -1;
         return;
     }
     close(pipeFds[1]);
 
-    std::thread([readFd = pipeFds[0], origStderr]() {
+    std::thread([readFd = pipeFds[0]]() {
         FILE *in = fdopen(readFd, "r");
         if (!in) return;
         char buffer[2048];
@@ -75,7 +78,9 @@ void setupStderrFilter()
                 strstr(buffer, "kf.service.sycoca:") != nullptr) {
                 continue;
             }
-            write(origStderr, buffer, strlen(buffer));
+            if (g_origStderr >= 0) {
+                write(g_origStderr, buffer, strlen(buffer));
+            }
         }
         fclose(in);
     }).detach();
@@ -92,10 +97,14 @@ void quietMessageHandler(QtMsgType type, const QMessageLogContext &/*context*/, 
         return;
     }
     if (type == QtFatalMsg) {
-        std::cerr << "Fatal: " << msg.toStdString() << "\n";
+        std::string out = "Fatal: " + msg.toStdString() + "\n";
+        int fd = (g_origStderr >= 0) ? g_origStderr : STDERR_FILENO;
+        (void)write(fd, out.data(), out.size());
         abort();
     } else if (type == QtCriticalMsg) {
-        std::cerr << "Error: " << msg.toStdString() << "\n";
+        std::string out = "Error: " + msg.toStdString() + "\n";
+        int fd = (g_origStderr >= 0) ? g_origStderr : STDERR_FILENO;
+        (void)write(fd, out.data(), out.size());
     }
 }
 }
