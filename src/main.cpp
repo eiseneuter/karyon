@@ -200,8 +200,21 @@ int main(int argc, char *argv[])
         if (libglx) dlclose(libglx);
 
         if (!glxAvailable) {
-            qputenv("QT_XCB_GL_INTEGRATION", "none");
+            void *libegl = dlopen("libEGL.so.1", RTLD_LAZY);
+            if (!libegl) libegl = dlopen("libEGL.so", RTLD_LAZY);
+            if (libegl) {
+                dlclose(libegl);
+                qputenv("QT_XCB_GL_INTEGRATION", "xcb_egl");
+            } else {
+                qputenv("QT_XCB_GL_INTEGRATION", "none");
+            }
         }
+    }
+
+    // Falls QT_XCB_GL_INTEGRATION=none aktiv ist, kann Qt Quick kein OpenGL auf XCB initialisieren.
+    // In diesem Fall automatisch auf den Software-RHI-Backend zurückgreifen, um "Failed to initialize graphics backend for OpenGL" zu verhindern.
+    if (qgetenv("QT_XCB_GL_INTEGRATION") == "none" && !qEnvironmentVariableIsSet("QSG_RHI_BACKEND")) {
+        qputenv("QSG_RHI_BACKEND", "software");
     }
 
     QApplication app(argc, argv);
