@@ -477,7 +477,7 @@ Item {
                     width: parent.width
                     spacing: 2
 
-                    readonly property string sliderTip: "Mouse cursor sensitivity while showing overlay"
+                    readonly property string sliderTip: "Mouse cursor speed while showing overlay"
 
                     Item {
                         width: parent.width
@@ -601,7 +601,7 @@ Item {
                     width: parent.width
                     spacing: 2
 
-                    readonly property string sliderTip: "Overall visual scale factor for the radial overlay (0.8x to 1.3x)"
+                    readonly property string sliderTip: "Overall visual scale factor for the radial overlay"
 
                     Item {
                         width: parent.width
@@ -856,7 +856,7 @@ Item {
                     width: parent.width
                     spacing: 2
 
-                    readonly property string sliderTip: "Maximum number of recently closed applications to track and show"
+                    readonly property string sliderTip: "Maximum number of recently closed applications to show"
 
                     Item {
                         width: parent.width
@@ -1431,14 +1431,6 @@ Item {
                     }
                 }
 
-                // Game Mode Section Header
-                Text {
-                    text: "GAME MODE"
-                    color: "#96a2b4"
-                    font.pixelSize: 11
-                    font.bold: true
-                }
-
                 // Game Mode Checkbox
                 Item {
                     width: parent.width
@@ -1597,7 +1589,7 @@ Item {
         Rectangle {
             id: gesturesDivider
             anchors.top: checkboxesRow.bottom
-            anchors.topMargin: 10
+            anchors.topMargin: 4
             anchors.left: parent.left
             anchors.leftMargin: 12
             anchors.right: parent.right

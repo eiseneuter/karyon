@@ -30,6 +30,47 @@ void PinnedManager::load()
         item.execOrPath = settings.value(QStringLiteral("execOrPath")).toString();
         item.icon = settings.value(QStringLiteral("icon")).toString();
         item.desktopFile = settings.value(QStringLiteral("desktopFile")).toString();
+        if (item.type == PinnedItemType::App &&
+            (item.id == QLatin1String("plasmawindowed") || item.execOrPath.trimmed() == QLatin1String("plasmawindowed"))) {
+            QString n = item.name.toLower();
+            QString pid;
+            if (n.contains(QStringLiteral("blue"))) {
+                pid = QStringLiteral("org.kde.plasma.bluetooth");
+                item.icon = QStringLiteral("preferences-system-bluetooth");
+            } else if (n.contains(QStringLiteral("lautst")) || n.contains(QStringLiteral("volume")) || n.contains(QStringLiteral("audio"))) {
+                pid = QStringLiteral("org.kde.plasma.volume");
+                item.icon = QStringLiteral("audio-volume-high");
+            } else if (n.contains(QStringLiteral("netz")) || n.contains(QStringLiteral("network")) || n.contains(QStringLiteral("wlan")) || n.contains(QStringLiteral("wifi"))) {
+                pid = QStringLiteral("org.kde.plasma.networkmanagement");
+                item.icon = QStringLiteral("network-wireless");
+            } else if (n.contains(QStringLiteral("akku")) || n.contains(QStringLiteral("batt")) || n.contains(QStringLiteral("energie")) || n.contains(QStringLiteral("energy"))) {
+                pid = QStringLiteral("org.kde.plasma.battery");
+                item.icon = QStringLiteral("battery-charging");
+            } else if (n.contains(QStringLiteral("hellig")) || n.contains(QStringLiteral("bright"))) {
+                pid = QStringLiteral("org.kde.plasma.brightness");
+                item.icon = QStringLiteral("display-brightness");
+            } else if (n.contains(QStringLiteral("druck")) || n.contains(QStringLiteral("print"))) {
+                pid = QStringLiteral("org.kde.plasma.printmanager");
+                item.icon = QStringLiteral("printer");
+            } else if (n.contains(QStringLiteral("wetter")) || n.contains(QStringLiteral("weather"))) {
+                pid = QStringLiteral("org.kde.plasma.weather");
+                item.icon = QStringLiteral("weather-few-clouds");
+            } else if (n.contains(QStringLiteral("gerät")) || n.contains(QStringLiteral("device"))) {
+                pid = QStringLiteral("org.kde.plasma.devicenotifier");
+                item.icon = QStringLiteral("drive-removable-media");
+            } else if (n.contains(QStringLiteral("kamera")) || n.contains(QStringLiteral("camera"))) {
+                pid = QStringLiteral("org.kde.plasma.cameraindicator");
+                item.icon = QStringLiteral("camera-web");
+            } else if (n.contains(QStringLiteral("anzeige")) || n.contains(QStringLiteral("bildschirm")) || n.contains(QStringLiteral("display")) || n.contains(QStringLiteral("screen"))) {
+                pid = QStringLiteral("org.kde.kscreen");
+                item.icon = QStringLiteral("preferences-desktop-display");
+            }
+            if (!pid.isEmpty()) {
+                item.id = QStringLiteral("plasmawindowed:") + pid;
+                item.execOrPath = QStringLiteral("plasmawindowed ") + pid;
+                item.desktopFile = QStringLiteral("plasmawindowed:") + pid;
+            }
+        }
         if (!item.id.isEmpty() || !item.execOrPath.isEmpty()) {
             m_items.append(item);
         }
@@ -65,6 +106,61 @@ bool PinnedManager::itemMatchesApp(const PinnedItem &item, const QString &deskto
     if (idLow.startsWith(QLatin1String("app:"))) idLow = idLow.mid(4);
     if (idLow.startsWith(QLatin1String("window:"))) idLow = idLow.mid(7);
     if (rcLow.startsWith(QLatin1String("app:"))) rcLow = rcLow.mid(4);
+
+    // Spezialfall: plasmawindowed Tray-Flyouts strikt über die Plasmoid-ID isolieren,
+    // damit verschiedene Flyouts (Bluetooth, Volume, Network etc.) sich niemals gegenseitig matchen.
+    auto extractPlasmoidId = [](const QString &str) -> QString {
+        if (str.isEmpty()) return {};
+        QString s = str.trimmed().toLower();
+        if (s.startsWith(QLatin1String("plasmawindowed:"))) {
+            return s.mid(15).trimmed();
+        }
+        if (s.startsWith(QLatin1String("app:plasmawindowed:"))) {
+            return s.mid(19).trimmed();
+        }
+        if (s.contains(QLatin1String("plasmawindowed"))) {
+            int idx = s.indexOf(QLatin1String("plasmawindowed"));
+            QString rest = s.mid(idx + 14).trimmed();
+            while (rest.startsWith(QLatin1Char(':')) || rest.startsWith(QLatin1Char(' '))) {
+                rest = rest.mid(1).trimmed();
+            }
+            QStringList tokens = rest.split(QLatin1Char(' '), Qt::SkipEmptyParts);
+            for (const QString &tok : tokens) {
+                if (!tok.startsWith(QLatin1Char('-'))) {
+                    return tok.trimmed();
+                }
+            }
+        }
+        if (s.startsWith(QLatin1String("org.kde.plasma.")) || s.startsWith(QLatin1String("org.kde.kscreen"))) {
+            return s;
+        }
+        return {};
+    };
+
+    QString itemPlasmoid = extractPlasmoidId(item.id);
+    if (itemPlasmoid.isEmpty()) itemPlasmoid = extractPlasmoidId(item.execOrPath);
+    if (itemPlasmoid.isEmpty()) itemPlasmoid = extractPlasmoidId(item.desktopFile);
+
+    bool itemIsPw = !itemPlasmoid.isEmpty() ||
+                    item.id.contains(QLatin1String("plasmawindowed"), Qt::CaseInsensitive) ||
+                    item.execOrPath.contains(QLatin1String("plasmawindowed"), Qt::CaseInsensitive) ||
+                    item.desktopFile.contains(QLatin1String("plasmawindowed"), Qt::CaseInsensitive);
+
+    bool targetIsPw = idLow.contains(QLatin1String("plasmawindowed")) ||
+                      rcLow.contains(QLatin1String("plasmawindowed"));
+
+    if (itemIsPw || targetIsPw) {
+        if (!itemIsPw || !targetIsPw) {
+            return false;
+        }
+        QString targetPlasmoid = extractPlasmoidId(desktopEntryName);
+        if (targetPlasmoid.isEmpty()) targetPlasmoid = extractPlasmoidId(resourceClass);
+
+        if (!itemPlasmoid.isEmpty() && !targetPlasmoid.isEmpty()) {
+            return itemPlasmoid == targetPlasmoid;
+        }
+        return false;
+    }
 
     auto matchStem = [](const QString &a, const QString &b) {
         if (a.isEmpty() || b.isEmpty()) return false;

@@ -814,6 +814,12 @@ void CircleOverlay::partitionWindows(const QList<WindowInfo> &mru,
     const double maxSegAng1 = segmentWidth() / r1Outer;
 
     auto getAppKey = [](const WindowInfo &w) {
+        if (w.resourceClass.contains(QLatin1String("plasmawindowed"), Qt::CaseInsensitive) ||
+            w.desktopFileName.contains(QLatin1String("plasmawindowed"), Qt::CaseInsensitive)) {
+            AppEntry app = AppManager::resolveWindowApp(w.desktopFileName, w.resourceClass, w.pid, w.caption);
+            if (!app.id.isEmpty()) return app.id;
+            return QStringLiteral("plasmawindowed:") + w.caption.trimmed().toLower();
+        }
         return w.desktopFileName.isEmpty() ? w.resourceClass : w.desktopFileName;
     };
 
@@ -854,6 +860,23 @@ void CircleOverlay::partitionWindows(const QList<WindowInfo> &mru,
     QString preferredPinAppKey;
 
     auto configurePinStatus = [&](OverlaySegment &seg, const WindowInfo &w) {
+        bool isPw = w.resourceClass.contains(QLatin1String("plasmawindowed"), Qt::CaseInsensitive) ||
+                    w.desktopFileName.contains(QLatin1String("plasmawindowed"), Qt::CaseInsensitive);
+
+        auto checkAppPinned = [&]() -> bool {
+            if (!seg.appKey.isEmpty() && m_pinnedManager.isAppPinned(seg.appKey, seg.resourceClass)) return true;
+            if (!seg.desktopFileName.isEmpty() && m_pinnedManager.isAppPinned(seg.desktopFileName, seg.resourceClass)) return true;
+            if (m_pinnedManager.isAppPinned(w.desktopFileName, w.resourceClass)) return true;
+            return false;
+        };
+
+        if (isPw) {
+            // Jedes Plasmoid-Fenster ist ein eigenständiges Fenstersegment und immer einzeln pinnbar
+            seg.canPin = true;
+            seg.isPinned = checkAppPinned();
+            return;
+        }
+
         QString appKey = getAppKey(w);
         bool isFilePin = false;
         for (const auto &item : m_pinnedManager.pinnedItems()) {
@@ -862,13 +885,6 @@ void CircleOverlay::partitionWindows(const QList<WindowInfo> &mru,
                 break;
             }
         }
-
-        auto checkAppPinned = [&]() -> bool {
-            if (m_pinnedManager.isAppPinned(w.desktopFileName, w.resourceClass)) return true;
-            if (!seg.desktopFileName.isEmpty() && m_pinnedManager.isAppPinned(seg.desktopFileName, seg.resourceClass)) return true;
-            if (!seg.appKey.isEmpty() && m_pinnedManager.isAppPinned(seg.appKey, seg.resourceClass)) return true;
-            return false;
-        };
 
         if (isFilePin) {
             seg.canPin = true;
@@ -900,18 +916,29 @@ void CircleOverlay::partitionWindows(const QList<WindowInfo> &mru,
         seg.caption = w.caption;
         seg.ring = 1;
 
+        bool isPw = w.resourceClass.contains(QLatin1String("plasmawindowed"), Qt::CaseInsensitive) ||
+                    w.desktopFileName.contains(QLatin1String("plasmawindowed"), Qt::CaseInsensitive);
+
         AppEntry app = AppManager::resolveWindowApp(w.desktopFileName, w.resourceClass, w.pid, w.caption);
         seg.appKey = !app.id.isEmpty() ? app.id : getAppKey(w);
         seg.desktopFileName = !app.desktopFile.isEmpty() ? app.desktopFile : w.desktopFileName;
         seg.resourceClass = !app.icon.isEmpty() ? app.icon : w.resourceClass;
 
-        QString displayName = !app.name.isEmpty() ? app.name : resolveAppName(seg.desktopFileName, seg.resourceClass);
-        seg.tooltipText = formatWindowTooltip(displayName, w.caption, w.resourceClass);
+        if (isPw) {
+            seg.caption = !w.caption.isEmpty() ? w.caption : (!app.name.isEmpty() ? app.name : QStringLiteral("Plasma Windowed"));
+            seg.tooltipText = seg.caption;
+            seg.groupWindowIds = {w.id};
+            seg.windowCount = 1;
+        } else {
+            QString displayName = !app.name.isEmpty() ? app.name : resolveAppName(seg.desktopFileName, seg.resourceClass);
+            seg.tooltipText = formatWindowTooltip(displayName, w.caption, w.resourceClass);
+            QString appGroupKey = getAppKey(w);
+            seg.groupWindowIds = appGroupWindowIds.value(appGroupKey);
+            seg.windowCount = seg.groupWindowIds.size();
+        }
+
         seg.segmentType = QStringLiteral("window");
         seg.isRealWindow = true;
-        QString appGroupKey = getAppKey(w);
-        seg.groupWindowIds = appGroupWindowIds.value(appGroupKey);
-        seg.windowCount = seg.groupWindowIds.size();
         configurePinStatus(seg, w);
 
         // Wenn das Fenster zu einer im Tray residierenden App gehört, Live-Tray-Icon verknüpfen
@@ -1041,6 +1068,13 @@ void CircleOverlay::partitionWindows(const QList<WindowInfo> &mru,
     // Ungeöffnete Pinned Items sammeln (geöffnete Apps/Dateien werden zu normalen Fenstern)
     auto isAppOpenInMru = [&](const PinnedItem &item) -> bool {
         for (const auto &w : mru) {
+            AppEntry app = AppManager::resolveWindowApp(w.desktopFileName, w.resourceClass, w.pid, w.caption);
+            if (!app.id.isEmpty() && PinnedManager::itemMatchesApp(item, app.id, app.icon)) {
+                return true;
+            }
+            if (!app.desktopFile.isEmpty() && PinnedManager::itemMatchesApp(item, app.desktopFile, app.icon)) {
+                return true;
+            }
             if (PinnedManager::itemMatchesApp(item, w.desktopFileName, w.resourceClass)) {
                 return true;
             }
@@ -1049,13 +1083,6 @@ void CircleOverlay::partitionWindows(const QList<WindowInfo> &mru,
                 if (!wName.isEmpty() && wName.compare(item.name, Qt::CaseInsensitive) == 0) {
                     return true;
                 }
-            }
-            AppEntry app = AppManager::resolveWindowApp(w.desktopFileName, w.resourceClass, w.pid, w.caption);
-            if (!app.id.isEmpty() && PinnedManager::itemMatchesApp(item, app.id, app.icon)) {
-                return true;
-            }
-            if (!app.desktopFile.isEmpty() && PinnedManager::itemMatchesApp(item, app.desktopFile, app.icon)) {
-                return true;
             }
         }
         return false;
@@ -3926,12 +3953,12 @@ void CircleOverlay::togglePinForCurrentSelection()
             }
 
             // Falls bereits (auch unter altem Pfad-Key) angepinnt, zuerst sauber entpinnen
-            if (m_pinnedManager.isAppPinned(seg->desktopFileName, seg->resourceClass) ||
-                m_pinnedManager.isAppPinned(seg->appKey, seg->resourceClass) ||
-                m_pinnedManager.isAppPinned(pinId, icon)) {
-                m_pinnedManager.unpinApp(seg->desktopFileName, seg->resourceClass);
-                m_pinnedManager.unpinApp(seg->appKey, seg->resourceClass);
+            if (m_pinnedManager.isAppPinned(pinId, icon) ||
+                (!seg->appKey.isEmpty() && m_pinnedManager.isAppPinned(seg->appKey, seg->resourceClass)) ||
+                (!seg->desktopFileName.isEmpty() && m_pinnedManager.isAppPinned(seg->desktopFileName, seg->resourceClass))) {
                 m_pinnedManager.unpinApp(pinId, icon);
+                if (!seg->appKey.isEmpty()) m_pinnedManager.unpinApp(seg->appKey, seg->resourceClass);
+                if (!seg->desktopFileName.isEmpty()) m_pinnedManager.unpinApp(seg->desktopFileName, seg->resourceClass);
             } else {
                 m_pinnedManager.pinApp(pinId, name, exec, icon, desktopFile);
             }

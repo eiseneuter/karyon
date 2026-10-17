@@ -59,7 +59,7 @@ Karyon features a dedicated settings panel accessible via the system tray icon (
 ## Technical Background (How it works)
 Karyon uses several advanced techniques to achieve deep system integration and maximum performance on both Wayland and X11:
 * **Global Input Interception (evdev/uinput):** To reliably capture the mouse trigger anywhere on the screen (even in Wayland, where global hotkeys are strictly isolated for security), Karyon directly reads from `/dev/input/event*` and uses `uinput` to create a virtual proxy mouse and keyboard. This allows Karyon to intercept and consume the trigger button before the compositor even sees it.
-* **Fullscreen Overlays (Wayland & X11):** While X11 naturally allows drawing over fullscreen apps, Wayland strictly enforces window layers. Karyon integrates dynamically with KWin via native D-Bus bridges and specialized window rules, ensuring the overlay renders seamlessly on top of windows.
+* **Fullscreen Overlays (Wayland & X11):** Karyon renders as a frameless, override-redirect top-level window (`Qt::BypassWindowManagerHint`), ensuring the overlay draws seamlessly on top of all windows, including fullscreen applications.
 * **Hardware-Accelerated Qt Quick / QML:** Karyon utilizes Qt Quick's GPU-accelerated scene graph (OpenGL / Vulkan) for vector rendering and animations, drawing with sub-millisecond frame latency while keeping CPU usage minimal.
 
 ---

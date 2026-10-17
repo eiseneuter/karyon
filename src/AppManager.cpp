@@ -814,10 +814,35 @@ AppEntry AppManager::findApp(const QString &desktopFileName, const QString &reso
     return cacheAndReturn({});
 }
 
+static QStringList readProcCmdline(int pid)
+{
+    if (pid <= 0) return {};
+    QFile f(QStringLiteral("/proc/%1/cmdline").arg(pid));
+    if (!f.open(QIODevice::ReadOnly)) return {};
+    QByteArray data = f.readAll();
+    QList<QByteArray> raw = data.split('\0');
+    QStringList args;
+    for (const auto &tok : raw) {
+        if (!tok.isEmpty()) {
+            args.append(QString::fromUtf8(tok));
+        }
+    }
+    return args;
+}
+
 AppEntry AppManager::resolveWindowApp(const QString &desktopFileName, const QString &resourceClass, int pid, const QString &caption)
 {
     static QHash<QString, AppEntry> s_windowAppCache;
-    QString cacheKey = QStringLiteral("%1|%2|%3").arg(desktopFileName, resourceClass, QString::number(pid));
+    bool isPlasmaWindowed = resourceClass.contains(QLatin1String("plasmawindowed"), Qt::CaseInsensitive) ||
+                            desktopFileName.contains(QLatin1String("plasmawindowed"), Qt::CaseInsensitive);
+
+    // WICHTIG: plasmawindowed ist ein Single-Instance-Daemon. Alle Plasmoid-Fenster laufen im
+    // SELBEN Prozess mit derselben PID, haben aber unterschiedliche Titel/Captions.
+    // Daher darf der Cache-Key für plasmawindowed NIEMALS die PID nutzen, sondern muss die Caption nutzen!
+    QString cacheKey = isPlasmaWindowed
+        ? QStringLiteral("pw|%1").arg(caption.trimmed().toLower())
+        : QStringLiteral("%1|%2|%3").arg(desktopFileName, resourceClass, QString::number(pid));
+
     if (s_windowAppCache.contains(cacheKey)) {
         AppEntry cached = s_windowAppCache.value(cacheKey);
         if (!caption.isEmpty() && cached.name.startsWith(QLatin1String("Steam App "))) {
@@ -835,6 +860,114 @@ AppEntry AppManager::resolveWindowApp(const QString &desktopFileName, const QStr
         s_windowAppCache.insert(cacheKey, entry);
         return entry;
     };
+
+    // 0. Plasma Windowed (System Tray Flyouts wie Lautstärke, Netzwerke, Bluetooth, Akku etc.)
+    if (isPlasmaWindowed) {
+        AppEntry pwEntry;
+        pwEntry.id = QStringLiteral("plasmawindowed");
+        pwEntry.name = caption.trimmed().isEmpty() ? QStringLiteral("Plasma Windowed") : caption.trimmed();
+        pwEntry.exec = QStringLiteral("plasmawindowed");
+        pwEntry.icon = QStringLiteral("plasma");
+
+        QString pluginId;
+        // 1. Zuerst aus caption auflösen (da PID/cmdline von plasmawindowed mit allen anderen Fenstern geteilt wird!)
+        if (!caption.isEmpty()) {
+            QString c = caption.toLower();
+            if (c.contains(QStringLiteral("wetter")) || c.contains(QStringLiteral("weather"))) {
+                pluginId = QStringLiteral("org.kde.plasma.weather");
+            } else if (c.contains(QStringLiteral("lautst")) || c.contains(QStringLiteral("volume")) || c.contains(QStringLiteral("audio"))) {
+                pluginId = QStringLiteral("org.kde.plasma.volume");
+            } else if (c.contains(QStringLiteral("netz")) || c.contains(QStringLiteral("network")) || c.contains(QStringLiteral("wlan")) || c.contains(QStringLiteral("wifi"))) {
+                pluginId = QStringLiteral("org.kde.plasma.networkmanagement");
+            } else if (c.contains(QStringLiteral("blue"))) {
+                pluginId = QStringLiteral("org.kde.plasma.bluetooth");
+            } else if (c.contains(QStringLiteral("akku")) || c.contains(QStringLiteral("batt")) || c.contains(QStringLiteral("energie")) || c.contains(QStringLiteral("energy")) || c.contains(QStringLiteral("power"))) {
+                pluginId = QStringLiteral("org.kde.plasma.battery");
+            } else if (c.contains(QStringLiteral("hellig")) || c.contains(QStringLiteral("bright"))) {
+                pluginId = QStringLiteral("org.kde.plasma.brightness");
+            } else if (c.contains(QStringLiteral("druck")) || c.contains(QStringLiteral("print"))) {
+                pluginId = QStringLiteral("org.kde.plasma.printmanager");
+            } else if (c.contains(QStringLiteral("gerät")) || c.contains(QStringLiteral("device")) || c.contains(QStringLiteral("platte")) || c.contains(QStringLiteral("disk"))) {
+                pluginId = QStringLiteral("org.kde.plasma.devicenotifier");
+            } else if (c.contains(QStringLiteral("kamera")) || c.contains(QStringLiteral("camera"))) {
+                pluginId = QStringLiteral("org.kde.plasma.cameraindicator");
+            } else if (c.contains(QStringLiteral("anzeige")) || c.contains(QStringLiteral("bildschirm")) || c.contains(QStringLiteral("display")) || c.contains(QStringLiteral("screen"))) {
+                pluginId = QStringLiteral("org.kde.kscreen");
+            } else if (c.contains(QStringLiteral("zwischenablage")) || c.contains(QStringLiteral("clipboard")) || c.contains(QStringLiteral("klipper"))) {
+                pluginId = QStringLiteral("org.kde.plasma.clipboard");
+            }
+        }
+
+        // 2. Fallback auf cmdline (nur wenn caption keinen Treffer ergab)
+        if (pluginId.isEmpty() && pid > 0) {
+            QStringList cmdline = readProcCmdline(pid);
+            for (int i = 1; i < cmdline.size(); ++i) {
+                const QString &arg = cmdline[i].trimmed();
+                if (arg.startsWith(QLatin1Char('-'))) continue;
+                if (i > 1 && (cmdline[i - 1] == QLatin1String("-p") || cmdline[i - 1] == QLatin1String("--shell-plugin"))) {
+                    continue;
+                }
+                pluginId = arg;
+                break;
+            }
+        }
+
+        if (pluginId == QLatin1String("org.kde.plasma.volume")) {
+            pwEntry.icon = QStringLiteral("audio-volume-high");
+        } else if (pluginId == QLatin1String("org.kde.plasma.networkmanagement")) {
+            pwEntry.icon = QStringLiteral("network-wireless");
+        } else if (pluginId == QLatin1String("org.kde.plasma.bluetooth")) {
+            pwEntry.icon = QStringLiteral("preferences-system-bluetooth");
+        } else if (pluginId == QLatin1String("org.kde.plasma.battery")) {
+            pwEntry.icon = QStringLiteral("battery-charging");
+        } else if (pluginId == QLatin1String("org.kde.plasma.brightness")) {
+            pwEntry.icon = QStringLiteral("display-brightness");
+        } else if (pluginId == QLatin1String("org.kde.plasma.printmanager")) {
+            pwEntry.icon = QStringLiteral("printer");
+        } else if (pluginId == QLatin1String("org.kde.plasma.weather")) {
+            pwEntry.icon = QStringLiteral("weather-few-clouds");
+        } else if (pluginId == QLatin1String("org.kde.plasma.devicenotifier")) {
+            pwEntry.icon = QStringLiteral("drive-removable-media");
+        } else if (pluginId == QLatin1String("org.kde.plasma.cameraindicator")) {
+            pwEntry.icon = QStringLiteral("camera-web");
+        } else if (pluginId == QLatin1String("org.kde.kscreen")) {
+            pwEntry.icon = QStringLiteral("preferences-desktop-display");
+        } else if (pluginId == QLatin1String("org.kde.plasma.clipboard")) {
+            pwEntry.icon = QStringLiteral("klipper");
+        }
+        if (!pluginId.isEmpty()) {
+            pwEntry.id = QStringLiteral("plasmawindowed:") + pluginId;
+            pwEntry.exec = QStringLiteral("plasmawindowed ") + pluginId;
+            pwEntry.desktopFile = QStringLiteral("plasmawindowed:") + pluginId;
+            if (pwEntry.name.isEmpty() || pwEntry.name == QLatin1String("Plasma Windowed")) {
+                if (pluginId == QLatin1String("org.kde.plasma.volume")) {
+                    pwEntry.name = QStringLiteral("Audio Volume");
+                } else if (pluginId == QLatin1String("org.kde.plasma.networkmanagement")) {
+                    pwEntry.name = QStringLiteral("Networks");
+                } else if (pluginId == QLatin1String("org.kde.plasma.bluetooth")) {
+                    pwEntry.name = QStringLiteral("Bluetooth");
+                } else if (pluginId == QLatin1String("org.kde.plasma.battery")) {
+                    pwEntry.name = QStringLiteral("Power and Battery");
+                } else if (pluginId == QLatin1String("org.kde.plasma.brightness")) {
+                    pwEntry.name = QStringLiteral("Brightness");
+                } else if (pluginId == QLatin1String("org.kde.plasma.printmanager")) {
+                    pwEntry.name = QStringLiteral("Printers");
+                } else if (pluginId == QLatin1String("org.kde.plasma.weather")) {
+                    pwEntry.name = QStringLiteral("Weather Report");
+                } else if (pluginId == QLatin1String("org.kde.plasma.devicenotifier")) {
+                    pwEntry.name = QStringLiteral("Disks & Devices");
+                } else if (pluginId == QLatin1String("org.kde.plasma.cameraindicator")) {
+                    pwEntry.name = QStringLiteral("Camera");
+                } else if (pluginId == QLatin1String("org.kde.kscreen")) {
+                    pwEntry.name = QStringLiteral("Display Configuration");
+                } else if (pluginId == QLatin1String("org.kde.plasma.clipboard")) {
+                    pwEntry.name = QStringLiteral("Clipboard");
+                }
+            }
+        }
+
+        return cacheAndReturn(pwEntry);
+    }
 
     // 1. Steam / Proton Game
     QString steamId;
@@ -897,22 +1030,6 @@ AppEntry AppManager::resolveWindowApp(const QString &desktopFileName, const QStr
     return cacheAndReturn(fallback);
 }
 
-static QStringList readProcCmdline(int pid)
-{
-    if (pid <= 0) return {};
-    QFile f(QStringLiteral("/proc/%1/cmdline").arg(pid));
-    if (!f.open(QIODevice::ReadOnly)) return {};
-    QByteArray data = f.readAll();
-    QList<QByteArray> raw = data.split('\0');
-    QStringList args;
-    for (const auto &tok : raw) {
-        if (!tok.isEmpty()) {
-            args.append(QString::fromUtf8(tok));
-        }
-    }
-    return args;
-}
-
 bool AppManager::isBlacklistedRecentApp(const AppEntry &entry, int pid, const QString &caption)
 {
     QString id = entry.id.toLower();
@@ -920,11 +1037,14 @@ bool AppManager::isBlacklistedRecentApp(const AppEntry &entry, int pid, const QS
     QString exec = entry.exec.toLower();
     QString df = entry.desktopFile.toLower();
 
-    // 0. Karyon selbst niemals als Recent App aufnehmen!
+    // 0. Karyon selbst sowie Tray-Flyouts niemals als Recent App aufnehmen!
     if (id.contains(QLatin1String("karyon")) ||
         exec.contains(QLatin1String("karyon")) ||
         df.contains(QLatin1String("karyon")) ||
-        name.contains(QLatin1String("karyon"))) {
+        name.contains(QLatin1String("karyon")) ||
+        id.contains(QLatin1String("plasmawindowed")) ||
+        exec.contains(QLatin1String("plasmawindowed")) ||
+        df.contains(QLatin1String("plasmawindowed"))) {
         return true;
     }
 

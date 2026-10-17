@@ -64,7 +64,7 @@ var initList = [];
 
 for (var i = 0; i < wins.length; i++) {
     var w = wins[i];
-    if (!w || !w.normalWindow || w.skipTaskbar || w.deleted || w.resourceClass === "karyon" || w.resourceClass.indexOf("plasmawindowed") !== -1) continue;
+    if (!w || !w.normalWindow || w.skipTaskbar || w.deleted || w.resourceClass === "karyon") continue;
     initList.push({
         id: w.internalId.toString(),
         rc: w.resourceClass,
@@ -103,14 +103,14 @@ if (initC) {
 callDBus("%1", "%2", "%3", "onDaemonInit", JSON.stringify(initList));
 
 workspace.windowActivated.connect(function(w) {
-    if (w && w.normalWindow && !w.skipTaskbar && !w.deleted && w.resourceClass !== "karyon" && w.resourceClass.indexOf("plasmawindowed") === -1) {
+    if (w && w.normalWindow && !w.skipTaskbar && !w.deleted && w.resourceClass !== "karyon") {
         callDBus("%1", "%2", "%3", "onWindowActivated",
                  w.internalId.toString(), w.resourceClass, w.desktopFileName, w.caption, (w.minimized === true), (w.pid ? w.pid : 0));
     }
 });
 
 workspace.windowAdded.connect(function(w) {
-    if (w && w.normalWindow && !w.skipTaskbar && !w.deleted && w.resourceClass !== "karyon" && w.resourceClass.indexOf("plasmawindowed") === -1) {
+    if (w && w.normalWindow && !w.skipTaskbar && !w.deleted && w.resourceClass !== "karyon") {
         callDBus("%1", "%2", "%3", "onWindowAdded",
                  w.internalId.toString(), w.resourceClass, w.desktopFileName, w.caption, (w.minimized === true), (w.pid ? w.pid : 0));
     }
@@ -202,7 +202,7 @@ void KWinBridge::onDaemonInit(const QString &json)
 
 void KWinBridge::onWindowActivated(const QString &id, const QString &rc, const QString &df, const QString &cap, bool min, int pid)
 {
-    if (id.isEmpty() || rc == QLatin1String("karyon") || rc.contains(QLatin1String("plasmawindowed"))) return;
+    if (id.isEmpty() || rc == QLatin1String("karyon")) return;
 
     AppManager::recordAppUsage(df, rc, pid, cap);
 
@@ -244,7 +244,7 @@ void KWinBridge::onWindowActivated(const QString &id, const QString &rc, const Q
 
 void KWinBridge::onWindowAdded(const QString &id, const QString &rc, const QString &df, const QString &cap, bool min, int pid)
 {
-    if (id.isEmpty() || rc == QLatin1String("karyon") || rc.contains(QLatin1String("plasmawindowed"))) return;
+    if (id.isEmpty() || rc == QLatin1String("karyon")) return;
 
     AppManager::recordAppUsage(df, rc, pid, cap);
 
