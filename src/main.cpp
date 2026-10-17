@@ -215,9 +215,10 @@ int main(int argc, char *argv[])
     }
 
     // Falls QT_XCB_GL_INTEGRATION=none aktiv ist, kann Qt Quick kein OpenGL auf XCB initialisieren.
-    // In diesem Fall automatisch auf den Software-RHI-Backend zurückgreifen, um "Failed to initialize graphics backend for OpenGL" zu verhindern.
-    if (qgetenv("QT_XCB_GL_INTEGRATION") == "none" && !qEnvironmentVariableIsSet("QSG_RHI_BACKEND")) {
-        qputenv("QSG_RHI_BACKEND", "software");
+    // In diesem Fall vor QApplication auf den Software-Scenegraph-Backend umschalten, um "Failed to initialize graphics backend for OpenGL" zu verhindern.
+    if (qgetenv("QT_XCB_GL_INTEGRATION") == "none") {
+        qputenv("QT_QUICK_BACKEND", "software");
+        QQuickWindow::setSceneGraphBackend(QStringLiteral("software"));
     }
 
     QApplication app(argc, argv);
@@ -294,16 +295,7 @@ int main(int argc, char *argv[])
         }
     }
 
-    // Automatische Absicherung für Qt Quick:
-    // Falls das Erstellen eines OpenGL-Kontexts fehlschlägt (z.B. defekter Treiber, VM ohne 3D,
-    // fehlendes GLX/EGL), schaltet Karyon nahtlos auf den Software-RHI-Backend um.
-    // Verhindert zu 100% den Fehler: "Fatal: Failed to initialize graphics backend for OpenGL".
-    if (!qEnvironmentVariableIsSet("QSG_RHI_BACKEND")) {
-        QOpenGLContext testContext;
-        if (!testContext.create()) {
-            QQuickWindow::setGraphicsApi(QSGRendererInterface::GraphicsApi::Software);
-        }
-    }
+
 
     CircleOverlay overlay;
     overlay.prewarm();
