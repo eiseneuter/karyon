@@ -40,6 +40,7 @@
 #include <thread>
 #include <cstring>
 #include <dlfcn.h>
+#include <sys/wait.h>
 
 namespace {
 void handleSignal(int /*sig*/)
@@ -110,6 +111,147 @@ void quietMessageHandler(QtMsgType type, const QMessageLogContext &/*context*/, 
         (void)write(fd, out.data(), out.size());
     }
 }
+
+enum class GpuBackend {
+    Egl,
+    Glx,
+    Software
+};
+
+GpuBackend probeHardwareGraphics()
+{
+    auto probeEgl = []() -> bool {
+        void *libx11 = dlopen("libX11.so.6", RTLD_LAZY);
+        if (!libx11) libx11 = dlopen("libX11.so", RTLD_LAZY);
+        if (!libx11) return false;
+
+        void *libegl = dlopen("libEGL.so.1", RTLD_LAZY);
+        if (!libegl) libegl = dlopen("libEGL.so", RTLD_LAZY);
+        if (!libegl) { dlclose(libx11); return false; }
+
+        typedef void* (*XOpenDisplayFn)(const char*);
+        typedef int (*XCloseDisplayFn)(void*);
+        typedef void* (*eglGetPlatformDisplayFn)(unsigned int, void*, const void*);
+        typedef void* (*eglGetDisplayFn)(void*);
+        typedef int (*eglInitializeFn)(void*, int*, int*);
+        typedef int (*eglTerminateFn)(void*);
+
+        auto xOpenDisplay = reinterpret_cast<XOpenDisplayFn>(dlsym(libx11, "XOpenDisplay"));
+        auto xCloseDisplay = reinterpret_cast<XCloseDisplayFn>(dlsym(libx11, "XCloseDisplay"));
+        auto eglGetPlatformDisplay = reinterpret_cast<eglGetPlatformDisplayFn>(dlsym(libegl, "eglGetPlatformDisplay"));
+        auto eglGetDisplay = reinterpret_cast<eglGetDisplayFn>(dlsym(libegl, "eglGetDisplay"));
+        auto eglInitialize = reinterpret_cast<eglInitializeFn>(dlsym(libegl, "eglInitialize"));
+        auto eglTerminate = reinterpret_cast<eglTerminateFn>(dlsym(libegl, "eglTerminate"));
+
+        if (!xOpenDisplay || !xCloseDisplay || (!eglGetPlatformDisplay && !eglGetDisplay) || !eglInitialize) {
+            dlclose(libegl); dlclose(libx11); return false;
+        }
+
+        void *dpy = xOpenDisplay(nullptr);
+        if (!dpy) { dlclose(libegl); dlclose(libx11); return false; }
+
+        void *edpy = nullptr;
+        if (eglGetPlatformDisplay) {
+            constexpr unsigned int EGL_PLATFORM_X11_KHR = 0x31D5;
+            edpy = eglGetPlatformDisplay(EGL_PLATFORM_X11_KHR, dpy, nullptr);
+        }
+        if (!edpy && eglGetDisplay) {
+            edpy = eglGetDisplay(dpy);
+        }
+        if (!edpy) { xCloseDisplay(dpy); dlclose(libegl); dlclose(libx11); return false; }
+
+        int major = 0, minor = 0;
+        int ok = eglInitialize(edpy, &major, &minor);
+        if (ok && eglTerminate) eglTerminate(edpy);
+        xCloseDisplay(dpy);
+        dlclose(libegl);
+        dlclose(libx11);
+        return ok != 0;
+    };
+
+    auto probeGlx = []() -> bool {
+        void *libx11 = dlopen("libX11.so.6", RTLD_LAZY);
+        if (!libx11) libx11 = dlopen("libX11.so", RTLD_LAZY);
+        if (!libx11) return false;
+
+        void *libglx = dlopen("libGLX.so.0", RTLD_LAZY);
+        if (!libglx) libglx = dlopen("libGL.so.1", RTLD_LAZY);
+        if (!libglx) libglx = dlopen("libGL.so", RTLD_LAZY);
+        if (!libglx) { dlclose(libx11); return false; }
+
+        typedef void* (*XOpenDisplayFn)(const char*);
+        typedef int (*XCloseDisplayFn)(void*);
+        typedef int (*glXQueryExtensionFn)(void*, int*, int*);
+        typedef int (*glXQueryVersionFn)(void*, int*, int*);
+        typedef void* (*glXGetFBConfigsFn)(void*, int, int*);
+        typedef int (*XDefaultScreenFn)(void*);
+        typedef int (*XFreeFn)(void*);
+
+        auto xOpenDisplay = reinterpret_cast<XOpenDisplayFn>(dlsym(libx11, "XOpenDisplay"));
+        auto xCloseDisplay = reinterpret_cast<XCloseDisplayFn>(dlsym(libx11, "XCloseDisplay"));
+        auto glXQueryExt = reinterpret_cast<glXQueryExtensionFn>(dlsym(libglx, "glXQueryExtension"));
+        auto glXQueryVer = reinterpret_cast<glXQueryVersionFn>(dlsym(libglx, "glXQueryVersion"));
+        auto glXGetFB = reinterpret_cast<glXGetFBConfigsFn>(dlsym(libglx, "glXGetFBConfigs"));
+        auto xDefaultScreen = reinterpret_cast<XDefaultScreenFn>(dlsym(libx11, "XDefaultScreen"));
+        auto xFree = reinterpret_cast<XFreeFn>(dlsym(libx11, "XFree"));
+
+        if (!xOpenDisplay || !xCloseDisplay || !glXQueryExt || !glXQueryVer || !glXGetFB || !xDefaultScreen) {
+            dlclose(libglx); dlclose(libx11); return false;
+        }
+
+        void *dpy = xOpenDisplay(nullptr);
+        if (!dpy) { dlclose(libglx); dlclose(libx11); return false; }
+
+        int err = 0, ev = 0, maj = 0, min = 0;
+        bool ok = glXQueryExt(dpy, &err, &ev) && glXQueryVer(dpy, &maj, &min) && (maj > 1 || (maj == 1 && min >= 3));
+        if (ok) {
+            int screen = xDefaultScreen(dpy);
+            int nConfigs = 0;
+            void *cfgs = glXGetFB(dpy, screen, &nConfigs);
+            if (cfgs && nConfigs > 0) {
+                if (xFree) xFree(cfgs);
+            } else {
+                ok = false;
+            }
+        }
+        xCloseDisplay(dpy);
+        dlclose(libglx);
+        dlclose(libx11);
+        return ok;
+    };
+
+    pid_t pid = fork();
+    if (pid == 0) {
+        if (probeEgl()) {
+            _exit(10);
+        }
+        if (probeGlx()) {
+            _exit(20);
+        }
+        _exit(30);
+    }
+
+    if (pid < 0) {
+        return GpuBackend::Software;
+    }
+
+    int status = 0;
+    waitpid(pid, &status, 0);
+
+    if (WIFSIGNALED(status)) {
+        std::cout << "[Graphics] Hardware probe process terminated with signal " << WTERMSIG(status)
+                  << " (driver crash caught and neutralized via sandbox isolation).\n";
+        return GpuBackend::Software;
+    }
+
+    if (WIFEXITED(status)) {
+        int code = WEXITSTATUS(status);
+        if (code == 10) return GpuBackend::Egl;
+        if (code == 20) return GpuBackend::Glx;
+    }
+
+    return GpuBackend::Software;
+}
 }
 
 int main(int argc, char *argv[])
@@ -164,61 +306,41 @@ int main(int argc, char *argv[])
     // Synchronous cursor positioning and frameless overlay window placement under cursor
     qputenv("QT_QPA_PLATFORM", "xcb");
 
-    // Automatische Erkennung, ob GLX auf dem X11/XWayland-Server funktionsfähig ist.
-    // Falls GLX fehlt oder blockiert ist (z.B. Wayland mit NVIDIA/Mesa DRI-Inkompatibilität, VMs, fehlender GLX-Treiber),
-    // automatisch auf QT_XCB_GL_INTEGRATION=none umschalten, um "Fatal: Could not initialize GLX" zu verhindern.
-    if (!qEnvironmentVariableIsSet("QT_XCB_GL_INTEGRATION")) {
-        bool glxAvailable = false;
-        void *libx11 = dlopen("libX11.so.6", RTLD_LAZY);
-        if (!libx11) libx11 = dlopen("libX11.so", RTLD_LAZY);
-        void *libglx = dlopen("libGLX.so.0", RTLD_LAZY);
-        if (!libglx) libglx = dlopen("libGL.so.1", RTLD_LAZY);
-        if (!libglx) libglx = dlopen("libGL.so", RTLD_LAZY);
-
-        if (libx11 && libglx) {
-            typedef void* (*XOpenDisplayFn)(const char*);
-            typedef int (*XCloseDisplayFn)(void*);
-            typedef int (*glXQueryExtensionFn)(void*, int*, int*);
-            typedef int (*glXQueryVersionFn)(void*, int*, int*);
-
-            auto xOpenDisplay = reinterpret_cast<XOpenDisplayFn>(dlsym(libx11, "XOpenDisplay"));
-            auto xCloseDisplay = reinterpret_cast<XCloseDisplayFn>(dlsym(libx11, "XCloseDisplay"));
-            auto glXQueryExt = reinterpret_cast<glXQueryExtensionFn>(dlsym(libglx, "glXQueryExtension"));
-            auto glXQueryVer = reinterpret_cast<glXQueryVersionFn>(dlsym(libglx, "glXQueryVersion"));
-
-            if (xOpenDisplay && xCloseDisplay && glXQueryExt && glXQueryVer) {
-                void *dpy = xOpenDisplay(nullptr);
-                if (dpy) {
-                    int errorBase = 0, eventBase = 0, major = 0, minor = 0;
-                    if (glXQueryExt(dpy, &errorBase, &eventBase) &&
-                        glXQueryVer(dpy, &major, &minor) &&
-                        (major > 1 || (major == 1 && minor >= 3))) {
-                        glxAvailable = true;
-                    }
-                    xCloseDisplay(dpy);
-                }
-            }
+    // -------------------------------------------------------------------------
+    // Grafik-Backend & Hardware-Beschleunigung Absicherung (EGL -> GLX -> Software)
+    // -------------------------------------------------------------------------
+    // Ziel: Das QML-Overlay MUSS auf jedem System (auch CachyOS, VMs, NVIDIA-Wayland)
+    // garantiert und ohne Absturz gezeichnet werden.
+    // 1. EGL bevorzugen (modernster Standard für X11/XWayland und NVIDIA/Mesa).
+    // 2. Fallback auf GLX für ältere X11-Server.
+    // 3. Fallback auf Qt Quick Software-Rendering (CPU-Rasterizer, 100% ausfallsicher).
+    // -------------------------------------------------------------------------
+    if (qEnvironmentVariableIsSet("QT_XCB_GL_INTEGRATION")) {
+        QString forced = QString::fromLocal8Bit(qgetenv("QT_XCB_GL_INTEGRATION"));
+        std::cout << "[Graphics] User environment override detected: QT_XCB_GL_INTEGRATION="
+                  << forced.toStdString() << "\n";
+        if (forced == QLatin1String("none")) {
+            std::cout << "[Graphics] Activating Qt Quick Software rendering fallback.\n";
+            qputenv("QT_QUICK_BACKEND", "software");
+            QQuickWindow::setSceneGraphBackend(QStringLiteral("software"));
         }
-        if (libx11) dlclose(libx11);
-        if (libglx) dlclose(libglx);
-
-        if (!glxAvailable) {
-            void *libegl = dlopen("libEGL.so.1", RTLD_LAZY);
-            if (!libegl) libegl = dlopen("libEGL.so", RTLD_LAZY);
-            if (libegl) {
-                dlclose(libegl);
-                qputenv("QT_XCB_GL_INTEGRATION", "xcb_egl");
-            } else {
-                qputenv("QT_XCB_GL_INTEGRATION", "none");
-            }
+    } else {
+        std::cout << "[Graphics] Probing graphics hardware acceleration on X11/XWayland display...\n";
+        GpuBackend backend = probeHardwareGraphics();
+        if (backend == GpuBackend::Egl) {
+            std::cout << "[Graphics] Hardware EGL acceleration verified. Enabling xcb_egl.\n";
+            qputenv("QT_XCB_GL_INTEGRATION", "xcb_egl");
+        } else if (backend == GpuBackend::Glx) {
+            std::cout << "[Graphics] EGL unavailable, Hardware GLX acceleration verified. Enabling xcb_glx.\n";
+            qputenv("QT_XCB_GL_INTEGRATION", "xcb_glx");
+        } else {
+            std::cout << "[Graphics] Neither EGL nor GLX functional or host driver incompatibility detected.\n";
+            std::cout << "[Graphics] Automatic fallback: Activating Qt Quick Software rendering (CPU rasterizer, zero GPU dependency).\n";
+            std::cout << "[Graphics] Overlay is guaranteed to render reliably on any system.\n";
+            qputenv("QT_XCB_GL_INTEGRATION", "none");
+            qputenv("QT_QUICK_BACKEND", "software");
+            QQuickWindow::setSceneGraphBackend(QStringLiteral("software"));
         }
-    }
-
-    // Falls QT_XCB_GL_INTEGRATION=none aktiv ist, kann Qt Quick kein OpenGL auf XCB initialisieren.
-    // In diesem Fall vor QApplication auf den Software-Scenegraph-Backend umschalten, um "Failed to initialize graphics backend for OpenGL" zu verhindern.
-    if (qgetenv("QT_XCB_GL_INTEGRATION") == "none") {
-        qputenv("QT_QUICK_BACKEND", "software");
-        QQuickWindow::setSceneGraphBackend(QStringLiteral("software"));
     }
 
     QApplication app(argc, argv);
