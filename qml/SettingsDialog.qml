@@ -647,7 +647,7 @@ Item {
                         height: 16
 
                         property real minVal: 0.8
-                        property real maxVal: 1.3
+                        property real maxVal: 1.5
                         property real curVal: settingsController.overlayScale
 
                         Rectangle {

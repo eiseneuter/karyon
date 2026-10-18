@@ -25,7 +25,7 @@ void SettingsManager::load()
     m_overlayMouseSpeed = std::clamp(m_overlayMouseSpeed, -1.0, 1.0);
 
     m_overlayScale = m_settings.value(QStringLiteral("overlay_scale"), 0.9).toDouble();
-    m_overlayScale = std::clamp(m_overlayScale, 0.8, 1.3);
+    m_overlayScale = std::clamp(m_overlayScale, 0.8, 1.5);
 
     m_overlayTransparency = m_settings.value(QStringLiteral("overlay_transparency"), 4.0).toDouble();
     m_overlayTransparency = std::clamp(m_overlayTransparency, 0.0, 20.0);
@@ -178,7 +178,7 @@ double SettingsManager::overlayScale() const
 
 void SettingsManager::setOverlayScale(double scale)
 {
-    double clamped = std::clamp(scale, 0.8, 1.3);
+    double clamped = std::clamp(scale, 0.8, 1.5);
     clamped = std::round(clamped * 10.0) / 10.0;
     if (std::abs(m_overlayScale - clamped) > 1e-4) {
         m_overlayScale = clamped;
