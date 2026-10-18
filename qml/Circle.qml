@@ -176,7 +176,7 @@ Item {
         return id;
     }
 
-    // Nur true, wenn der Cursor physisch auf einem Segment liegt (NIE im Hub, NIE im Leerraum)
+    // Nur true, wenn der Cursor auf einem Segment liegt oder sich außerhalb des Overlays im Sektor des äußersten Segments befindet
     readonly property bool isCursorOnSegment: {
         if (selectedRing < 1 || selectedIndex < 0) return false;
         var dx = aimOffsetX;
@@ -211,15 +211,50 @@ Item {
 
         if (!seg) return false;
 
-        // Exakte Radius-Prüfung: Muss im gezeichneten Ring liegen
-        if (dist < innerR || dist > outerR) return false;
-
         // Exakte Winkel-Prüfung: Muss im gezeichneten Winkelbereich des Segments liegen
         var diff = angle - seg.angle;
         while (diff > Math.PI) diff -= 2 * Math.PI;
         while (diff < -Math.PI) diff += 2 * Math.PI;
+        if (Math.abs(diff) > (seg.span / 2.0)) return false;
 
-        return Math.abs(diff) <= (seg.span / 2.0);
+        // Im Hub (dist < innerR): NIE auf dem Segment
+        if (dist < innerR) return false;
+
+        // Liegt der Cursor physisch im Ring?
+        if (dist <= outerR) return true;
+
+        // Cursor ist außerhalb des Rings (dist > outerR):
+        // Gültig, wenn dieses Segment in dieser Richtung das äußerste existierende Segment ist
+        if (selectedRing === 3) return true;
+        if (selectedRing === 2) {
+            var numS3 = (hasRing3Active && segmentList3 && segmentList3.length) ? segmentList3.length : 0;
+            for (var k3 = 0; k3 < numS3; k3++) {
+                var d3 = angle - segmentList3[k3].angle;
+                while (d3 > Math.PI) d3 -= 2 * Math.PI;
+                while (d3 < -Math.PI) d3 += 2 * Math.PI;
+                if (Math.abs(d3) <= (segmentList3[k3].span / 2.0)) return false;
+            }
+            return true;
+        }
+        if (selectedRing === 1) {
+            var numS3b = (hasRing3Active && segmentList3 && segmentList3.length) ? segmentList3.length : 0;
+            for (var k3b = 0; k3b < numS3b; k3b++) {
+                var d3b = angle - segmentList3[k3b].angle;
+                while (d3b > Math.PI) d3b -= 2 * Math.PI;
+                while (d3b < -Math.PI) d3b += 2 * Math.PI;
+                if (Math.abs(d3b) <= (segmentList3[k3b].span / 2.0)) return false;
+            }
+            var numS2 = (hasRing2Active && segmentList2 && segmentList2.length) ? segmentList2.length : 0;
+            for (var k2 = 0; k2 < numS2; k2++) {
+                var d2 = angle - segmentList2[k2].angle;
+                while (d2 > Math.PI) d2 -= 2 * Math.PI;
+                while (d2 < -Math.PI) d2 += 2 * Math.PI;
+                if (Math.abs(d2) <= (segmentList2[k2].span / 2.0)) return false;
+            }
+            return true;
+        }
+
+        return false;
     }
 
     function setSegmentLists(s1, s2, s3, r2Active, r3Active) {
@@ -279,6 +314,7 @@ Item {
         var foundRing = -1;
         var foundIndex = -1;
 
+        // 1. Physische Segmentprüfung innerhalb der gezeichneten Ringe (Pixelgenau)
         // Prüfe Ring 3 (falls aktiv) — exakte Pixelgrenzen identisch zur Canvas-Zeichnung
         var numSegs3 = (hasRing3Active && segmentList3 && segmentList3.length) ? segmentList3.length : 0;
         if (numSegs3 > 0 && dist >= innerR3 && dist <= outerR3) {
@@ -296,41 +332,128 @@ Item {
         }
 
         // Prüfe Ring 2 (falls aktiv und noch nicht auf Ring 3)
-        if (foundRing === -1) {
-            var numSegs2 = (hasRing2Active && segmentList2 && segmentList2.length) ? segmentList2.length : 0;
-            if (numSegs2 > 0 && dist >= innerR2 && dist <= outerR2) {
-                for (var j = 0; j < numSegs2; j++) {
-                    var seg2 = segmentList2[j];
-                    var diff2 = angle - seg2.angle;
-                    while (diff2 > Math.PI) diff2 -= 2 * Math.PI;
-                    while (diff2 < -Math.PI) diff2 += 2 * Math.PI;
-                    if (Math.abs(diff2) <= (seg2.span / 2.0)) {
-                        foundRing = 2;
-                        foundIndex = j;
-                        break;
-                    }
+        var numSegs2 = (hasRing2Active && segmentList2 && segmentList2.length) ? segmentList2.length : 0;
+        if (foundRing === -1 && numSegs2 > 0 && dist >= innerR2 && dist <= outerR2) {
+            for (var j = 0; j < numSegs2; j++) {
+                var seg2 = segmentList2[j];
+                var diff2 = angle - seg2.angle;
+                while (diff2 > Math.PI) diff2 -= 2 * Math.PI;
+                while (diff2 < -Math.PI) diff2 += 2 * Math.PI;
+                if (Math.abs(diff2) <= (seg2.span / 2.0)) {
+                    foundRing = 2;
+                    foundIndex = j;
+                    break;
                 }
             }
         }
 
         // Prüfe Ring 1 (falls noch nicht auf Ring 2 oder 3)
-        // Hub ist keine freie Fläche: Ring 1 ist ab 20px Totzone anwählbar
-        if (foundRing === -1) {
-            var numSegs1 = (segmentList1 && segmentList1.length) ? segmentList1.length : 0;
-            var deadR = (typeof deadzoneRadius !== "undefined") ? deadzoneRadius : 20;
-            if (numSegs1 > 0 && dist >= deadR && dist <= outerR1) {
-                for (var i = 0; i < numSegs1; i++) {
-                    var seg1 = segmentList1[i];
-                    if (volumeScrolledThisSession && (seg1.segmentType === "media" || (seg1.windowId && seg1.windowId.indexOf("__MEDIA_") === 0))) {
-                        continue;
-                    }
-                    var diff1 = angle - seg1.angle;
-                    while (diff1 > Math.PI) diff1 -= 2 * Math.PI;
-                    while (diff1 < -Math.PI) diff1 += 2 * Math.PI;
-                    if (Math.abs(diff1) <= (seg1.span / 2.0)) {
-                        foundRing = 1;
-                        foundIndex = i;
+        // Hub ist keine freie Fläche: Ring 1 ist ab 20px Totzone bis outerR1 anwählbar
+        var numSegs1 = (segmentList1 && segmentList1.length) ? segmentList1.length : 0;
+        var deadR = (typeof deadzoneRadius !== "undefined") ? deadzoneRadius : 20;
+        if (foundRing === -1 && numSegs1 > 0 && dist >= deadR && dist <= outerR1) {
+            for (var i = 0; i < numSegs1; i++) {
+                var seg1 = segmentList1[i];
+                if (volumeScrolledThisSession && (seg1.segmentType === "media" || (seg1.windowId && seg1.windowId.indexOf("__MEDIA_") === 0))) {
+                    continue;
+                }
+                var diff1 = angle - seg1.angle;
+                while (diff1 > Math.PI) diff1 -= 2 * Math.PI;
+                while (diff1 < -Math.PI) diff1 += 2 * Math.PI;
+                if (Math.abs(diff1) <= (seg1.span / 2.0)) {
+                    foundRing = 1;
+                    foundIndex = i;
+                    break;
+                }
+            }
+        }
+
+        // 2. Cursor befindet sich AUSSERHALB des Overlays (dist > outerR):
+        // In diesem Fall wird in Cursor-Richtung immer das äußerste existierende Segment gehighlightet!
+        if (foundRing === -1 && dist > outerR1) {
+            // Prüfe zuerst Ring 3: Ist Ring 3 in dieser Richtung vorhanden und dist > outerR3?
+            if (numSegs3 > 0 && dist > outerR3) {
+                for (var o3 = 0; o3 < numSegs3; o3++) {
+                    var s3 = segmentList3[o3];
+                    var d3 = angle - s3.angle;
+                    while (d3 > Math.PI) d3 -= 2 * Math.PI;
+                    while (d3 < -Math.PI) d3 += 2 * Math.PI;
+                    if (Math.abs(d3) <= (s3.span / 2.0)) {
+                        foundRing = 3;
+                        foundIndex = o3;
                         break;
+                    }
+                }
+            }
+
+            // Falls kein Ring-3-Segment an diesem Winkel existiert: Prüfe Ring 2
+            if (foundRing === -1 && numSegs2 > 0 && dist > outerR2) {
+                var hasRing3AtAngle = false;
+                if (numSegs3 > 0) {
+                    for (var c3 = 0; c3 < numSegs3; c3++) {
+                        var diffC3 = angle - segmentList3[c3].angle;
+                        while (diffC3 > Math.PI) diffC3 -= 2 * Math.PI;
+                        while (diffC3 < -Math.PI) diffC3 += 2 * Math.PI;
+                        if (Math.abs(diffC3) <= (segmentList3[c3].span / 2.0)) {
+                            hasRing3AtAngle = true;
+                            break;
+                        }
+                    }
+                }
+                if (!hasRing3AtAngle) {
+                    for (var o2 = 0; o2 < numSegs2; o2++) {
+                        var s2 = segmentList2[o2];
+                        var d2 = angle - s2.angle;
+                        while (d2 > Math.PI) d2 -= 2 * Math.PI;
+                        while (d2 < -Math.PI) d2 += 2 * Math.PI;
+                        if (Math.abs(d2) <= (s2.span / 2.0)) {
+                            foundRing = 2;
+                            foundIndex = o2;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            // Falls weder auf Ring 3 noch auf Ring 2 ein Segment an diesem Winkel liegt: Ring 1
+            if (foundRing === -1 && numSegs1 > 0 && dist > outerR1) {
+                var hasOuterAtAngle = false;
+                if (numSegs3 > 0) {
+                    for (var r3 = 0; r3 < numSegs3; r3++) {
+                        var dR3 = angle - segmentList3[r3].angle;
+                        while (dR3 > Math.PI) dR3 -= 2 * Math.PI;
+                        while (dR3 < -Math.PI) dR3 += 2 * Math.PI;
+                        if (Math.abs(dR3) <= (segmentList3[r3].span / 2.0)) {
+                            hasOuterAtAngle = true;
+                            break;
+                        }
+                    }
+                }
+                if (!hasOuterAtAngle && numSegs2 > 0) {
+                    for (var r2 = 0; r2 < numSegs2; r2++) {
+                        var dR2 = angle - segmentList2[r2].angle;
+                        while (dR2 > Math.PI) dR2 -= 2 * Math.PI;
+                        while (dR2 < -Math.PI) dR2 += 2 * Math.PI;
+                        if (Math.abs(dR2) <= (segmentList2[r2].span / 2.0)) {
+                            hasOuterAtAngle = true;
+                            break;
+                        }
+                    }
+                }
+                if (!hasOuterAtAngle) {
+                    for (var o1 = 0; o1 < numSegs1; o1++) {
+                        var s1 = segmentList1[o1];
+                        if (volumeScrolledThisSession && (s1.segmentType === "media" || (s1.windowId && s1.windowId.indexOf("__MEDIA_") === 0))) {
+                            continue;
+                        }
+                        var d1 = angle - s1.angle;
+                        while (d1 > Math.PI) d1 -= 2 * Math.PI;
+                        while (d1 < -Math.PI) d1 += 2 * Math.PI;
+                        if (Math.abs(d1) <= (s1.span / 2.0)) {
+                            foundRing = 1;
+                            foundIndex = o1;
+                            break;
+                        }
                     }
                 }
             }

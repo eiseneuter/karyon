@@ -3654,6 +3654,9 @@ void CircleOverlay::showAt(const QPoint &cursorPos, const QList<WindowInfo> &win
     const int winX = targetCursor.x() - wr;
     const int winY = targetCursor.y() + curOffsetY - wr;
 
+    m_centerX = targetCursor.x();
+    m_centerY = targetCursor.y() + curOffsetY;
+
     m_view->setPosition(winX, winY);
     m_view->setVisible(true);
     m_view->raise();
@@ -4108,6 +4111,12 @@ QString CircleOverlay::manipulationTargetWindowId() const
 bool CircleOverlay::isVisible() const
 {
     return m_view && m_view->isVisible();
+}
+
+bool CircleOverlay::containsCursor(const QPoint &globalPos) const
+{
+    if (!m_view || !m_view->isVisible()) return false;
+    return m_view->geometry().contains(globalPos);
 }
 
 void CircleOverlay::hideOverlay()

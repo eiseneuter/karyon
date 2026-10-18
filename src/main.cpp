@@ -683,11 +683,22 @@ int main(int argc, char *argv[])
     }, Qt::QueuedConnection);
 
     // Aiming im Normalbetrieb erfolgt flackerfrei über MouseArea/DropArea in QML anhand der Compositor-Cursorposition.
-    // Bei aktivem Drag & Drop (gehaltene LMT beim Ziehen einer Datei) liefert das Fenstersystem unter XWayland
-    // oft keine Events an Override-Redirect-Fenster. cursorMoved steuert das Segment-Aiming direkt über evdev-Mausdaten:
+    // Verlässt der Cursor bei gedrückter RMT das Overlay-Fenster (oder bei aktivem Drag & Drop),
+    // steuert cursorMoved das Segment-Aiming direkt und übergangslos über die globale Cursorposition:
     QObject::connect(&monitor, &InputMonitor::cursorMoved, &overlay, [&overlay, &monitor](int aimX, int aimY) {
+        if (!overlay.isVisible()) return;
+
         if (monitor.isLeftDown()) {
             overlay.updateAim(aimX, aimY);
+        } else {
+            QPoint cur = QCursor::pos();
+            if (!cur.isNull() && (cur.x() != 0 || cur.y() != 0)) {
+                if (!overlay.containsCursor(cur)) {
+                    overlay.updateAim(cur.x() - overlay.centerX(), cur.y() - overlay.centerY());
+                }
+            } else {
+                overlay.updateAim(aimX, aimY);
+            }
         }
     }, Qt::QueuedConnection);
 

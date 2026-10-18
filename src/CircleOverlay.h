@@ -91,6 +91,10 @@ public:
     QString manipulationTargetWindowId() const;
     bool isVisible() const;
 
+    int centerX() const { return m_centerX; }
+    int centerY() const { return m_centerY; }
+    bool containsCursor(const QPoint &globalPos) const;
+
     void handleHubWheel(int delta);
     OverlayMode mode() const { return m_mode; }
     void resetToWindowsMode();
@@ -212,6 +216,8 @@ private:
     QHash<QString, QString> m_appNameCache;
     int m_lastAimX = 0;
     int m_lastAimY = -CURSOR_OFFSET_Y;
+    int m_centerX = 0;
+    int m_centerY = 0;
     bool m_showDesktopEnabled = true;
     bool m_showTrayEnabled = true;
     bool m_showSessionEnabled = true;
