@@ -21,10 +21,35 @@
 #include <QMetaObject>
 #include <QStringList>
 #include <QVariantMap>
+#include <QSettings>
+#include <QFile>
+#include <QDir>
 
 namespace fs = std::filesystem;
 
 namespace {
+
+bool isExcludedNonMouse(const QString &devName)
+{
+    static const QStringList nonMouseKeywords = {
+        QStringLiteral("touchpad"), QStringLiteral("trackpad"), QStringLiteral("glidepoint"),
+        QStringLiteral("trackpoint"), QStringLiteral("trackstick"), QStringLiteral("pointstick"),
+        QStringLiteral("dualpoint"), QStringLiteral("tpps/2"), QStringLiteral("stick"),
+        QStringLiteral("synaptics"), QStringLiteral("alps"), QStringLiteral("focaltech"),
+        QStringLiteral("goodix"), QStringLiteral("elan"),
+        QStringLiteral("consumer control"), QStringLiteral("system control"),
+        QStringLiteral("digitizer"), QStringLiteral("stylus"), QStringLiteral("touchscreen"),
+        QStringLiteral("wacom"), QStringLiteral("tablet"), QStringLiteral("pen")
+    };
+
+    QString lower = devName.toLower();
+    for (const QString &kw : nonMouseKeywords) {
+        if (lower.contains(kw)) {
+            return true;
+        }
+    }
+    return false;
+}
 
 bool isMouseDevice(int fd)
 {
@@ -37,7 +62,9 @@ bool isMouseDevice(int fd)
         std::string lowerName = sName;
         for (char &c : lowerName) c = std::tolower(c);
         if (lowerName.find("touchpad") != std::string::npos ||
-            lowerName.find("trackpad") != std::string::npos) {
+            lowerName.find("trackpad") != std::string::npos ||
+            lowerName.find("consumer control") != std::string::npos ||
+            lowerName.find("system control") != std::string::npos) {
             return false;
         }
     }
@@ -362,47 +389,118 @@ void InputMonitor::syncKWinMouseSettings()
     }
     if (virtualMouseSysName.isEmpty()) return;
 
-    // Beste physische Maus unter den gegrabbten Geräten auswählen:
-    // 1. Bevorzuge externe Mäuse mit benutzerdefinierten Einstellungen (PointerAcceleration != 0, Flat-Profil, etc.)
-    // 2. Sonst erste echte externe Maus (keine internen I2C-Touchpad-Begleitgeräte wie ELAN*)
+    // Beste physische Maus auswählen:
+    // 1. Zuerst unter den gegrabbten Geräten suchen, dann Fallback auf alle echten KWin-Pointer
+    // 2. Touchpads, Trackpoints, Consumer Control etc. streng ausschließen bzw. stark abwerten
+    // 3. Echte externe Mäuse mit benutzerdefinierten Einstellungen (Flat-Profil, PointerAcceleration != 0) bevorzugen
     QVariantMap bestProps;
-    int bestScore = -1;
+    int bestScore = -10000;
 
-    for (const QString &sysName : grabbedSysNames) {
-        if (!allSysNames.contains(sysName)) continue;
+    auto evaluateDevice = [&](const QString &sysName) {
+        if (!allSysNames.contains(sysName)) return;
         QVariantMap props = getDeviceProps(sysName);
-        if (props.isEmpty()) continue;
-        if (!props.value(QStringLiteral("pointer")).toBool()) continue;
-        if (props.value(QStringLiteral("touchpad")).toBool()) continue;
-        if (props.value(QStringLiteral("isVirtual")).toBool()) continue;
+        if (props.isEmpty()) return;
+        if (!props.value(QStringLiteral("pointer")).toBool()) return;
+        if (props.value(QStringLiteral("touchpad")).toBool()) return;
+        if (props.value(QStringLiteral("touch")).toBool()) return;
+        if (props.value(QStringLiteral("tabletTool")).toBool()) return;
+        if (props.value(QStringLiteral("isVirtual")).toBool()) return;
 
         QString devName = props.value(QStringLiteral("name")).toString();
-        if (devName.startsWith(QStringLiteral("karyon-virtual"))) continue;
+        if (devName.startsWith(QStringLiteral("karyon-virtual"))) return;
 
-        int score = 1;
-        bool isInternalElan = devName.contains(QStringLiteral("ELAN"), Qt::CaseInsensitive) ||
-                              devName.contains(QStringLiteral("SYNA"), Qt::CaseInsensitive);
-        if (!isInternalElan) {
-            score += 10;
+        bool excluded = isExcludedNonMouse(devName);
+        int score = 0;
+        if (excluded) {
+            score -= 2000; // TrackPoints, Touchpad-Begleitknoten, Media Controls
+        } else {
+            score += 500;  // Echte physische Maus
         }
 
-        double accel = props.value(QStringLiteral("pointerAcceleration"), 0.0).toDouble();
-        bool flat = props.value(QStringLiteral("pointerAccelerationProfileFlat"), false).toBool();
-        bool leftHanded = props.value(QStringLiteral("leftHanded"), false).toBool();
-        bool natScroll = props.value(QStringLiteral("naturalScroll"), false).toBool();
-        double scrollFac = props.value(QStringLiteral("scrollFactor"), 1.0).toDouble();
+        if (grabbedSysNames.contains(sysName)) {
+            score += 300;
+        }
 
-        if (std::abs(accel) > 0.001 || flat || leftHanded || natScroll || std::abs(scrollFac - 1.0) > 0.001) {
-            score += 100;
+        int vendor = props.value(QStringLiteral("vendor"), 0).toInt();
+        if (vendor != 0 && vendor != 2) {
+            score += 400; // USB / Bluetooth / Wireless (kein PS/2)
+        }
+
+        double devAccel = props.value(QStringLiteral("pointerAcceleration"), 0.0).toDouble();
+        bool devFlat = props.value(QStringLiteral("pointerAccelerationProfileFlat"), false).toBool();
+        bool devLeftHanded = props.value(QStringLiteral("leftHanded"), false).toBool();
+        bool devNatScroll = props.value(QStringLiteral("naturalScroll"), false).toBool();
+        double devScrollFac = props.value(QStringLiteral("scrollFactor"), 1.0).toDouble();
+
+        if (devFlat) {
+            score += 2000; // Nutzer hat Zeigerbeschleunigung bewusst deaktiviert!
+        }
+        if (std::abs(devAccel) > 0.001) {
+            score += 1000;
+        }
+        if (devLeftHanded || devNatScroll || std::abs(devScrollFac - 1.0) > 0.001) {
+            score += 500;
         }
 
         if (score > bestScore) {
             bestScore = score;
             bestProps = props;
         }
+    };
+
+    for (const QString &sysName : grabbedSysNames) {
+        evaluateDevice(sysName);
+    }
+
+    if (bestScore < 0) {
+        for (const QString &sysName : allSysNames) {
+            evaluateDevice(sysName);
+        }
     }
 
     if (bestProps.isEmpty()) return;
+
+    QString bestDevName = bestProps.value(QStringLiteral("name")).toString();
+    double accel = bestProps.value(QStringLiteral("pointerAcceleration"), 0.0).toDouble();
+    bool flat = bestProps.value(QStringLiteral("pointerAccelerationProfileFlat"), false).toBool();
+    bool leftHanded = bestProps.value(QStringLiteral("leftHanded"), false).toBool();
+    bool natScroll = bestProps.value(QStringLiteral("naturalScroll"), false).toBool();
+    double scrollFac = bestProps.value(QStringLiteral("scrollFactor"), 1.0).toDouble();
+
+    // ~/.config/kcminputrc prüfen, um Benutzer-Profile exakt zu matchen
+    QString kcmPath = QDir::homePath() + QStringLiteral("/.config/kcminputrc");
+    if (QFile::exists(kcmPath)) {
+        QSettings kcm(kcmPath, QSettings::IniFormat);
+        for (const QString &group : kcm.childGroups()) {
+            if (!group.startsWith(QStringLiteral("Libinput/")) && !group.startsWith(QStringLiteral("Libinput]["))) continue;
+            if (group.contains(QStringLiteral("Touchpad"), Qt::CaseInsensitive)) continue;
+            if (group.contains(QStringLiteral("karyon-virtual"), Qt::CaseInsensitive)) continue;
+
+            kcm.beginGroup(group);
+            if (kcm.contains(QStringLiteral("PointerAccelerationProfile"))) {
+                int profile = kcm.value(QStringLiteral("PointerAccelerationProfile")).toInt();
+                if (profile == 1) {
+                    flat = true;
+                } else if (profile == 2) {
+                    flat = false;
+                }
+            }
+            if (kcm.contains(QStringLiteral("PointerAcceleration"))) {
+                accel = kcm.value(QStringLiteral("PointerAcceleration")).toDouble();
+            }
+            if (kcm.contains(QStringLiteral("ScrollFactor"))) {
+                scrollFac = kcm.value(QStringLiteral("ScrollFactor")).toDouble();
+            }
+            if (kcm.contains(QStringLiteral("NaturalScroll"))) {
+                natScroll = kcm.value(QStringLiteral("NaturalScroll")).toBool();
+            }
+            if (kcm.contains(QStringLiteral("LeftHanded"))) {
+                leftHanded = kcm.value(QStringLiteral("LeftHanded")).toBool();
+            }
+            kcm.endGroup();
+            break;
+        }
+    }
 
     auto setVirtualProp = [&](const QString &propName, const QVariant &val) {
         QDBusMessage msg = QDBusMessage::createMethodCall(
@@ -416,38 +514,38 @@ void InputMonitor::syncKWinMouseSettings()
         bus.call(msg, QDBus::NoBlock);
     };
 
-    if (bestProps.contains(QStringLiteral("pointerAcceleration"))) {
-        setVirtualProp(QStringLiteral("pointerAcceleration"),
-                       bestProps.value(QStringLiteral("pointerAcceleration")).toDouble());
+    setVirtualProp(QStringLiteral("pointerAcceleration"), accel);
+    if (flat) {
+        setVirtualProp(QStringLiteral("pointerAccelerationProfileFlat"), true);
+        setVirtualProp(QStringLiteral("pointerAccelerationProfileAdaptive"), false);
+    } else {
+        setVirtualProp(QStringLiteral("pointerAccelerationProfileAdaptive"), true);
+        setVirtualProp(QStringLiteral("pointerAccelerationProfileFlat"), false);
     }
-    if (bestProps.contains(QStringLiteral("pointerAccelerationProfileFlat"))) {
-        setVirtualProp(QStringLiteral("pointerAccelerationProfileFlat"),
-                       bestProps.value(QStringLiteral("pointerAccelerationProfileFlat")).toBool());
-    }
-    if (bestProps.contains(QStringLiteral("pointerAccelerationProfileAdaptive"))) {
-        setVirtualProp(QStringLiteral("pointerAccelerationProfileAdaptive"),
-                       bestProps.value(QStringLiteral("pointerAccelerationProfileAdaptive")).toBool());
-    }
-    if (bestProps.contains(QStringLiteral("leftHanded"))) {
-        setVirtualProp(QStringLiteral("leftHanded"),
-                       bestProps.value(QStringLiteral("leftHanded")).toBool());
-    }
-    if (bestProps.contains(QStringLiteral("naturalScroll"))) {
-        setVirtualProp(QStringLiteral("naturalScroll"),
-                       bestProps.value(QStringLiteral("naturalScroll")).toBool());
-    }
-    if (bestProps.contains(QStringLiteral("scrollFactor"))) {
-        setVirtualProp(QStringLiteral("scrollFactor"),
-                       bestProps.value(QStringLiteral("scrollFactor")).toDouble());
+    setVirtualProp(QStringLiteral("leftHanded"), leftHanded);
+    setVirtualProp(QStringLiteral("naturalScroll"), natScroll);
+    setVirtualProp(QStringLiteral("scrollFactor"), scrollFac);
+
+    // In ~/.config/kcminputrc persistieren, damit KDE System Settings die virtuelle Maus synchron hält
+    if (QFile::exists(kcmPath)) {
+        QSettings kcm(kcmPath, QSettings::IniFormat);
+        QString vGroup = QStringLiteral("Libinput][4660][22136][karyon-virtual mouse");
+        kcm.beginGroup(vGroup);
+        kcm.setValue(QStringLiteral("PointerAccelerationProfile"), flat ? 1 : 2);
+        kcm.setValue(QStringLiteral("PointerAcceleration"), QString::number(accel, 'f', 3));
+        kcm.setValue(QStringLiteral("ScrollFactor"), QString::number(scrollFac, 'f', 3));
+        kcm.setValue(QStringLiteral("NaturalScroll"), natScroll);
+        kcm.setValue(QStringLiteral("LeftHanded"), leftHanded);
+        kcm.endGroup();
+        kcm.sync();
     }
 
-    std::cout << "[InputMonitor] Synced KWin mouse settings from \""
-              << bestProps.value(QStringLiteral("name")).toString().toStdString()
+    std::cout << "[InputMonitor] Synced mouse settings from \""
+              << bestDevName.toStdString()
               << "\" to karyon-virtual mouse (accel="
-              << bestProps.value(QStringLiteral("pointerAcceleration"), 0.0).toDouble()
-              << ", flat=" << (bestProps.value(QStringLiteral("pointerAccelerationProfileFlat"), false).toBool() ? "true" : "false")
-              << ", adaptive=" << (bestProps.value(QStringLiteral("pointerAccelerationProfileAdaptive"), true).toBool() ? "true" : "false")
-              << ", scrollFactor=" << bestProps.value(QStringLiteral("scrollFactor"), 1.0).toDouble()
+              << accel
+              << ", profile=" << (flat ? "flat (disabled)" : "adaptive (enabled)")
+              << ", scrollFactor=" << scrollFac
               << ")\n";
 }
 
