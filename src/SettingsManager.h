@@ -100,6 +100,9 @@ public:
     bool gesturesEnabled() const;
     void setGesturesEnabled(bool enabled);
 
+    bool showGestureTrail() const;
+    void setShowGestureTrail(bool show);
+
     QString gestureLeft() const;
     void setGestureLeft(const QString &action);
 
@@ -179,6 +182,7 @@ private:
     QString m_customBaseColorHex = QStringLiteral("#22262d");
 
     bool m_gesturesEnabled = true;
+    bool m_showGestureTrail = true;
     QString m_gestureLeft = QStringLiteral("select_all");
     QString m_gestureRight = QStringLiteral("paste");
     QString m_gestureUp = QStringLiteral("reload");

@@ -670,19 +670,23 @@ int main(int argc, char *argv[])
         }
     });
 
-    // 1. Trail-Start: Sobald bei gedrückter RMT Bewegung beginnt
+    // 1. Trail-Start: Sobald bei gedrücktem Trigger Bewegung beginnt
     QObject::connect(&monitor, &InputMonitor::gestureStarted, &gestureTrail,
                      [&gestureTrail, &gestureStartPos, &inGesture]() {
         if (!SettingsManager::instance().gesturesEnabled()) return;
         inGesture = true;
-        gestureTrail.startTrail(gestureStartPos);
+        if (SettingsManager::instance().showGestureTrail()) {
+            gestureTrail.startTrail(gestureStartPos);
+        }
     }, Qt::QueuedConnection);
 
     // 2. Trail-Aktualisierung: Verfolgt die Zugrichtung flüssig ohne Haken
     QObject::connect(&monitor, &InputMonitor::gesturePointAdded, &gestureTrail,
                      [&gestureTrail, &gestureStartPos](int deltaX, int deltaY) {
         if (!SettingsManager::instance().gesturesEnabled()) return;
-        gestureTrail.updateCurrentPos(gestureStartPos.x() + deltaX, gestureStartPos.y() + deltaY);
+        if (SettingsManager::instance().showGestureTrail()) {
+            gestureTrail.updateCurrentPos(gestureStartPos.x() + deltaX, gestureStartPos.y() + deltaY);
+        }
     }, Qt::QueuedConnection);
 
     // 3. Trail-Ende: Sanftes Ausfaden beim Loslassen der RMT
@@ -907,7 +911,7 @@ int main(int argc, char *argv[])
         return 1;
     }
 
-    std::cout << "Karyon C++ active. Hold right mouse button for 120 ms.\n";
+    std::cout << "Karyon C++ active. Hold trigger button for 120 ms.\n";
     int ret = app.exec();
     std::cout << "[Karyon] Application terminated cleanly.\n";
     _exit(ret);

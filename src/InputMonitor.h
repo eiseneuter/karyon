@@ -105,6 +105,7 @@ private:
     std::atomic<int> m_triggerType{0}; // 0 = mouse, 1 = keyboard
     std::atomic<int> m_triggerButton{273}; // BTN_RIGHT
     std::vector<int> m_triggerKeyCodes;
+    bool m_triggerInitialized{false};
     std::atomic<bool> m_inhibited{false};
     std::atomic<bool> m_isRecordingTrigger{false};
     std::thread m_thread;

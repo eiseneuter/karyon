@@ -1,5 +1,6 @@
 #include "GestureTrail.h"
 #include "ThemeManager.h"
+#include "SettingsManager.h"
 
 #include <QQuickView>
 #include <QQuickItem>
@@ -81,7 +82,7 @@ void GestureTrail::prewarm()
 
 void GestureTrail::startTrail(const QPoint &startPos)
 {
-    if (!m_view) return;
+    if (!m_view || !SettingsManager::instance().showGestureTrail()) return;
 
     if (m_hideTimer) {
         m_hideTimer->stop();

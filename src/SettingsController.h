@@ -40,6 +40,7 @@ class SettingsController : public QObject
     Q_PROPERTY(QString detectedLocaleName READ detectedLocaleName CONSTANT)
 
     Q_PROPERTY(bool gesturesEnabled READ gesturesEnabled WRITE setGesturesEnabled NOTIFY gesturesEnabledChanged)
+    Q_PROPERTY(bool showGestureTrail READ showGestureTrail WRITE setShowGestureTrail NOTIFY showGestureTrailChanged)
     Q_PROPERTY(bool isRecordingKey READ isRecordingKey WRITE setIsRecordingKey NOTIFY isRecordingKeyChanged)
     Q_PROPERTY(QString gestureLeft READ gestureLeft WRITE setGestureLeft NOTIFY gestureLeftChanged)
     Q_PROPERTY(QString gestureRight READ gestureRight WRITE setGestureRight NOTIFY gestureRightChanged)
@@ -150,6 +151,9 @@ public:
     bool gesturesEnabled() const;
     void setGesturesEnabled(bool enabled);
 
+    bool showGestureTrail() const;
+    void setShowGestureTrail(bool show);
+
     QString gestureLeft() const;
     void setGestureLeft(const QString &action);
 
@@ -237,6 +241,7 @@ signals:
     void colorSchemeIndexChanged();
     void customBaseColorHexChanged();
     void gesturesEnabledChanged();
+    void showGestureTrailChanged();
     void isRecordingKeyChanged();
     void gestureLeftChanged();
     void gestureRightChanged();

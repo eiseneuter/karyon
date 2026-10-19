@@ -36,7 +36,7 @@ export LANG=en_US.UTF-8
 export LANGUAGE=en_US:en
 
 echo "Starting Karyon C++ ($APP_BIN)..."
-echo "Hold right mouse button for 120 ms."
+echo "Hold trigger button for 120 ms."
 echo "Press Ctrl+C to stop."
 
 exec "$APP_BIN" "$@"

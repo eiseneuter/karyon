@@ -237,27 +237,36 @@ void InputMonitor::setOverlayMouseSpeed(double speed)
 
 void InputMonitor::setTrigger(const QString &type, int button, const QString &keySeq)
 {
-    if (type == QLatin1String("keyboard")) {
-        m_triggerType.store(1);
-    } else {
-        m_triggerType.store(0);
-    }
-    m_triggerButton.store(button > 0 ? button : 273);
+    int newType = (type == QLatin1String("keyboard")) ? 1 : 0;
+    int newBtn = (button > 0 ? button : 273);
 
-    m_triggerKeyCodes.clear();
+    std::vector<int> newKeyCodes;
     if (!keySeq.isEmpty()) {
         const QStringList parts = keySeq.split(QLatin1Char(','), Qt::SkipEmptyParts);
         for (const QString &p : parts) {
             bool ok = false;
             int k = p.trimmed().toInt(&ok);
             if (ok && k > 0) {
-                m_triggerKeyCodes.push_back(k);
+                newKeyCodes.push_back(k);
             }
         }
     }
-    std::cout << "[InputMonitor] Trigger configured: type=" << (m_triggerType.load() == 1 ? "keyboard" : "mouse")
-              << ", button=" << m_triggerButton.load()
-              << ", keySeq=" << keySeq.toStdString() << "\n";
+
+    bool changed = (!m_triggerInitialized ||
+                    m_triggerType.load() != newType ||
+                    m_triggerButton.load() != newBtn ||
+                    m_triggerKeyCodes != newKeyCodes);
+
+    m_triggerInitialized = true;
+    m_triggerType.store(newType);
+    m_triggerButton.store(newBtn);
+    m_triggerKeyCodes = std::move(newKeyCodes);
+
+    if (changed) {
+        std::cout << "[InputMonitor] Trigger configured: type=" << (newType == 1 ? "keyboard" : "mouse")
+                  << ", button=" << newBtn
+                  << ", keySeq=" << keySeq.toStdString() << "\n";
+    }
 }
 
 bool InputMonitor::start()

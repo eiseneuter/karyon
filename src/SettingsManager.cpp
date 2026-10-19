@@ -95,6 +95,7 @@ void SettingsManager::load()
     m_gestureRightDown = m_settings.value(QStringLiteral("gesture_right_down"), QStringLiteral("undo")).toString();
 
     m_gesturesEnabled = m_settings.value(QStringLiteral("gestures_enabled"), true).toBool();
+    m_showGestureTrail = m_settings.value(QStringLiteral("show_gesture_trail"), true).toBool();
     for (int i = 0; i < 8; ++i) {
         m_gestureCustomApp[i] = m_settings.value(QStringLiteral("gesture_custom_app_%1").arg(i)).toString();
         m_gestureCustomAppName[i] = m_settings.value(QStringLiteral("gesture_custom_app_name_%1").arg(i)).toString();
@@ -135,6 +136,7 @@ void SettingsManager::save()
     m_settings.setValue(QStringLiteral("color_scheme_index"), m_colorSchemeIndex);
     m_settings.setValue(QStringLiteral("custom_base_color_hex"), m_customBaseColorHex);
     m_settings.setValue(QStringLiteral("gestures_enabled"), m_gesturesEnabled);
+    m_settings.setValue(QStringLiteral("show_gesture_trail"), m_showGestureTrail);
     m_settings.setValue(QStringLiteral("gesture_left"), m_gestureLeft);
     m_settings.setValue(QStringLiteral("gesture_right"), m_gestureRight);
     m_settings.setValue(QStringLiteral("gesture_up"), m_gestureUp);
@@ -714,6 +716,16 @@ void SettingsManager::setGesturesEnabled(bool enabled)
     }
 }
 
+bool SettingsManager::showGestureTrail() const { return m_showGestureTrail; }
+void SettingsManager::setShowGestureTrail(bool show)
+{
+    if (m_showGestureTrail != show) {
+        m_showGestureTrail = show;
+        save();
+        emit settingsChanged();
+    }
+}
+
 QString SettingsManager::gestureCustomApp(int direction) const
 {
     if (direction >= 0 && direction < 8) return m_gestureCustomApp[direction];
@@ -807,6 +819,7 @@ void SettingsManager::resetDefaults()
     m_customBaseColorHex = QStringLiteral("#22262d");
 
     m_gesturesEnabled = true;
+    m_showGestureTrail = true;
     m_gestureLeft = QStringLiteral("select_all");
     m_gestureRight = QStringLiteral("paste");
     m_gestureUp = QStringLiteral("reload");

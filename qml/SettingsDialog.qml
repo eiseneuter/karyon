@@ -287,7 +287,7 @@ Item {
                     }
 
                     Text {
-                        text: "Hold right mouse button to open overlay • Aim & release to trigger"
+                        text: "Hold trigger button to open overlay • Aim & release to trigger action"
                         color: (typeof karyonTheme !== "undefined") ? karyonTheme.textSubtle : "#b8c0cc"
                         font.pixelSize: 11
                     }
@@ -366,7 +366,7 @@ Item {
                         Text {
                             anchors.left: parent.left
                             anchors.verticalCenter: parent.verticalCenter
-                            text: "Trigger Key / Button"
+                            text: "Trigger Button / Key"
                             color: (typeof karyonTheme !== "undefined") ? karyonTheme.textPrimary : "#e8ecf4"
                             font.pixelSize: 12
                             font.bold: true
@@ -1140,7 +1140,7 @@ Item {
 
                         Text {
                             anchors.centerIn: parent
-                            text: "Switch Date"
+                            text: "Date format"
                             color: switchDateMa.containsMouse ? ((typeof karyonTheme !== "undefined") ? karyonTheme.textPrimary : "#ffffff") : ((typeof karyonTheme !== "undefined") ? karyonTheme.textSecondary : "#cdd3de")
                             font.pixelSize: 10
                             font.bold: true
@@ -1236,7 +1236,7 @@ Item {
 
                         Text {
                             anchors.centerIn: parent
-                            text: "Switch Time"
+                            text: "Time format"
                             color: switchTimeMa.containsMouse ? ((typeof karyonTheme !== "undefined") ? karyonTheme.textPrimary : "#ffffff") : ((typeof karyonTheme !== "undefined") ? karyonTheme.textSecondary : "#cdd3de")
                             font.pixelSize: 10
                             font.bold: true
@@ -1888,7 +1888,7 @@ Item {
 
                 Text {
                     anchors.verticalCenter: parent.verticalCenter
-                    text: "MOUSE GESTURES (RMB + FAST SWIPE)"
+                    text: "MOUSE GESTURES (TRIGGER + FAST SWIPE)"
                     color: root.accentColor
                     font.pixelSize: 11
                     font.bold: true
@@ -1901,6 +1901,15 @@ Item {
                     text: "Enable gestures"
                     checked: settingsController.gesturesEnabled
                     onToggled: function(c) { settingsController.gesturesEnabled = c; }
+                }
+
+                KaryonCheckBox {
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: "Show trail"
+                    checked: settingsController.showGestureTrail
+                    enabled: settingsController.gesturesEnabled
+                    opacity: settingsController.gesturesEnabled ? 1.0 : 0.45
+                    onToggled: function(c) { settingsController.showGestureTrail = c; }
                 }
             }
 

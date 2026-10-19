@@ -78,6 +78,7 @@ SettingsController::SettingsController(QObject *parent)
         emit colorSchemeIndexChanged();
         emit customBaseColorHexChanged();
         emit gesturesEnabledChanged();
+        emit showGestureTrailChanged();
         emit gestureLeftChanged();
         emit gestureRightChanged();
         emit gestureUpChanged();
@@ -629,6 +630,17 @@ void SettingsController::setGesturesEnabled(bool enabled)
 {
     SettingsManager::instance().setGesturesEnabled(enabled);
     emit gesturesEnabledChanged();
+}
+
+bool SettingsController::showGestureTrail() const
+{
+    return SettingsManager::instance().showGestureTrail();
+}
+
+void SettingsController::setShowGestureTrail(bool show)
+{
+    SettingsManager::instance().setShowGestureTrail(show);
+    emit showGestureTrailChanged();
 }
 
 void SettingsController::selectCustomApp(const QString &direction)
