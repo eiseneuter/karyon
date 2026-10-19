@@ -1,6 +1,7 @@
 #include "PermissionDialogController.h"
 #include "PermissionManager.h"
 #include "ProcessUtils.h"
+#include "ThemeManager.h"
 
 #include <QQmlContext>
 #include <QScreen>
@@ -86,6 +87,7 @@ bool PermissionDialogController::execDialog()
     m_view->setColor(QColor(Qt::transparent));
     m_view->setResizeMode(QQuickView::SizeRootObjectToView);
     m_view->rootContext()->setContextProperty(QStringLiteral("permController"), this);
+    m_view->rootContext()->setContextProperty(QStringLiteral("karyonTheme"), &ThemeManager::instance());
     m_view->setSource(QUrl(QStringLiteral("qrc:/qt/qml/karyon/qml/PermissionDialog.qml")));
     m_view->create();
 

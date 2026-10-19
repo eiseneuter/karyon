@@ -8,6 +8,11 @@ class SettingsController : public QObject
 {
     Q_OBJECT
     Q_PROPERTY(int triggerHoldMs READ triggerHoldMs WRITE setTriggerHoldMs NOTIFY triggerHoldMsChanged)
+    Q_PROPERTY(QString triggerType READ triggerType NOTIFY triggerChanged)
+    Q_PROPERTY(int triggerButton READ triggerButton NOTIFY triggerChanged)
+    Q_PROPERTY(QString triggerKeySeq READ triggerKeySeq NOTIFY triggerChanged)
+    Q_PROPERTY(QString triggerDisplayName READ triggerDisplayName NOTIFY triggerChanged)
+    Q_PROPERTY(bool isRecordingTrigger READ isRecordingTrigger WRITE setIsRecordingTrigger NOTIFY isRecordingTriggerChanged)
     Q_PROPERTY(bool gameMode READ gameMode WRITE setGameMode NOTIFY gameModeChanged)
     Q_PROPERTY(double overlayMouseSpeed READ overlayMouseSpeed WRITE setOverlayMouseSpeed NOTIFY overlayMouseSpeedChanged)
     Q_PROPERTY(double overlayScale READ overlayScale WRITE setOverlayScale NOTIFY overlayScaleChanged)
@@ -30,6 +35,8 @@ class SettingsController : public QObject
     Q_PROPERTY(int dateFormatIndex READ dateFormatIndex WRITE setDateFormatIndex NOTIFY dateFormatIndexChanged)
     Q_PROPERTY(QString dateSeparator READ dateSeparator WRITE setDateSeparator NOTIFY dateSeparatorChanged)
     Q_PROPERTY(int timeFormatIndex READ timeFormatIndex WRITE setTimeFormatIndex NOTIFY timeFormatIndexChanged)
+    Q_PROPERTY(int colorSchemeIndex READ colorSchemeIndex WRITE setColorSchemeIndex NOTIFY colorSchemeIndexChanged)
+    Q_PROPERTY(QString customBaseColorHex READ customBaseColorHex WRITE setCustomBaseColorHex NOTIFY customBaseColorHexChanged)
     Q_PROPERTY(QString detectedLocaleName READ detectedLocaleName CONSTANT)
 
     Q_PROPERTY(bool gesturesEnabled READ gesturesEnabled WRITE setGesturesEnabled NOTIFY gesturesEnabledChanged)
@@ -50,6 +57,17 @@ public:
 
     int triggerHoldMs() const;
     void setTriggerHoldMs(int ms);
+
+    QString triggerType() const;
+    int triggerButton() const;
+    QString triggerKeySeq() const;
+    QString triggerDisplayName() const;
+
+    bool isRecordingTrigger() const { return m_isRecordingTrigger; }
+    void setIsRecordingTrigger(bool rec);
+
+    Q_INVOKABLE void setTrigger(const QString &type, int button, const QString &keySeq, const QString &displayName);
+    Q_INVOKABLE QVariantMap processMouseEvent(int qtButton) const;
 
     bool gameMode() const;
     void setGameMode(bool enabled);
@@ -117,6 +135,16 @@ public:
     int timeFormatIndex() const;
     void setTimeFormatIndex(int index);
 
+    int colorSchemeIndex() const;
+    void setColorSchemeIndex(int index);
+
+    QString customBaseColorHex() const;
+    void setCustomBaseColorHex(const QString &hex);
+
+    Q_INVOKABLE void selectColorScheme(int index);
+    Q_INVOKABLE void openColorDialog();
+    Q_INVOKABLE void pickScreenColor();
+
     QString detectedLocaleName() const;
 
     bool gesturesEnabled() const;
@@ -173,9 +201,17 @@ public:
 
     bool eventFilter(QObject *obj, QEvent *event) override;
 
+public slots:
+    void onPortalColorPicked(uint response, const QVariantMap &results);
+    void onInputCaptured(const QString &type, int button, const QString &keySeq, const QString &displayName);
+
 signals:
     void inputPermissionsChanged();
     void triggerHoldMsChanged();
+    void triggerChanged();
+    void isRecordingTriggerChanged();
+    void triggerCaptured(const QString &type, int button, const QString &keySeq, const QString &displayName);
+    void settingsVisibilityChanged(bool visible);
     void gameModeChanged();
     void overlayMouseSpeedChanged();
     void overlayScaleChanged();
@@ -198,6 +234,8 @@ signals:
     void dateFormatIndexChanged();
     void dateSeparatorChanged();
     void timeFormatIndexChanged();
+    void colorSchemeIndexChanged();
+    void customBaseColorHexChanged();
     void gesturesEnabledChanged();
     void isRecordingKeyChanged();
     void gestureLeftChanged();
@@ -214,5 +252,7 @@ private:
 
     QQuickView *m_view = nullptr;
     bool m_isRecordingKey = false;
+    bool m_isRecordingTrigger = false;
+    QString m_portalRequestPath;
 };
 

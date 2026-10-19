@@ -33,19 +33,27 @@ KWinBridge::KWinBridge(QObject *parent)
     queryCursor();
 }
 
-KWinBridge::~KWinBridge()
+void KWinBridge::stopDaemon()
 {
     if (m_daemonSid >= 0) {
         QDBusConnection bus = QDBusConnection::sessionBus();
-        QDBusInterface script(QStringLiteral("org.kde.KWin"),
-                              QStringLiteral("/Scripting/Script%1").arg(m_daemonSid),
-                              QStringLiteral("org.kde.kwin.Script"), bus);
-        script.call(QStringLiteral("stop"));
+        QDBusMessage msg = QDBusMessage::createMethodCall(
+            QStringLiteral("org.kde.KWin"),
+            QStringLiteral("/Scripting/Script%1").arg(m_daemonSid),
+            QStringLiteral("org.kde.kwin.Script"),
+            QStringLiteral("stop"));
+        bus.send(msg);
         m_daemonSid = -1;
     }
     if (!m_daemonScriptPath.isEmpty()) {
         QFile::remove(m_daemonScriptPath);
+        m_daemonScriptPath.clear();
     }
+}
+
+KWinBridge::~KWinBridge()
+{
+    stopDaemon();
 }
 
 void KWinBridge::setupDaemon()

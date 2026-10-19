@@ -1,7 +1,9 @@
 #include "GestureTrail.h"
+#include "ThemeManager.h"
 
 #include <QQuickView>
 #include <QQuickItem>
+#include <QQmlContext>
 #include <QGuiApplication>
 #include <QScreen>
 #include <QColor>
@@ -58,6 +60,7 @@ void GestureTrail::prewarm()
     m_view->setGeometry(m_geometry);
     m_view->setTitle(QStringLiteral("karyon-trail"));
 
+    m_view->rootContext()->setContextProperty(QStringLiteral("karyonTheme"), &ThemeManager::instance());
     m_view->setSource(QUrl(QStringLiteral("qrc:/qt/qml/karyon/qml/GestureTrail.qml")));
     m_view->create();
 

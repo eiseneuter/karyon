@@ -1,4 +1,5 @@
 #include "InfoDialogController.h"
+#include "ThemeManager.h"
 #include "ProcessUtils.h"
 
 #include <QQmlContext>
@@ -46,6 +47,7 @@ void InfoDialogController::showInfo()
         m_view->setColor(QColor(Qt::transparent));
         m_view->setResizeMode(QQuickView::SizeRootObjectToView);
         m_view->rootContext()->setContextProperty(QStringLiteral("infoController"), this);
+        m_view->rootContext()->setContextProperty(QStringLiteral("karyonTheme"), &ThemeManager::instance());
         m_view->setSource(QUrl(QStringLiteral("qrc:/qt/qml/karyon/qml/InfoDialog.qml")));
         m_view->create();
 

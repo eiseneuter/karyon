@@ -556,14 +556,23 @@ Item {
         }
     }
 
+    Connections {
+        target: (typeof karyonTheme !== "undefined") ? karyonTheme : null
+        function onThemeChanged() {
+            hubCategoryCanvas.requestPaint();
+            hubVolumeCanvas.requestPaint();
+            ringCanvas.requestPaint();
+        }
+    }
+
     // Hub (Zentralkreis, Durchmesser 150px) mit normalem dunklem Segmenthintergrund
     Rectangle {
         id: hubCircle
         width: circleRadius * 2
         height: width
         radius: circleRadius
-        color: "#21252b"
-        border.color: "#16181d"
+        color: (typeof karyonTheme !== "undefined") ? karyonTheme.baseBg : "#21252b"
+        border.color: (typeof karyonTheme !== "undefined") ? karyonTheme.ring1Border : "#16181d"
         border.width: 1
         anchors.centerIn: parent
 
@@ -593,7 +602,7 @@ Item {
                 ctx.lineTo(x + r, y + h);
                 ctx.arcTo(x, y + h, x, y + h - r, r);
                 ctx.lineTo(x, y + r);
-                ctx.arcTo(x, y, x + r, y, r);
+                ctx.arcTo(x, y + r, x + r, y, r);
                 ctx.closePath();
             }
 
@@ -603,13 +612,18 @@ Item {
                 ctx.save();
                 ctx.scale(hubScale, hubScale);
 
+                var winColor = (typeof karyonTheme !== "undefined") ? karyonTheme.identWindows : "#2ed573";
+                var appsColor = (typeof karyonTheme !== "undefined") ? karyonTheme.identApps : "#37d0ff";
+                var filesColor = (typeof karyonTheme !== "undefined") ? karyonTheme.identFiles : "#ff9f43";
+                var maskBg = (typeof karyonTheme !== "undefined") ? karyonTheme.baseBg : "#21252b";
+
                 if (mode === "windows") {
                     ctx.lineWidth = 1.4;
                     ctx.lineCap = "round";
                     ctx.lineJoin = "round";
 
                     // Hinteres Fenster
-                    ctx.strokeStyle = "#2ed573";
+                    ctx.strokeStyle = winColor;
                     ctx.fillStyle = "transparent";
                     drawRoundedRect(ctx, 4, 2, 16, 12, 2.0);
                     ctx.stroke();
@@ -619,10 +633,10 @@ Item {
                     ctx.stroke();
 
                     // Vorderes Fenster (überlagert, mit Hintergrundmaskierung)
-                    ctx.fillStyle = "#21252b";
+                    ctx.fillStyle = maskBg;
                     drawRoundedRect(ctx, 11, 7, 17, 13, 2.0);
                     ctx.fill();
-                    ctx.strokeStyle = "#2ed573";
+                    ctx.strokeStyle = winColor;
                     ctx.stroke();
                     ctx.beginPath();
                     ctx.moveTo(11, 10.5);
@@ -630,8 +644,8 @@ Item {
                     ctx.stroke();
 
                 } else if (mode === "apps") {
-                    // 9-Quadrate Symbol in Blau
-                    ctx.fillStyle = "#37d0ff";
+                    // 9-Quadrate Symbol in Kategorie-Farbe
+                    ctx.fillStyle = appsColor;
                     var sqSize = 4.8;
                     var step = 6.6;
                     var startX = 6.0;
@@ -647,14 +661,14 @@ Item {
                     ctx.lineWidth = 1.4;
                     ctx.lineCap = "round";
                     ctx.lineJoin = "round";
-                    ctx.strokeStyle = "#ff9f43";
+                    ctx.strokeStyle = filesColor;
 
                     // Hintere A4-Seite (schlankes A4-Hochformat 11 x 18 px)
                     drawRoundedRect(ctx, 7.0, 1.5, 11.0, 18.0, 1.5);
                     ctx.stroke();
 
                     // Vordere A4-Seite mit abgeknickter Ecke (Hintergrundmaske, 11 x 18 px)
-                    ctx.fillStyle = "#21252b";
+                    ctx.fillStyle = maskBg;
                     ctx.beginPath();
                     ctx.moveTo(14.0, 4.5);
                     ctx.lineTo(21.0, 4.5);
@@ -690,7 +704,7 @@ Item {
                 width: Math.round(130 * ((typeof circleRadius !== "undefined" ? circleRadius : 75) / 75.0))
                 horizontalAlignment: Text.AlignHCenter
                 text: root.currentTimeStr
-                color: "#ffffff"
+                color: (typeof karyonTheme !== "undefined") ? karyonTheme.textPrimary : "#ffffff"
                 font.pixelSize: Math.round(22 * ((typeof circleRadius !== "undefined" ? circleRadius : 75) / 75.0))
                 minimumPixelSize: Math.round(12 * ((typeof circleRadius !== "undefined" ? circleRadius : 75) / 75.0))
                 fontSizeMode: Text.HorizontalFit
@@ -705,7 +719,7 @@ Item {
                 width: Math.round(136 * ((typeof circleRadius !== "undefined" ? circleRadius : 75) / 75.0))
                 horizontalAlignment: Text.AlignHCenter
                 text: root.currentDateStr
-                color: "#9faec0"
+                color: (typeof karyonTheme !== "undefined") ? karyonTheme.textMuted : "#9faec0"
                 font.pixelSize: Math.round(13.5 * ((typeof circleRadius !== "undefined" ? circleRadius : 75) / 75.0))
                 minimumPixelSize: Math.round(8 * ((typeof circleRadius !== "undefined" ? circleRadius : 75) / 75.0))
                 fontSizeMode: Text.HorizontalFit
@@ -763,9 +777,10 @@ Item {
                 var barW = Math.max(0.6 * hs, slotW - gap);
                 var startX = cx - totalW / 2.0;
 
+                var isLight = (typeof karyonTheme !== "undefined") && karyonTheme.isLight;
                 var activeBars = Math.round(volPct * numBars);
-                var activeCol = muted ? "rgba(255, 71, 87, 0.35)" : "rgba(255, 255, 255, 0.28)";
-                var inactiveCol = "rgba(255, 255, 255, 0.05)";
+                var activeCol = muted ? "rgba(255, 71, 87, 0.40)" : (isLight ? "rgba(24, 28, 36, 0.35)" : "rgba(255, 255, 255, 0.28)");
+                var inactiveCol = isLight ? "rgba(24, 28, 36, 0.08)" : "rgba(255, 255, 255, 0.05)";
 
                 for (var i = 0; i < numBars; i++) {
                     var bx = startX + i * slotW;
@@ -787,14 +802,14 @@ Item {
                 var spkCy = cy + 51.5 * hs;
                 var spkR = 14.5 * hs;
 
-                // Kreisrunder dunkler Hintergrund (#21252b) OHNE Kontur/Rahmen
+                // Kreisrunder Hintergrund OHNE Kontur/Rahmen
                 ctx.beginPath();
                 ctx.arc(spkCx, spkCy, spkR, 0, 2 * Math.PI);
-                ctx.fillStyle = "#21252b";
+                ctx.fillStyle = (typeof karyonTheme !== "undefined") ? karyonTheme.baseBg : "#21252b";
                 ctx.fill();
 
-                // Lautsprechersymbol exakt zentriert im Badge (bleibt voll hell: reinweiß bzw. leuchtend rot)
-                var spkColor = muted ? "#ff4757" : "#ffffff";
+                // Lautsprechersymbol exakt zentriert im Badge
+                var spkColor = muted ? "#ff4757" : (isLight ? "#181c24" : "#ffffff");
                 ctx.fillStyle = spkColor;
                 ctx.strokeStyle = spkColor;
                 ctx.lineWidth = 1.4 * hs;
@@ -880,9 +895,14 @@ Item {
                 // Rotate so that +X points directly toward the hub center (cx, cy)
                 ctx.rotate(pinAngle + Math.PI);
 
-                var col = isHovered ? "#ffffff" : (isPinned ? "rgba(255, 255, 255, 0.85)" : "rgba(255, 255, 255, 0.35)");
+                var isLight = (typeof karyonTheme !== "undefined" && karyonTheme.isLight);
+                var col = isHovered
+                    ? (isLight ? "#111827" : "#ffffff")
+                    : (isPinned
+                        ? (isLight ? "#2c313a" : "rgba(255, 255, 255, 0.85)")
+                        : (isLight ? "rgba(44, 49, 58, 0.45)" : "rgba(255, 255, 255, 0.35)"));
                 if (isHovered) {
-                    ctx.shadowColor = "#ffffff";
+                    ctx.shadowColor = isLight ? "rgba(0, 0, 0, 0.3)" : "#ffffff";
                     ctx.shadowBlur = 6;
                 }
 
@@ -944,13 +964,13 @@ Item {
                     ctx.lineCap = "round";
                     ctx.stroke();
                 } else {
-                    ctx.fillStyle = "#282c34";
+                    ctx.fillStyle = (typeof karyonTheme !== "undefined") ? karyonTheme.baseBg : "#282c34";
                     ctx.fill();
-                    ctx.strokeStyle = "rgba(255, 255, 255, 0.4)";
+                    ctx.strokeStyle = (typeof karyonTheme !== "undefined") ? (karyonTheme.isLight ? "rgba(0, 0, 0, 0.25)" : "rgba(255, 255, 255, 0.4)") : "rgba(255, 255, 255, 0.4)";
                     ctx.lineWidth = 1.0;
                     ctx.stroke();
 
-                    ctx.fillStyle = "#ffffff";
+                    ctx.fillStyle = (typeof karyonTheme !== "undefined") ? karyonTheme.textPrimary : "#ffffff";
                     ctx.font = "bold " + Math.round(8.5 * scaleFactor) + "px sans-serif";
                     ctx.textAlign = "center";
                     ctx.textBaseline = "middle";
@@ -973,10 +993,14 @@ Item {
 
                     var isSel = (selRing === ringNum && i === selIdx);
 
-                    if (seg.isRealWindow) {
-                        ctx.fillStyle = isSel ? "#385244" : "#1d2c25";
+                    if (isSel) {
+                        ctx.fillStyle = (typeof karyonTheme !== "undefined")
+                            ? (seg.isRealWindow ? karyonTheme.windowSelectionBg : karyonTheme.ringSelectionBg)
+                            : "#454a55";
+                    } else if (seg.isRealWindow) {
+                        ctx.fillStyle = (typeof karyonTheme !== "undefined") ? karyonTheme.windowUnselBg : "#2a2f38";
                     } else {
-                        ctx.fillStyle = isSel ? "#454a55" : unselColor;
+                        ctx.fillStyle = unselColor;
                     }
                     ctx.fill();
 
@@ -1001,7 +1025,7 @@ Item {
                             ctx.arc(cx, cy, outerR, a1, progEnd, false);
                             ctx.arc(cx, cy, outerR - 15, progEnd, a1, true);
                             ctx.closePath();
-                            ctx.fillStyle = "#2ed573";
+                            ctx.fillStyle = (typeof karyonTheme !== "undefined") ? karyonTheme.identWindows : "#2ed573";
                             ctx.fill();
                         }
 
@@ -1015,10 +1039,10 @@ Item {
                         ctx.lineWidth = 1;
                         ctx.stroke();
 
-                        // 4. Normale Top-Linie (2.5px grün am Außenrand) beibehalten
+                        // 4. Normale Top-Linie (2.5px am Außenrand) beibehalten
                         ctx.beginPath();
                         ctx.arc(cx, cy, outerR - 1, a1, a2, false);
-                        ctx.strokeStyle = "#2ed573";
+                        ctx.strokeStyle = (typeof karyonTheme !== "undefined") ? karyonTheme.identWindows : "#2ed573";
                         ctx.lineWidth = 2.5;
                         ctx.stroke();
 
@@ -1028,7 +1052,7 @@ Item {
                             ctx.arc(cx, cy, outerR, a1, a2, false);
                             ctx.arc(cx, cy, outerR - 15, a2, a1, true);
                             ctx.closePath();
-                            ctx.fillStyle = "rgba(55, 208, 255, 0.35)";
+                            ctx.fillStyle = (typeof karyonTheme !== "undefined") ? karyonTheme.drilldownColor : "rgba(13, 124, 214, 0.30)";
                             ctx.fill();
                         }
 
@@ -1051,11 +1075,11 @@ Item {
                         // Top Edge color
                         var topColor = "";
                         if (seg.segmentType === "window") {
-                            topColor = "#2ed573";
+                            topColor = (typeof karyonTheme !== "undefined") ? karyonTheme.identWindows : "#2ed573";
                         } else if (seg.segmentType === "file") {
-                            topColor = "#ff9f43";
+                            topColor = (typeof karyonTheme !== "undefined") ? karyonTheme.identFiles : "#ff9f43";
                         } else if (seg.segmentType === "app") {
-                            topColor = "#37d0ff";
+                            topColor = (typeof karyonTheme !== "undefined") ? karyonTheme.identApps : "#37d0ff";
                         }
 
                         // Border drawing:
@@ -1076,7 +1100,7 @@ Item {
                                 ctx.arc(cx, cy, outerR, a1, a2, false);
                                 ctx.arc(cx, cy, outerR - 15, a2, a1, true);
                                 ctx.closePath();
-                                ctx.fillStyle = "rgba(55, 208, 255, 0.35)";
+                                ctx.fillStyle = (typeof karyonTheme !== "undefined") ? karyonTheme.drilldownColor : "rgba(13, 124, 214, 0.30)";
                                 ctx.fill();
                             }
 
@@ -1098,7 +1122,7 @@ Item {
                                 ctx.arc(cx, cy, outerR, a1, a2, false);
                                 ctx.arc(cx, cy, outerR - 15, a2, a1, true);
                                 ctx.closePath();
-                                ctx.fillStyle = "rgba(55, 208, 255, 0.35)";
+                                ctx.fillStyle = (typeof karyonTheme !== "undefined") ? karyonTheme.drilldownColor : "rgba(13, 124, 214, 0.30)";
                                 ctx.fill();
                             }
                         }
@@ -1129,13 +1153,17 @@ Item {
             }
 
             // 1. Ring 1 zeichnen
-            drawRingSegments(1, segmentList1, innerR1, outerR1, "#21252b", "#16181d");
+            var r1Bg = (typeof karyonTheme !== "undefined") ? karyonTheme.ring1Bg : "#21252b";
+            var r1Border = (typeof karyonTheme !== "undefined") ? karyonTheme.ring1Border : "#16181d";
+            drawRingSegments(1, segmentList1, innerR1, outerR1, r1Bg, r1Border);
 
             // 2. Ring 2 zeichnen (falls vorhanden)
             if (ring2Active && segmentData2 && segmentData2.length > 0) {
                 var innerR2 = outerR1 + ring2Gap;
                 var outerR2 = innerR2 + ring2Depth;
-                drawRingSegments(2, segmentData2, innerR2, outerR2, "#1e2126", "#14161a");
+                var r2Bg = (typeof karyonTheme !== "undefined") ? karyonTheme.ring2Bg : "#1e2126";
+                var r2Border = (typeof karyonTheme !== "undefined") ? karyonTheme.ring2Border : "#14161a";
+                drawRingSegments(2, segmentData2, innerR2, outerR2, r2Bg, r2Border);
             }
 
             // 3. Ring 3 zeichnen (falls vorhanden)
@@ -1144,7 +1172,9 @@ Item {
                 var outerR2_3 = innerR2_3 + ring2Depth;
                 var innerR3 = outerR2_3 + ring3Gap;
                 var outerR3 = innerR3 + ring3Depth;
-                drawRingSegments(3, segmentData3, innerR3, outerR3, "#1b1e23", "#121417");
+                var r3Bg = (typeof karyonTheme !== "undefined") ? karyonTheme.ring3Bg : "#1b1e23";
+                var r3Border = (typeof karyonTheme !== "undefined") ? karyonTheme.ring3Border : "#121417";
+                drawRingSegments(3, segmentData3, innerR3, outerR3, r3Bg, r3Border);
             }
         }
     }
@@ -1187,7 +1217,9 @@ Item {
                 id: segText1
                 visible: !!modelData.isTextSegment
                 text: modelData.label || ""
-                color: (selectedRing === 1 && selectedIndex === index) ? "#37d0ff" : "#e8eef6"
+                color: (selectedRing === 1 && selectedIndex === index)
+                    ? ((typeof karyonTheme !== "undefined") ? karyonTheme.identApps : "#37d0ff")
+                    : ((typeof karyonTheme !== "undefined") ? karyonTheme.textPrimary : "#e8eef6")
                 font.pixelSize: 10
                 font.bold: (selectedRing === 1 && selectedIndex === index)
                 horizontalAlignment: Text.AlignHCenter
@@ -1250,7 +1282,9 @@ Item {
                 id: segText2
                 visible: !!modelData.isTextSegment
                 text: modelData.label || ""
-                color: (selectedRing === 2 && selectedIndex === index) ? "#37d0ff" : "#e8eef6"
+                color: (selectedRing === 2 && selectedIndex === index)
+                    ? ((typeof karyonTheme !== "undefined") ? karyonTheme.identApps : "#37d0ff")
+                    : ((typeof karyonTheme !== "undefined") ? karyonTheme.textPrimary : "#e8eef6")
                 font.pixelSize: Math.max(9, Math.round(10 * (circleRadius / 75.0)))
                 font.bold: (selectedRing === 2 && selectedIndex === index)
                 horizontalAlignment: Text.AlignHCenter

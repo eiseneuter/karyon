@@ -3,10 +3,10 @@ import QtQuick
 Item {
     id: root
     width: 580
-    height: 640
+    height: 660
 
-    readonly property color accentColor: "#0d7cd6"
-    readonly property color accentHoverColor: "#298fe6"
+    readonly property color accentColor: (typeof karyonTheme !== "undefined") ? karyonTheme.accentColor : "#0d7cd6"
+    readonly property color accentHoverColor: (typeof karyonTheme !== "undefined") ? karyonTheme.accentHoverColor : "#298fe6"
 
     focus: true
     Component.onCompleted: root.forceActiveFocus()
@@ -104,8 +104,8 @@ Item {
                 height: 15
                 radius: 3
                 anchors.verticalCenter: parent.verticalCenter
-                color: cbRoot.checked ? root.accentColor : "#282c34"
-                border.color: cbMa.containsMouse ? (cbRoot.checked ? root.accentHoverColor : "#5c6370") : (cbRoot.checked ? root.accentColor : "#3e4451")
+                color: cbRoot.checked ? root.accentColor : ((typeof karyonTheme !== "undefined") ? karyonTheme.controlBg : "#282c34")
+                border.color: cbMa.containsMouse ? (cbRoot.checked ? root.accentHoverColor : ((typeof karyonTheme !== "undefined") ? karyonTheme.controlHoverBg : "#5c6370")) : (cbRoot.checked ? root.accentColor : ((typeof karyonTheme !== "undefined") ? karyonTheme.controlBorder : "#3e4451"))
                 border.width: 1
 
                 Text {
@@ -121,7 +121,7 @@ Item {
             Text {
                 anchors.verticalCenter: parent.verticalCenter
                 text: cbRoot.text
-                color: cbRoot.checked ? "#ffffff" : "#cdd3de"
+                color: cbRoot.checked ? ((typeof karyonTheme !== "undefined") ? karyonTheme.textPrimary : "#ffffff") : ((typeof karyonTheme !== "undefined") ? karyonTheme.textSecondary : "#cdd3de")
                 font.pixelSize: 11
                 font.bold: true
             }
@@ -167,7 +167,7 @@ Item {
                 width: 70
                 anchors.verticalCenter: parent.verticalCenter
                 text: ddRoot.label
-                color: "#e8ecf4"
+                color: (typeof karyonTheme !== "undefined") ? karyonTheme.textSecondary : "#e8ecf4"
                 font.pixelSize: 12
                 font.bold: true
             }
@@ -177,8 +177,8 @@ Item {
                 width: parent.width - 76
                 height: 24
                 radius: 4
-                color: ddMa.containsMouse ? "#2c313a" : "#282c34"
-                border.color: ddMa.containsMouse ? root.accentHoverColor : "#3e4451"
+                color: ddMa.containsMouse ? ((typeof karyonTheme !== "undefined") ? karyonTheme.controlHoverBg : "#2c313a") : ((typeof karyonTheme !== "undefined") ? karyonTheme.controlBg : "#282c34")
+                border.color: ddMa.containsMouse ? root.accentHoverColor : ((typeof karyonTheme !== "undefined") ? karyonTheme.controlBorder : "#3e4451")
                 border.width: 1
 
                 Row {
@@ -190,7 +190,7 @@ Item {
                         width: parent.width - 16
                         anchors.verticalCenter: parent.verticalCenter
                         text: ddRoot.actionText
-                        color: ddRoot.actionId === "none" ? "#96a2b4" : "#ffffff"
+                        color: ddRoot.actionId === "none" ? ((typeof karyonTheme !== "undefined") ? karyonTheme.textMuted : "#96a2b4") : ((typeof karyonTheme !== "undefined") ? karyonTheme.textPrimary : "#ffffff")
                         font.pixelSize: 11
                         font.bold: true
                         elide: Text.ElideRight
@@ -231,8 +231,8 @@ Item {
         anchors.fill: parent
         anchors.margins: 4
         radius: 12
-        color: "#1e2227"
-        border.color: "#353b45"
+        color: (typeof karyonTheme !== "undefined") ? karyonTheme.cardBg : "#1e2227"
+        border.color: (typeof karyonTheme !== "undefined") ? karyonTheme.cardBorder : "#353b45"
         border.width: 1
 
         property bool isDraggingSlider: false
@@ -273,14 +273,14 @@ Item {
 
                         Text {
                             text: "Karyon Settings"
-                            color: "#ffffff"
+                            color: (typeof karyonTheme !== "undefined") ? karyonTheme.textPrimary : "#ffffff"
                             font.pixelSize: 14
                             font.bold: true
                         }
 
                         Text {
-                            text: "Version 3.0"
-                            color: "#96a2b4"
+                            text: "Version 3.1"
+                            color: (typeof karyonTheme !== "undefined") ? karyonTheme.textMuted : "#96a2b4"
                             font.pixelSize: 11
                             anchors.verticalCenter: parent.verticalCenter
                         }
@@ -288,7 +288,7 @@ Item {
 
                     Text {
                         text: "Hold right mouse button to open overlay • Aim & release to trigger"
-                        color: "#b8c0cc"
+                        color: (typeof karyonTheme !== "undefined") ? karyonTheme.textSubtle : "#b8c0cc"
                         font.pixelSize: 11
                     }
                 }
@@ -300,7 +300,7 @@ Item {
                 width: 26
                 height: 26
                 radius: 5
-                color: closeXMa.containsMouse ? "#353b45" : "transparent"
+                color: closeXMa.containsMouse ? ((typeof karyonTheme !== "undefined") ? karyonTheme.controlHoverBg : "#353b45") : "transparent"
                 anchors.right: parent.right
                 anchors.rightMargin: 12
                 anchors.verticalCenter: parent.verticalCenter
@@ -308,7 +308,7 @@ Item {
                 Text {
                     anchors.centerIn: parent
                     text: "✕"
-                    color: closeXMa.containsMouse ? "#ffffff" : "#cdd3de"
+                    color: closeXMa.containsMouse ? ((typeof karyonTheme !== "undefined") ? karyonTheme.textPrimary : "#ffffff") : ((typeof karyonTheme !== "undefined") ? karyonTheme.textSecondary : "#cdd3de")
                     font.pixelSize: 13
                     font.bold: true
                 }
@@ -332,7 +332,7 @@ Item {
             anchors.right: parent.right
             anchors.rightMargin: 12
             height: 1
-            color: "#282c34"
+            color: (typeof karyonTheme !== "undefined") ? karyonTheme.dividerColor : "#282c34"
         }
 
         // Schieberegler in 2 Spalten
@@ -351,6 +351,92 @@ Item {
                 width: (parent.width - parent.spacing) / 2
                 spacing: 6
 
+                // 0. Trigger Selector (Button "Select trigger" + Display text)
+                Column {
+                    id: triggerCol
+                    width: parent.width
+                    spacing: 2
+
+                    readonly property string tipText: "Select mouse button or keyboard key/combination to trigger Karyon"
+
+                    Item {
+                        width: parent.width
+                        height: 16
+
+                        Text {
+                            anchors.left: parent.left
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: "Trigger Key / Button"
+                            color: (typeof karyonTheme !== "undefined") ? karyonTheme.textPrimary : "#e8ecf4"
+                            font.pixelSize: 12
+                            font.bold: true
+                        }
+
+                        MouseArea {
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            onEntered: {
+                                if (card.isDraggingSlider) return;
+                                var pt = mapToItem(card, width / 2, 0);
+                                sliderTooltip.show(triggerCol.tipText, pt.x, pt.y);
+                            }
+                            onExited: sliderTooltip.hide()
+                        }
+                    }
+
+                    Row {
+                        width: parent.width
+                        height: 16
+                        spacing: 8
+
+                        Rectangle {
+                            id: selectTriggerBtn
+                            width: 82
+                            height: 18
+                            anchors.verticalCenter: parent.verticalCenter
+                            radius: 4
+                            color: selectTriggerMa.containsMouse ? ((typeof karyonTheme !== "undefined") ? karyonTheme.controlHoverBg : "#353b45") : ((typeof karyonTheme !== "undefined") ? karyonTheme.controlBg : "#282c34")
+                            border.color: selectTriggerMa.containsMouse ? root.accentHoverColor : ((typeof karyonTheme !== "undefined") ? karyonTheme.controlBorder : "#3e4451")
+                            border.width: 1
+
+                            Text {
+                                anchors.centerIn: parent
+                                text: "Select trigger"
+                                color: selectTriggerMa.containsMouse ? ((typeof karyonTheme !== "undefined") ? karyonTheme.textPrimary : "#ffffff") : ((typeof karyonTheme !== "undefined") ? karyonTheme.textSecondary : "#cdd3de")
+                                font.pixelSize: 10
+                                font.bold: true
+                            }
+
+                            MouseArea {
+                                id: selectTriggerMa
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                onEntered: {
+                                    if (!card.isDraggingSlider) {
+                                        var pt = mapToItem(card, width / 2, 0);
+                                        sliderTooltip.show("Record a mouse button or key combination to trigger Karyon", pt.x, pt.y);
+                                    }
+                                }
+                                onExited: sliderTooltip.hide()
+                                onClicked: {
+                                    triggerRecorderModal.open();
+                                }
+                            }
+                        }
+
+                        Text {
+                            anchors.verticalCenter: parent.verticalCenter
+                            width: parent.width - selectTriggerBtn.width - 8
+                            text: settingsController.triggerDisplayName
+                            color: root.accentColor
+                            font.pixelSize: 11
+                            font.bold: true
+                            elide: Text.ElideRight
+                        }
+                    }
+                }
+
                 // 1. Trigger Hold
                 Column {
                     id: sliderCol1
@@ -367,7 +453,7 @@ Item {
                             anchors.left: parent.left
                             anchors.verticalCenter: parent.verticalCenter
                             text: "Trigger Hold"
-                            color: "#e8ecf4"
+                            color: (typeof karyonTheme !== "undefined") ? karyonTheme.textPrimary : "#e8ecf4"
                             font.pixelSize: 12
                             font.bold: true
                         }
@@ -377,7 +463,7 @@ Item {
                             anchors.right: parent.right
                             anchors.verticalCenter: parent.verticalCenter
                             text: settingsController.triggerHoldMs + " ms" + (settingsController.triggerHoldMs === 120 ? " (def.)" : "")
-                            color: "#cdd3de"
+                            color: (typeof karyonTheme !== "undefined") ? karyonTheme.textSecondary : "#cdd3de"
                             font.pixelSize: 12
                         }
 
@@ -407,8 +493,8 @@ Item {
                             width: parent.width
                             height: 4
                             radius: 2
-                            color: "#282c34"
-                            border.color: "#3e4451"
+                            color: (typeof karyonTheme !== "undefined") ? karyonTheme.controlBg : "#282c34"
+                            border.color: (typeof karyonTheme !== "undefined") ? karyonTheme.controlBorder : "#3e4451"
                             border.width: 1
 
                             Rectangle {
@@ -487,7 +573,7 @@ Item {
                             anchors.left: parent.left
                             anchors.verticalCenter: parent.verticalCenter
                             text: "Overlay Mouse Speed"
-                            color: "#e8ecf4"
+                            color: (typeof karyonTheme !== "undefined") ? karyonTheme.textPrimary : "#e8ecf4"
                             font.pixelSize: 12
                             font.bold: true
                         }
@@ -501,7 +587,7 @@ Item {
                                 var isDef = Math.abs(spd - (-0.5)) < 0.02;
                                 return (spd >= 0 ? "+" : "") + spd.toFixed(2) + (isDef ? " (def.)" : "");
                             }
-                            color: "#cdd3de"
+                            color: (typeof karyonTheme !== "undefined") ? karyonTheme.textSecondary : "#cdd3de"
                             font.pixelSize: 12
                         }
 
@@ -531,8 +617,8 @@ Item {
                             width: parent.width
                             height: 4
                             radius: 2
-                            color: "#282c34"
-                            border.color: "#3e4451"
+                            color: (typeof karyonTheme !== "undefined") ? karyonTheme.controlBg : "#282c34"
+                            border.color: (typeof karyonTheme !== "undefined") ? karyonTheme.controlBorder : "#3e4451"
                             border.width: 1
 
                             Rectangle {
@@ -594,255 +680,6 @@ Item {
                         }
                     }
                 }
-
-                // 3. Overlay Scale
-                Column {
-                    id: sliderCol3
-                    width: parent.width
-                    spacing: 2
-
-                    readonly property string sliderTip: "Overall visual scale factor for the radial overlay"
-
-                    Item {
-                        width: parent.width
-                        height: 16
-
-                        Text {
-                            anchors.left: parent.left
-                            anchors.verticalCenter: parent.verticalCenter
-                            text: "Overlay Scale"
-                            color: "#e8ecf4"
-                            font.pixelSize: 12
-                            font.bold: true
-                        }
-
-                        Text {
-                            id: scaleValText
-                            anchors.right: parent.right
-                            anchors.verticalCenter: parent.verticalCenter
-                            text: {
-                                var s = settingsController.overlayScale;
-                                var isDef = Math.abs(s - 1.0) < 0.02;
-                                return s.toFixed(1) + "x" + (isDef ? " (def.)" : "");
-                            }
-                            color: "#cdd3de"
-                            font.pixelSize: 12
-                        }
-
-                        MouseArea {
-                            anchors.fill: parent
-                            hoverEnabled: true
-                            onEntered: {
-                                if (card.isDraggingSlider) return;
-                                var pt = mapToItem(card, width / 2, 0);
-                                sliderTooltip.show(sliderCol3.sliderTip, pt.x, pt.y);
-                            }
-                            onExited: sliderTooltip.hide()
-                        }
-                    }
-
-                    Item {
-                        id: scaleSlider
-                        width: parent.width
-                        height: 16
-
-                        property real minVal: 0.8
-                        property real maxVal: 1.5
-                        property real curVal: settingsController.overlayScale
-
-                        Rectangle {
-                            anchors.verticalCenter: parent.verticalCenter
-                            width: parent.width
-                            height: 4
-                            radius: 2
-                            color: "#282c34"
-                            border.color: "#3e4451"
-                            border.width: 1
-
-                            Rectangle {
-                                height: parent.height
-                                radius: 2
-                                color: root.accentColor
-                                width: Math.max(0, Math.min(parent.width, (scaleSlider.curVal - scaleSlider.minVal) / (scaleSlider.maxVal - scaleSlider.minVal) * parent.width))
-                            }
-                        }
-
-                        Rectangle {
-                            width: 12
-                            height: 12
-                            radius: 6
-                            color: scaleMa.containsMouse || scaleMa.pressed ? "#ffffff" : "#f0f0f0"
-                            border.color: root.accentColor
-                            border.width: 2
-                            anchors.verticalCenter: parent.verticalCenter
-                            x: Math.max(0, Math.min(parent.width - width, (scaleSlider.curVal - scaleSlider.minVal) / (scaleSlider.maxVal - scaleSlider.minVal) * (parent.width - width)))
-                        }
-
-                        MouseArea {
-                            id: scaleMa
-                            anchors.fill: parent
-                            hoverEnabled: true
-                            cursorShape: Qt.PointingHandCursor
-
-                            function updateFromMouse(mouseX) {
-                                var ratio = Math.max(0, Math.min(1, mouseX / scaleSlider.width));
-                                var rawVal = scaleSlider.minVal + ratio * (scaleSlider.maxVal - scaleSlider.minVal);
-                                var stepped = Math.round(rawVal * 10) / 10;
-                                settingsController.overlayScale = Math.max(scaleSlider.minVal, Math.min(scaleSlider.maxVal, stepped));
-                            }
-
-                            onPressedChanged: {
-                                if (pressed) {
-                                    card.isDraggingSlider = true;
-                                    sliderTooltip.hide();
-                                } else {
-                                    card.isDraggingSlider = false;
-                                }
-                            }
-
-                            onPressed: function(mouse) {
-                                sliderTooltip.hide();
-                                updateFromMouse(mouse.x);
-                            }
-                            onPositionChanged: function(mouse) {
-                                if (pressed) {
-                                    sliderTooltip.hide();
-                                    updateFromMouse(mouse.x);
-                                }
-                            }
-                            onEntered: {
-                                if (pressed || card.isDraggingSlider) return;
-                                var pt = mapToItem(card, width / 2, 0);
-                                sliderTooltip.show(sliderCol3.sliderTip, pt.x, pt.y);
-                            }
-                            onExited: sliderTooltip.hide()
-                        }
-                    }
-                }
-
-                // 4. Overlay Transparency
-                Column {
-                    id: sliderCol4
-                    width: parent.width
-                    spacing: 2
-
-                    readonly property string sliderTip: "Background opacity (0% = completely opaque)"
-
-                    Item {
-                        width: parent.width
-                        height: 16
-
-                        Text {
-                            anchors.left: parent.left
-                            anchors.verticalCenter: parent.verticalCenter
-                            text: "Overlay Transparency"
-                            color: "#e8ecf4"
-                            font.pixelSize: 12
-                            font.bold: true
-                        }
-
-                        Text {
-                            id: transValText
-                            anchors.right: parent.right
-                            anchors.verticalCenter: parent.verticalCenter
-                            text: {
-                                var tr = Math.round(settingsController.overlayTransparency);
-                                return tr + "%" + (tr === 4 ? " (def.)" : "");
-                            }
-                            color: "#cdd3de"
-                            font.pixelSize: 12
-                        }
-
-                        MouseArea {
-                            anchors.fill: parent
-                            hoverEnabled: true
-                            onEntered: {
-                                if (card.isDraggingSlider) return;
-                                var pt = mapToItem(card, width / 2, 0);
-                                sliderTooltip.show(sliderCol4.sliderTip, pt.x, pt.y);
-                            }
-                            onExited: sliderTooltip.hide()
-                        }
-                    }
-
-                    Item {
-                        id: transSlider
-                        width: parent.width
-                        height: 16
-
-                        property real minVal: 0.0
-                        property real maxVal: 20.0
-                        property real curVal: settingsController.overlayTransparency
-
-                        Rectangle {
-                            anchors.verticalCenter: parent.verticalCenter
-                            width: parent.width
-                            height: 4
-                            radius: 2
-                            color: "#282c34"
-                            border.color: "#3e4451"
-                            border.width: 1
-
-                            Rectangle {
-                                height: parent.height
-                                radius: 2
-                                color: root.accentColor
-                                width: Math.max(0, Math.min(parent.width, (transSlider.curVal - transSlider.minVal) / (transSlider.maxVal - transSlider.minVal) * parent.width))
-                            }
-                        }
-
-                        Rectangle {
-                            width: 12
-                            height: 12
-                            radius: 6
-                            color: transMa.containsMouse || transMa.pressed ? "#ffffff" : "#f0f0f0"
-                            border.color: root.accentColor
-                            border.width: 2
-                            anchors.verticalCenter: parent.verticalCenter
-                            x: Math.max(0, Math.min(parent.width - width, (transSlider.curVal - transSlider.minVal) / (transSlider.maxVal - transSlider.minVal) * (parent.width - width)))
-                        }
-
-                        MouseArea {
-                            id: transMa
-                            anchors.fill: parent
-                            hoverEnabled: true
-                            cursorShape: Qt.PointingHandCursor
-
-                            function updateFromMouse(mouseX) {
-                                var ratio = Math.max(0, Math.min(1, mouseX / transSlider.width));
-                                var rawVal = transSlider.minVal + ratio * (transSlider.maxVal - transSlider.minVal);
-                                var stepped = Math.round(rawVal);
-                                settingsController.overlayTransparency = Math.max(transSlider.minVal, Math.min(transSlider.maxVal, stepped));
-                            }
-
-                            onPressedChanged: {
-                                if (pressed) {
-                                    card.isDraggingSlider = true;
-                                    sliderTooltip.hide();
-                                } else {
-                                    card.isDraggingSlider = false;
-                                }
-                            }
-
-                            onPressed: function(mouse) {
-                                sliderTooltip.hide();
-                                updateFromMouse(mouse.x);
-                            }
-                            onPositionChanged: function(mouse) {
-                                if (pressed) {
-                                    sliderTooltip.hide();
-                                    updateFromMouse(mouse.x);
-                                }
-                            }
-                            onEntered: {
-                                if (pressed || card.isDraggingSlider) return;
-                                var pt = mapToItem(card, width / 2, 0);
-                                sliderTooltip.show(sliderCol4.sliderTip, pt.x, pt.y);
-                            }
-                            onExited: sliderTooltip.hide()
-                        }
-                    }
-                }
             }
 
             // Rechte Spalte: Sliders
@@ -866,7 +703,7 @@ Item {
                             anchors.left: parent.left
                             anchors.verticalCenter: parent.verticalCenter
                             text: "Max Recent Apps"
-                            color: "#e8ecf4"
+                            color: (typeof karyonTheme !== "undefined") ? karyonTheme.textPrimary : "#e8ecf4"
                             font.pixelSize: 12
                             font.bold: true
                         }
@@ -876,7 +713,7 @@ Item {
                             anchors.right: parent.right
                             anchors.verticalCenter: parent.verticalCenter
                             text: settingsController.maxRecentApps + (settingsController.maxRecentApps === 12 ? " (def.)" : "")
-                            color: "#cdd3de"
+                            color: (typeof karyonTheme !== "undefined") ? karyonTheme.textSecondary : "#cdd3de"
                             font.pixelSize: 12
                         }
 
@@ -906,8 +743,8 @@ Item {
                             width: parent.width
                             height: 4
                             radius: 2
-                            color: "#282c34"
-                            border.color: "#3e4451"
+                            color: (typeof karyonTheme !== "undefined") ? karyonTheme.controlBg : "#282c34"
+                            border.color: (typeof karyonTheme !== "undefined") ? karyonTheme.controlBorder : "#3e4451"
                             border.width: 1
 
                             Rectangle {
@@ -986,7 +823,7 @@ Item {
                             anchors.left: parent.left
                             anchors.verticalCenter: parent.verticalCenter
                             text: "Max Recent Files"
-                            color: "#e8ecf4"
+                            color: (typeof karyonTheme !== "undefined") ? karyonTheme.textPrimary : "#e8ecf4"
                             font.pixelSize: 12
                             font.bold: true
                         }
@@ -996,7 +833,7 @@ Item {
                             anchors.right: parent.right
                             anchors.verticalCenter: parent.verticalCenter
                             text: settingsController.maxRecentFiles + (settingsController.maxRecentFiles === 12 ? " (def.)" : "")
-                            color: "#cdd3de"
+                            color: (typeof karyonTheme !== "undefined") ? karyonTheme.textSecondary : "#cdd3de"
                             font.pixelSize: 12
                         }
 
@@ -1026,8 +863,8 @@ Item {
                             width: parent.width
                             height: 4
                             radius: 2
-                            color: "#282c34"
-                            border.color: "#3e4451"
+                            color: (typeof karyonTheme !== "undefined") ? karyonTheme.controlBg : "#282c34"
+                            border.color: (typeof karyonTheme !== "undefined") ? karyonTheme.controlBorder : "#3e4451"
                             border.width: 1
 
                             Rectangle {
@@ -1106,7 +943,7 @@ Item {
                             anchors.left: parent.left
                             anchors.verticalCenter: parent.verticalCenter
                             text: "Volume Steps"
-                            color: "#e8ecf4"
+                            color: (typeof karyonTheme !== "undefined") ? karyonTheme.textPrimary : "#e8ecf4"
                             font.pixelSize: 12
                             font.bold: true
                         }
@@ -1116,7 +953,7 @@ Item {
                             anchors.right: parent.right
                             anchors.verticalCenter: parent.verticalCenter
                             text: settingsController.volumeStep + "%" + (settingsController.volumeStep === 3 ? " (def.)" : "")
-                            color: "#cdd3de"
+                            color: (typeof karyonTheme !== "undefined") ? karyonTheme.textSecondary : "#cdd3de"
                             font.pixelSize: 12
                         }
 
@@ -1146,8 +983,8 @@ Item {
                             width: parent.width
                             height: 4
                             radius: 2
-                            color: "#282c34"
-                            border.color: "#3e4451"
+                            color: (typeof karyonTheme !== "undefined") ? karyonTheme.controlBg : "#282c34"
+                            border.color: (typeof karyonTheme !== "undefined") ? karyonTheme.controlBorder : "#3e4451"
                             border.width: 1
 
                             Rectangle {
@@ -1222,7 +1059,7 @@ Item {
             anchors.right: parent.right
             anchors.rightMargin: 12
             height: 1
-            color: "#282c34"
+            color: (typeof karyonTheme !== "undefined") ? karyonTheme.dividerColor : "#282c34"
         }
 
         // Checkboxen in 2 Spalten auf einheitlichen horizontalen Linien
@@ -1244,7 +1081,7 @@ Item {
                 // Hub Section Header
                 Text {
                     text: "HUB DISPLAY"
-                    color: "#96a2b4"
+                    color: root.accentColor
                     font.pixelSize: 11
                     font.bold: true
                 }
@@ -1286,6 +1123,7 @@ Item {
                 }
 
                 // Datumsformat: Button "Switch Date" + Trennzeichen-Button "." + Beispieldatum (24.12.26)
+                // Datumsformat: Button "Switch Date" + Button Trennzeichen + Beispieldatum
                 Row {
                     width: parent.width
                     height: 20
@@ -1296,14 +1134,14 @@ Item {
                         width: 74
                         height: 20
                         radius: 4
-                        color: switchDateMa.containsMouse ? "#353b45" : "#282c34"
-                        border.color: switchDateMa.containsMouse ? root.accentHoverColor : "#3e4451"
+                        color: switchDateMa.containsMouse ? ((typeof karyonTheme !== "undefined") ? karyonTheme.controlHoverBg : "#353b45") : ((typeof karyonTheme !== "undefined") ? karyonTheme.controlBg : "#282c34")
+                        border.color: switchDateMa.containsMouse ? root.accentHoverColor : ((typeof karyonTheme !== "undefined") ? karyonTheme.controlBorder : "#3e4451")
                         border.width: 1
 
                         Text {
                             anchors.centerIn: parent
                             text: "Switch Date"
-                            color: switchDateMa.containsMouse ? "#ffffff" : "#cdd3de"
+                            color: switchDateMa.containsMouse ? ((typeof karyonTheme !== "undefined") ? karyonTheme.textPrimary : "#ffffff") : ((typeof karyonTheme !== "undefined") ? karyonTheme.textSecondary : "#cdd3de")
                             font.pixelSize: 10
                             font.bold: true
                         }
@@ -1331,14 +1169,14 @@ Item {
                         width: 20
                         height: 20
                         radius: 4
-                        color: dateSepMa.containsMouse ? "#353b45" : "#282c34"
-                        border.color: dateSepMa.containsMouse ? root.accentHoverColor : "#3e4451"
+                        color: dateSepMa.containsMouse ? ((typeof karyonTheme !== "undefined") ? karyonTheme.controlHoverBg : "#353b45") : ((typeof karyonTheme !== "undefined") ? karyonTheme.controlBg : "#282c34")
+                        border.color: dateSepMa.containsMouse ? root.accentHoverColor : ((typeof karyonTheme !== "undefined") ? karyonTheme.controlBorder : "#3e4451")
                         border.width: 1
 
                         Text {
                             anchors.centerIn: parent
                             text: settingsController.dateSeparator
-                            color: dateSepMa.containsMouse ? "#ffffff" : "#cdd3de"
+                            color: dateSepMa.containsMouse ? ((typeof karyonTheme !== "undefined") ? karyonTheme.textPrimary : "#ffffff") : ((typeof karyonTheme !== "undefined") ? karyonTheme.textSecondary : "#cdd3de")
                             font.pixelSize: 11
                             font.bold: true
                         }
@@ -1372,7 +1210,7 @@ Item {
                         width: parent.width - switchDateBtn.width - dateSepBtn.width - 12
                         anchors.verticalCenter: parent.verticalCenter
                         text: root.formatSampleDate(settingsController.dateFormatIndex, settingsController.dateSeparator)
-                        color: "#9faec0"
+                        color: root.accentColor
                         font.pixelSize: 11
                         minimumPixelSize: 8
                         fontSizeMode: Text.HorizontalFit
@@ -1392,14 +1230,14 @@ Item {
                         width: 74
                         height: 20
                         radius: 4
-                        color: switchTimeMa.containsMouse ? "#353b45" : "#282c34"
-                        border.color: switchTimeMa.containsMouse ? root.accentHoverColor : "#3e4451"
+                        color: switchTimeMa.containsMouse ? ((typeof karyonTheme !== "undefined") ? karyonTheme.controlHoverBg : "#353b45") : ((typeof karyonTheme !== "undefined") ? karyonTheme.controlBg : "#282c34")
+                        border.color: switchTimeMa.containsMouse ? root.accentHoverColor : ((typeof karyonTheme !== "undefined") ? karyonTheme.controlBorder : "#3e4451")
                         border.width: 1
 
                         Text {
                             anchors.centerIn: parent
                             text: "Switch Time"
-                            color: switchTimeMa.containsMouse ? "#ffffff" : "#cdd3de"
+                            color: switchTimeMa.containsMouse ? ((typeof karyonTheme !== "undefined") ? karyonTheme.textPrimary : "#ffffff") : ((typeof karyonTheme !== "undefined") ? karyonTheme.textSecondary : "#cdd3de")
                             font.pixelSize: 10
                             font.bold: true
                         }
@@ -1425,7 +1263,7 @@ Item {
                     Text {
                         anchors.verticalCenter: parent.verticalCenter
                         text: root.formatSampleTime(settingsController.timeFormatIndex)
-                        color: "#9faec0"
+                        color: root.accentColor
                         font.pixelSize: 11
                         font.bold: true
                     }
@@ -1456,7 +1294,7 @@ Item {
                 // Kategorien Header
                 Text {
                     text: "CATEGORIES"
-                    color: "#96a2b4"
+                    color: root.accentColor
                     font.pixelSize: 11
                     font.bold: true
                 }
@@ -1506,7 +1344,7 @@ Item {
                 // Karyon Icons Header
                 Text {
                     text: "KARYON ICONS"
-                    color: "#96a2b4"
+                    color: root.accentColor
                     font.pixelSize: 11
                     font.bold: true
                 }
@@ -1585,17 +1423,452 @@ Item {
             }
         }
 
-        // Trennlinie vor Gesten-Sektion
+        // Trennlinie vor der neuen Sektion (Scale, Transparency, Color Schemes, Base Color)
         Rectangle {
-            id: gesturesDivider
+            id: appearanceDivider
             anchors.top: checkboxesRow.bottom
-            anchors.topMargin: 4
+            anchors.topMargin: 8
             anchors.left: parent.left
             anchors.leftMargin: 12
             anchors.right: parent.right
             anchors.rightMargin: 12
             height: 1
-            color: "#282c34"
+            color: (typeof karyonTheme !== "undefined") ? karyonTheme.dividerColor : "#282c34"
+        }
+
+        // Neue Sektion ohne Überschrift
+        Column {
+            id: appearanceSection
+            anchors.top: appearanceDivider.bottom
+            anchors.topMargin: 8
+            anchors.left: parent.left
+            anchors.leftMargin: 16
+            anchors.right: parent.right
+            anchors.rightMargin: 16
+            spacing: 8
+
+            // 1. Schieberegler in 2 Spalten: Overlay Scale (links) & Overlay Transparency (rechts)
+            Row {
+                width: parent.width
+                spacing: 18
+
+                // Linke Spalte: Overlay Scale
+                Column {
+                    id: sliderColScale
+                    width: (parent.width - parent.spacing) / 2
+                    spacing: 2
+
+                    readonly property string sliderTip: "Overall visual scale factor for the radial overlay"
+
+                    Item {
+                        width: parent.width
+                        height: 16
+
+                        Text {
+                            anchors.left: parent.left
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: "Overlay Scale"
+                            color: (typeof karyonTheme !== "undefined") ? karyonTheme.textPrimary : "#e8ecf4"
+                            font.pixelSize: 12
+                            font.bold: true
+                        }
+
+                        Text {
+                            id: scaleValText
+                            anchors.right: parent.right
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: {
+                                var s = settingsController.overlayScale;
+                                var isDef = Math.abs(s - 1.0) < 0.02;
+                                return s.toFixed(1) + "x" + (isDef ? " (def.)" : "");
+                            }
+                            color: (typeof karyonTheme !== "undefined") ? karyonTheme.textSecondary : "#cdd3de"
+                            font.pixelSize: 12
+                        }
+
+                        MouseArea {
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            onEntered: {
+                                if (card.isDraggingSlider) return;
+                                var pt = mapToItem(card, width / 2, 0);
+                                sliderTooltip.show(sliderColScale.sliderTip, pt.x, pt.y);
+                            }
+                            onExited: sliderTooltip.hide()
+                        }
+                    }
+
+                    Item {
+                        id: scaleSlider
+                        width: parent.width
+                        height: 16
+
+                        property real minVal: 0.8
+                        property real maxVal: 1.5
+                        property real curVal: settingsController.overlayScale
+
+                        Rectangle {
+                            anchors.verticalCenter: parent.verticalCenter
+                            width: parent.width
+                            height: 4
+                            radius: 2
+                            color: (typeof karyonTheme !== "undefined") ? karyonTheme.controlBg : "#282c34"
+                            border.color: (typeof karyonTheme !== "undefined") ? karyonTheme.controlBorder : "#3e4451"
+                            border.width: 1
+
+                            Rectangle {
+                                height: parent.height
+                                radius: 2
+                                color: root.accentColor
+                                width: Math.max(0, Math.min(parent.width, (scaleSlider.curVal - scaleSlider.minVal) / (scaleSlider.maxVal - scaleSlider.minVal) * parent.width))
+                            }
+                        }
+
+                        Rectangle {
+                            width: 12
+                            height: 12
+                            radius: 6
+                            color: scaleMa.containsMouse || scaleMa.pressed ? "#ffffff" : "#f0f0f0"
+                            border.color: root.accentColor
+                            border.width: 2
+                            anchors.verticalCenter: parent.verticalCenter
+                            x: Math.max(0, Math.min(parent.width - width, (scaleSlider.curVal - scaleSlider.minVal) / (scaleSlider.maxVal - scaleSlider.minVal) * (parent.width - width)))
+                        }
+
+                        MouseArea {
+                            id: scaleMa
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+
+                            function updateFromMouse(mouseX) {
+                                var ratio = Math.max(0, Math.min(1, mouseX / scaleSlider.width));
+                                var rawVal = scaleSlider.minVal + ratio * (scaleSlider.maxVal - scaleSlider.minVal);
+                                var stepped = Math.round(rawVal * 10) / 10;
+                                settingsController.overlayScale = Math.max(scaleSlider.minVal, Math.min(scaleSlider.maxVal, stepped));
+                            }
+
+                            onPressedChanged: {
+                                if (pressed) {
+                                    card.isDraggingSlider = true;
+                                    sliderTooltip.hide();
+                                } else {
+                                    card.isDraggingSlider = false;
+                                }
+                            }
+
+                            onPressed: function(mouse) {
+                                sliderTooltip.hide();
+                                updateFromMouse(mouse.x);
+                            }
+                            onPositionChanged: function(mouse) {
+                                if (pressed) {
+                                    sliderTooltip.hide();
+                                    updateFromMouse(mouse.x);
+                                }
+                            }
+                            onEntered: {
+                                if (pressed || card.isDraggingSlider) return;
+                                var pt = mapToItem(card, width / 2, 0);
+                                sliderTooltip.show(sliderColScale.sliderTip, pt.x, pt.y);
+                            }
+                            onExited: sliderTooltip.hide()
+                        }
+                    }
+                }
+
+                // Rechte Spalte: Overlay Transparency
+                Column {
+                    id: sliderColTrans
+                    width: (parent.width - parent.spacing) / 2
+                    spacing: 2
+
+                    readonly property string sliderTip: "Background opacity (0% = completely opaque)"
+
+                    Item {
+                        width: parent.width
+                        height: 16
+
+                        Text {
+                            anchors.left: parent.left
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: "Overlay Transparency"
+                            color: (typeof karyonTheme !== "undefined") ? karyonTheme.textPrimary : "#e8ecf4"
+                            font.pixelSize: 12
+                            font.bold: true
+                        }
+
+                        Text {
+                            id: transValText
+                            anchors.right: parent.right
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: {
+                                var tr = Math.round(settingsController.overlayTransparency);
+                                return tr + "%" + (tr === 4 ? " (def.)" : "");
+                            }
+                            color: (typeof karyonTheme !== "undefined") ? karyonTheme.textSecondary : "#cdd3de"
+                            font.pixelSize: 12
+                        }
+
+                        MouseArea {
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            onEntered: {
+                                if (card.isDraggingSlider) return;
+                                var pt = mapToItem(card, width / 2, 0);
+                                sliderTooltip.show(sliderColTrans.sliderTip, pt.x, pt.y);
+                            }
+                            onExited: sliderTooltip.hide()
+                        }
+                    }
+
+                    Item {
+                        id: transSlider
+                        width: parent.width
+                        height: 16
+
+                        property real minVal: 0.0
+                        property real maxVal: 20.0
+                        property real curVal: settingsController.overlayTransparency
+
+                        Rectangle {
+                            anchors.verticalCenter: parent.verticalCenter
+                            width: parent.width
+                            height: 4
+                            radius: 2
+                            color: (typeof karyonTheme !== "undefined") ? karyonTheme.controlBg : "#282c34"
+                            border.color: (typeof karyonTheme !== "undefined") ? karyonTheme.controlBorder : "#3e4451"
+                            border.width: 1
+
+                            Rectangle {
+                                height: parent.height
+                                radius: 2
+                                color: root.accentColor
+                                width: Math.max(0, Math.min(parent.width, (transSlider.curVal - transSlider.minVal) / (transSlider.maxVal - transSlider.minVal) * parent.width))
+                            }
+                        }
+
+                        Rectangle {
+                            width: 12
+                            height: 12
+                            radius: 6
+                            color: transMa.containsMouse || transMa.pressed ? "#ffffff" : "#f0f0f0"
+                            border.color: root.accentColor
+                            border.width: 2
+                            anchors.verticalCenter: parent.verticalCenter
+                            x: Math.max(0, Math.min(parent.width - width, (transSlider.curVal - transSlider.minVal) / (transSlider.maxVal - transSlider.minVal) * (parent.width - width)))
+                        }
+
+                        MouseArea {
+                            id: transMa
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+
+                            function updateFromMouse(mouseX) {
+                                var ratio = Math.max(0, Math.min(1, mouseX / transSlider.width));
+                                var rawVal = transSlider.minVal + ratio * (transSlider.maxVal - transSlider.minVal);
+                                var stepped = Math.round(rawVal);
+                                settingsController.overlayTransparency = Math.max(transSlider.minVal, Math.min(transSlider.maxVal, stepped));
+                            }
+
+                            onPressedChanged: {
+                                if (pressed) {
+                                    card.isDraggingSlider = true;
+                                    sliderTooltip.hide();
+                                } else {
+                                    card.isDraggingSlider = false;
+                                }
+                            }
+
+                            onPressed: function(mouse) {
+                                sliderTooltip.hide();
+                                updateFromMouse(mouse.x);
+                            }
+                            onPositionChanged: function(mouse) {
+                                if (pressed) {
+                                    sliderTooltip.hide();
+                                    updateFromMouse(mouse.x);
+                                }
+                            }
+                            onEntered: {
+                                if (pressed || card.isDraggingSlider) return;
+                                var pt = mapToItem(card, width / 2, 0);
+                                sliderTooltip.show(sliderColTrans.sliderTip, pt.x, pt.y);
+                            }
+                            onExited: sliderTooltip.hide()
+                        }
+                    }
+                }
+            }
+
+            // 2. Color Schemes: 6 Checkboxen nebeneinander
+            Row {
+                width: parent.width
+                spacing: 10
+
+                Repeater {
+                    model: [
+                        { id: 0, name: "Charcoal", tip: "Classic Karyon carbon charcoal & cobalt blue (Default)", dotColor: "#22262d", dotBorder: "#0d7cd6" },
+                        { id: 1, name: "Slate", tip: "Nordic arctic slate & frost cyan", dotColor: "#222936", dotBorder: "#88c0d0" },
+                        { id: 2, name: "Emerald", tip: "Deep boreal pine & radiant emerald", dotColor: "#142e22", dotBorder: "#10b981" },
+                        { id: 3, name: "Amethyst", tip: "Deep royal amethyst & electric lavender", dotColor: "#271b36", dotBorder: "#a855f7" },
+                        { id: 4, name: "Cappuccino", tip: "Warm roasted espresso & caramel mocha", dotColor: "#312117", dotBorder: "#e0a96d" },
+                        { id: 5, name: "Crimson", tip: "Velvet wine & radiant ruby rose", dotColor: "#33141f", dotBorder: "#f43f5e" }
+                    ]
+
+                    Row {
+                        spacing: 4
+                        anchors.verticalCenter: parent.verticalCenter
+
+                        KaryonCheckBox {
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: modelData.name
+                            checked: settingsController.colorSchemeIndex === modelData.id
+                            tooltip: modelData.tip
+                            onToggled: function(val) {
+                                settingsController.selectColorScheme(modelData.id);
+                            }
+                        }
+
+                        Rectangle {
+                            width: 8
+                            height: 8
+                            radius: 4
+                            anchors.verticalCenter: parent.verticalCenter
+                            color: modelData.dotColor
+                            border.color: modelData.dotBorder
+                            border.width: 1
+                        }
+                    }
+                }
+            }
+
+            // 3. Base Color: 2 Buttons (Dialog & Screen Eyedropper) + Vorschau-Swatch
+            Row {
+                width: parent.width
+                height: 24
+                spacing: 10
+
+                Text {
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: "Base Color:"
+                    color: (typeof karyonTheme !== "undefined") ? karyonTheme.textSecondary : "#cdd3de"
+                    font.pixelSize: 11
+                    font.bold: true
+                }
+
+                // Button 1: Farbwähler-Dialog
+                Rectangle {
+                    id: baseColorDlgBtn
+                    width: 136
+                    height: 24
+                    radius: 4
+                    anchors.verticalCenter: parent.verticalCenter
+                    color: baseColorDlgMa.containsMouse ? ((typeof karyonTheme !== "undefined") ? karyonTheme.controlHoverBg : "#353b45") : ((typeof karyonTheme !== "undefined") ? karyonTheme.controlBg : "#282c34")
+                    border.color: baseColorDlgMa.containsMouse ? root.accentHoverColor : ((typeof karyonTheme !== "undefined") ? karyonTheme.controlBorder : "#3e4451")
+                    border.width: 1
+
+                    Row {
+                        anchors.centerIn: parent
+                        spacing: 6
+
+                        Text {
+                            text: "🎨"
+                            font.pixelSize: 11
+                            anchors.verticalCenter: parent.verticalCenter
+                        }
+
+                        Text {
+                            text: "Choose Color..."
+                            color: baseColorDlgMa.containsMouse ? ((typeof karyonTheme !== "undefined") ? karyonTheme.textPrimary : "#ffffff") : ((typeof karyonTheme !== "undefined") ? karyonTheme.textSecondary : "#cdd3de")
+                            font.pixelSize: 11
+                            font.bold: true
+                            anchors.verticalCenter: parent.verticalCenter
+                        }
+                    }
+
+                    MouseArea {
+                        id: baseColorDlgMa
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onEntered: {
+                            if (!card.isDraggingSlider) {
+                                var pt = mapToItem(card, width / 2, 0);
+                                sliderTooltip.show("Open intelligent color picker dialog to customize base color", pt.x, pt.y);
+                            }
+                        }
+                        onExited: sliderTooltip.hide()
+                        onClicked: {
+                            sliderTooltip.hide();
+                            settingsController.openColorDialog();
+                        }
+                    }
+                }
+
+                // Button 2: Screen Color Picker
+                Rectangle {
+                    id: screenPickerBtn
+                    width: 136
+                    height: 24
+                    radius: 4
+                    anchors.verticalCenter: parent.verticalCenter
+                    color: screenPickerMa.containsMouse ? ((typeof karyonTheme !== "undefined") ? karyonTheme.controlHoverBg : "#353b45") : ((typeof karyonTheme !== "undefined") ? karyonTheme.controlBg : "#282c34")
+                    border.color: screenPickerMa.containsMouse ? root.accentHoverColor : ((typeof karyonTheme !== "undefined") ? karyonTheme.controlBorder : "#3e4451")
+                    border.width: 1
+
+                    Row {
+                        anchors.centerIn: parent
+                        spacing: 6
+
+                        Text {
+                            text: "💉"
+                            font.pixelSize: 11
+                            anchors.verticalCenter: parent.verticalCenter
+                        }
+
+                        Text {
+                            text: "Pick from Screen"
+                            color: screenPickerMa.containsMouse ? ((typeof karyonTheme !== "undefined") ? karyonTheme.textPrimary : "#ffffff") : ((typeof karyonTheme !== "undefined") ? karyonTheme.textSecondary : "#cdd3de")
+                            font.pixelSize: 11
+                            font.bold: true
+                            anchors.verticalCenter: parent.verticalCenter
+                        }
+                    }
+
+                    MouseArea {
+                        id: screenPickerMa
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onEntered: {
+                            if (!card.isDraggingSlider) {
+                                var pt = mapToItem(card, width / 2, 0);
+                                sliderTooltip.show("Pick any pixel color directly from your screen", pt.x, pt.y);
+                            }
+                        }
+                        onExited: sliderTooltip.hide()
+                        onClicked: {
+                            sliderTooltip.hide();
+                            settingsController.pickScreenColor();
+                        }
+                    }
+                }
+            }
+        }
+
+        // Trennlinie vor Gesten-Sektion
+        Rectangle {
+            id: gesturesDivider
+            anchors.top: appearanceSection.bottom
+            anchors.topMargin: 8
+            anchors.left: parent.left
+            anchors.leftMargin: 12
+            anchors.right: parent.right
+            anchors.rightMargin: 12
+            height: 1
+            color: (typeof karyonTheme !== "undefined") ? karyonTheme.dividerColor : "#282c34"
         }
 
         // Gesten-Sektion (2 Spalten, exakt wie im Layout)
@@ -1616,7 +1889,7 @@ Item {
                 Text {
                     anchors.verticalCenter: parent.verticalCenter
                     text: "MOUSE GESTURES (RMB + FAST SWIPE)"
-                    color: "#96a2b4"
+                    color: root.accentColor
                     font.pixelSize: 11
                     font.bold: true
                 }
@@ -1717,7 +1990,7 @@ Item {
             anchors.right: parent.right
             anchors.rightMargin: 12
             height: 1
-            color: "#282c34"
+            color: (typeof karyonTheme !== "undefined") ? karyonTheme.dividerColor : "#282c34"
         }
 
         // Footer mit bündig angeordneten Buttons unter den Gesten-Spalten
@@ -1746,8 +2019,8 @@ Item {
                     width: Math.floor((footerLeftRow.width - footerLeftRow.spacing) * 0.55)
                     height: 30
                     radius: 5
-                    color: permsMa.containsMouse ? "#353b45" : "#282c34"
-                    border.color: settingsController.hasInputPermissions ? "#3e4451" : "#e06c75"
+                    color: permsMa.containsMouse ? ((typeof karyonTheme !== "undefined") ? karyonTheme.controlHoverBg : "#353b45") : ((typeof karyonTheme !== "undefined") ? karyonTheme.controlBg : "#282c34")
+                    border.color: settingsController.hasInputPermissions ? ((typeof karyonTheme !== "undefined") ? karyonTheme.controlBorder : "#3e4451") : "#e06c75"
                     border.width: 1
 
                     Row {
@@ -1765,7 +2038,7 @@ Item {
                         Text {
                             anchors.verticalCenter: parent.verticalCenter
                             text: settingsController.hasInputPermissions ? "Revoke Permissions" : "Set Permissions"
-                            color: permsMa.containsMouse ? "#ffffff" : "#cdd3de"
+                            color: permsMa.containsMouse ? ((typeof karyonTheme !== "undefined") ? karyonTheme.textPrimary : "#ffffff") : ((typeof karyonTheme !== "undefined") ? karyonTheme.textSecondary : "#cdd3de")
                             font.pixelSize: 11
                             font.bold: true
                         }
@@ -1801,14 +2074,14 @@ Item {
                     width: footerLeftRow.width - footerLeftRow.spacing - permsBtn.width
                     height: 30
                     radius: 5
-                    color: resetMa.containsMouse ? "#353b45" : "#282c34"
-                    border.color: resetMa.containsMouse ? "#4b5263" : "#3e4451"
+                    color: resetMa.containsMouse ? ((typeof karyonTheme !== "undefined") ? karyonTheme.controlHoverBg : "#353b45") : ((typeof karyonTheme !== "undefined") ? karyonTheme.controlBg : "#282c34")
+                    border.color: resetMa.containsMouse ? ((typeof karyonTheme !== "undefined") ? karyonTheme.controlHoverBg : "#4b5263") : ((typeof karyonTheme !== "undefined") ? karyonTheme.controlBorder : "#3e4451")
                     border.width: 1
 
                     Text {
                         anchors.centerIn: parent
                         text: "Reset Defaults"
-                        color: resetMa.containsMouse ? "#ffffff" : "#cdd3de"
+                        color: resetMa.containsMouse ? ((typeof karyonTheme !== "undefined") ? karyonTheme.textPrimary : "#ffffff") : ((typeof karyonTheme !== "undefined") ? karyonTheme.textSecondary : "#cdd3de")
                         font.pixelSize: 12
                         font.bold: true
                     }
@@ -1887,7 +2160,7 @@ Item {
             id: sliderTooltip
             visible: false
             z: 300
-            color: "#181a1f"
+            color: (typeof karyonTheme !== "undefined") ? karyonTheme.cardBg : "#181a1f"
             border.color: root.accentColor
             border.width: 1
             radius: 4
@@ -1904,7 +2177,7 @@ Item {
                 width: parent.width - 16
                 wrapMode: Text.WordWrap
                 text: ""
-                color: "#e8ecf4"
+                color: (typeof karyonTheme !== "undefined" && karyonTheme.isLight) ? "#000000" : "#e8ecf4"
                 font.pixelSize: 11
                 lineHeight: 1.25
             }
@@ -2000,7 +2273,7 @@ Item {
                 width: dropdownOverlay.popupWidth
                 height: Math.min(220, dropdownList.contentHeight + 8)
                 radius: 5
-                color: "#1e2227"
+                color: (typeof karyonTheme !== "undefined") ? karyonTheme.cardBg : "#1e2227"
                 border.color: root.accentColor
                 border.width: 1
                 clip: true
@@ -2028,7 +2301,7 @@ Item {
                         width: dropdownList.width
                         height: 24
                         radius: 3
-                        color: itemMa.containsMouse ? "#2c313a" : (modelData === dropdownOverlay.currentActionId ? "#282c34" : "transparent")
+                        color: itemMa.containsMouse ? ((typeof karyonTheme !== "undefined") ? karyonTheme.controlHoverBg : "#2c313a") : (modelData === dropdownOverlay.currentActionId ? ((typeof karyonTheme !== "undefined") ? karyonTheme.controlBg : "#282c34") : "transparent")
 
                         Text {
                             anchors.verticalCenter: parent.verticalCenter
@@ -2038,7 +2311,7 @@ Item {
                             anchors.rightMargin: 4
                             elide: Text.ElideRight
                             text: settingsController.actionDisplayForId(modelData, dropdownOverlay.targetDirection)
-                            color: modelData === dropdownOverlay.currentActionId ? root.accentColor : (itemMa.containsMouse ? "#ffffff" : "#cdd3de")
+                            color: modelData === dropdownOverlay.currentActionId ? root.accentColor : (itemMa.containsMouse ? ((typeof karyonTheme !== "undefined") ? karyonTheme.textPrimary : "#ffffff") : ((typeof karyonTheme !== "undefined") ? karyonTheme.textSecondary : "#cdd3de"))
                             font.pixelSize: 11
                             font.bold: modelData === dropdownOverlay.currentActionId
                         }
@@ -2070,7 +2343,7 @@ Item {
                     anchors.bottomMargin: 4
                     width: 3
                     radius: 1.5
-                    color: "#282c34"
+                    color: (typeof karyonTheme !== "undefined") ? karyonTheme.controlBg : "#282c34"
                     visible: dropdownList.contentHeight > dropdownList.height
 
                     Rectangle {
@@ -2137,7 +2410,7 @@ Item {
                 width: 380
                 height: 190
                 radius: 10
-                color: "#1e2227"
+                color: (typeof karyonTheme !== "undefined") ? karyonTheme.cardBg : "#1e2227"
                 border.color: root.accentColor
                 border.width: 1
                 anchors.centerIn: parent
@@ -2161,7 +2434,7 @@ Item {
 
                     Text {
                         text: "Press the desired key or shortcut\n(e.g. Ctrl+C, F11, Alt+Tab, Super+D...)"
-                        color: "#cdd3de"
+                        color: (typeof karyonTheme !== "undefined") ? karyonTheme.textSecondary : "#cdd3de"
                         font.pixelSize: 11
                         lineHeight: 1.3
                     }
@@ -2170,14 +2443,14 @@ Item {
                         width: parent.width
                         height: 38
                         radius: 6
-                        color: "#282c34"
-                        border.color: keyRecorderModal.keyValid ? root.accentColor : "#3e4451"
+                        color: (typeof karyonTheme !== "undefined") ? karyonTheme.controlBg : "#282c34"
+                        border.color: keyRecorderModal.keyValid ? root.accentColor : ((typeof karyonTheme !== "undefined") ? karyonTheme.controlBorder : "#3e4451")
                         border.width: 1.5
 
                         Text {
                             anchors.centerIn: parent
                             text: keyRecorderModal.recordedKeyName.length > 0 ? keyRecorderModal.recordedKeyName : "Press a key..."
-                            color: keyRecorderModal.keyValid ? "#ffffff" : "#96a2b4"
+                            color: keyRecorderModal.keyValid ? ((typeof karyonTheme !== "undefined") ? karyonTheme.textPrimary : "#ffffff") : ((typeof karyonTheme !== "undefined") ? karyonTheme.textMuted : "#96a2b4")
                             font.pixelSize: 13
                             font.bold: true
                         }
@@ -2191,13 +2464,13 @@ Item {
                             width: 80
                             height: 26
                             radius: 4
-                            color: cancelKeyMa.containsMouse ? "#353b45" : "#282c34"
-                            border.color: "#3e4451"
+                            color: cancelKeyMa.containsMouse ? ((typeof karyonTheme !== "undefined") ? karyonTheme.controlHoverBg : "#353b45") : ((typeof karyonTheme !== "undefined") ? karyonTheme.controlBg : "#282c34")
+                            border.color: (typeof karyonTheme !== "undefined") ? karyonTheme.controlBorder : "#3e4451"
                             border.width: 1
                             Text {
                                 anchors.centerIn: parent
                                 text: "Cancel"
-                                color: cancelKeyMa.containsMouse ? "#ffffff" : "#cdd3de"
+                                color: cancelKeyMa.containsMouse ? ((typeof karyonTheme !== "undefined") ? karyonTheme.textPrimary : "#ffffff") : ((typeof karyonTheme !== "undefined") ? karyonTheme.textSecondary : "#cdd3de")
                                 font.pixelSize: 10
                                 font.bold: true
                             }
@@ -2214,7 +2487,7 @@ Item {
                             width: 80
                             height: 26
                             radius: 4
-                            color: keyRecorderModal.keyValid ? (saveKeyMa.containsMouse ? root.accentHoverColor : root.accentColor) : "#353b45"
+                            color: keyRecorderModal.keyValid ? (saveKeyMa.containsMouse ? root.accentHoverColor : root.accentColor) : ((typeof karyonTheme !== "undefined") ? karyonTheme.controlBg : "#353b45")
                             opacity: keyRecorderModal.keyValid ? 1.0 : 0.4
                             Text {
                                 anchors.centerIn: parent
@@ -2232,6 +2505,243 @@ Item {
                                     if (keyRecorderModal.keyValid) {
                                         settingsController.setCustomKey(keyRecorderModal.targetDirection, keyRecorderModal.recordedKeyName, keyRecorderModal.recordedKeySeq);
                                         keyRecorderModal.close();
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Modal-Dialog für Trigger-Aufnahme (Mausbutton oder Tastenkombination)
+        Item {
+            id: triggerRecorderModal
+            anchors.fill: parent
+            visible: false
+            z: 9999
+            focus: visible
+
+            property string capturedType: ""
+            property int capturedButton: 0
+            property string capturedKeySeq: ""
+            property string capturedDisplayName: ""
+            property bool triggerValid: false
+
+            Timer {
+                id: startRecTimer
+                interval: 80
+                repeat: false
+                onTriggered: {
+                    if (triggerRecorderModal.visible) {
+                        settingsController.isRecordingTrigger = true;
+                    }
+                }
+            }
+
+            Keys.enabled: visible
+            Keys.priority: Keys.BeforeItem
+            Keys.onPressed: function(event) {
+                if (event.key === Qt.Key_Escape) {
+                    triggerRecorderModal.close();
+                    event.accepted = true;
+                    return;
+                }
+                if ((event.key === Qt.Key_Return || event.key === Qt.Key_Enter) && triggerRecorderModal.triggerValid) {
+                    settingsController.setTrigger(
+                        triggerRecorderModal.capturedType,
+                        triggerRecorderModal.capturedButton,
+                        triggerRecorderModal.capturedKeySeq,
+                        triggerRecorderModal.capturedDisplayName
+                    );
+                    triggerRecorderModal.close();
+                    event.accepted = true;
+                    return;
+                }
+                var res = settingsController.processKeyEvent(event.key, event.modifiers, event.text);
+                if (res.name && res.name.length > 0) {
+                    triggerRecorderModal.capturedType = "keyboard";
+                    triggerRecorderModal.capturedButton = 0;
+                    triggerRecorderModal.capturedKeySeq = res.sequence || "";
+                    triggerRecorderModal.capturedDisplayName = res.name;
+                    triggerRecorderModal.triggerValid = res.valid;
+                }
+                event.accepted = true;
+            }
+
+            Connections {
+                target: settingsController
+                function onTriggerCaptured(type, button, keySeq, displayName) {
+                    if (triggerRecorderModal.visible) {
+                        if (type === "mouse" && button === 272) return; // Left Click ignorieren
+                        triggerRecorderModal.capturedType = type;
+                        triggerRecorderModal.capturedButton = button;
+                        triggerRecorderModal.capturedKeySeq = keySeq;
+                        triggerRecorderModal.capturedDisplayName = displayName;
+                        triggerRecorderModal.triggerValid = true;
+                    }
+                }
+            }
+
+            function open() {
+                capturedType = "";
+                capturedButton = 0;
+                capturedKeySeq = "";
+                capturedDisplayName = "";
+                triggerValid = false;
+                visible = true;
+                triggerRecorderModal.forceActiveFocus();
+                startRecTimer.start();
+            }
+
+            function close() {
+                startRecTimer.stop();
+                settingsController.isRecordingTrigger = false;
+                visible = false;
+                root.forceActiveFocus();
+            }
+
+            MouseArea {
+                anchors.fill: parent
+                onClicked: triggerRecorderModal.close()
+            }
+
+            Rectangle {
+                width: 380
+                height: 190
+                radius: 10
+                color: (typeof karyonTheme !== "undefined") ? karyonTheme.cardBg : "#1e2227"
+                border.color: root.accentColor
+                border.width: 1
+                anchors.centerIn: parent
+
+                MouseArea {
+                    anchors.fill: parent
+                    acceptedButtons: Qt.AllButtons
+                    onPressed: function(mouse) {
+                        triggerRecorderModal.forceActiveFocus();
+                        if (mouse.button !== Qt.LeftButton) {
+                            var res = settingsController.processMouseEvent(mouse.button);
+                            if (res.valid) {
+                                triggerRecorderModal.capturedType = "mouse";
+                                triggerRecorderModal.capturedButton = res.code;
+                                triggerRecorderModal.capturedKeySeq = "";
+                                triggerRecorderModal.capturedDisplayName = res.name;
+                                triggerRecorderModal.triggerValid = true;
+                            }
+                        }
+                    }
+                }
+
+                Column {
+                    anchors.fill: parent
+                    anchors.margins: 18
+                    spacing: 12
+
+                    Text {
+                        text: "SELECT TRIGGER BUTTON OR SHORTCUT"
+                        color: root.accentColor
+                        font.pixelSize: 11
+                        font.bold: true
+                    }
+
+                    Text {
+                        text: "Click Right / Middle / Side button or press any shortcut\n(Left Click is reserved for Save / Cancel)"
+                        color: (typeof karyonTheme !== "undefined") ? karyonTheme.textSecondary : "#cdd3de"
+                        font.pixelSize: 11
+                        lineHeight: 1.3
+                    }
+
+                    Rectangle {
+                        width: parent.width
+                        height: 38
+                        radius: 6
+                        color: (typeof karyonTheme !== "undefined") ? karyonTheme.controlBg : "#282c34"
+                        border.color: triggerRecorderModal.triggerValid ? root.accentColor : ((typeof karyonTheme !== "undefined") ? karyonTheme.controlBorder : "#3e4451")
+                        border.width: 1.5
+
+                        Text {
+                            anchors.centerIn: parent
+                            text: triggerRecorderModal.capturedDisplayName.length > 0 ? triggerRecorderModal.capturedDisplayName : "Click mouse button or press key..."
+                            color: triggerRecorderModal.triggerValid ? ((typeof karyonTheme !== "undefined") ? karyonTheme.textPrimary : "#ffffff") : ((typeof karyonTheme !== "undefined") ? karyonTheme.textMuted : "#96a2b4")
+                            font.pixelSize: 13
+                            font.bold: true
+                        }
+
+                        MouseArea {
+                            anchors.fill: parent
+                            acceptedButtons: Qt.AllButtons
+                            cursorShape: Qt.PointingHandCursor
+                            onPressed: function(mouse) {
+                                triggerRecorderModal.forceActiveFocus();
+                                if (mouse.button !== Qt.LeftButton) {
+                                    var res = settingsController.processMouseEvent(mouse.button);
+                                    if (res.valid) {
+                                        triggerRecorderModal.capturedType = "mouse";
+                                        triggerRecorderModal.capturedButton = res.code;
+                                        triggerRecorderModal.capturedKeySeq = "";
+                                        triggerRecorderModal.capturedDisplayName = res.name;
+                                        triggerRecorderModal.triggerValid = true;
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    Row {
+                        anchors.right: parent.right
+                        spacing: 10
+
+                        Rectangle {
+                            width: 80
+                            height: 26
+                            radius: 4
+                            color: cancelTriggerMa.containsMouse ? ((typeof karyonTheme !== "undefined") ? karyonTheme.controlHoverBg : "#353b45") : ((typeof karyonTheme !== "undefined") ? karyonTheme.controlBg : "#282c34")
+                            border.color: (typeof karyonTheme !== "undefined") ? karyonTheme.controlBorder : "#3e4451"
+                            border.width: 1
+                            Text {
+                                anchors.centerIn: parent
+                                text: "Cancel"
+                                color: cancelTriggerMa.containsMouse ? ((typeof karyonTheme !== "undefined") ? karyonTheme.textPrimary : "#ffffff") : ((typeof karyonTheme !== "undefined") ? karyonTheme.textSecondary : "#cdd3de")
+                                font.pixelSize: 10
+                                font.bold: true
+                            }
+                            MouseArea {
+                                id: cancelTriggerMa
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: triggerRecorderModal.close()
+                            }
+                        }
+
+                        Rectangle {
+                            width: 80
+                            height: 26
+                            radius: 4
+                            color: triggerRecorderModal.triggerValid ? (saveTriggerMa.containsMouse ? root.accentHoverColor : root.accentColor) : ((typeof karyonTheme !== "undefined") ? karyonTheme.controlBg : "#353b45")
+                            opacity: triggerRecorderModal.triggerValid ? 1.0 : 0.4
+                            Text {
+                                anchors.centerIn: parent
+                                text: "Save"
+                                color: "#ffffff"
+                                font.pixelSize: 10
+                                font.bold: true
+                            }
+                            MouseArea {
+                                id: saveTriggerMa
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: triggerRecorderModal.triggerValid ? Qt.PointingHandCursor : Qt.ArrowCursor
+                                onClicked: {
+                                    if (triggerRecorderModal.triggerValid) {
+                                        settingsController.setTrigger(
+                                            triggerRecorderModal.capturedType,
+                                            triggerRecorderModal.capturedButton,
+                                            triggerRecorderModal.capturedKeySeq,
+                                            triggerRecorderModal.capturedDisplayName
+                                        );
+                                        triggerRecorderModal.close();
                                     }
                                 }
                             }

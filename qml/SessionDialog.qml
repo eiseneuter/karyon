@@ -25,8 +25,8 @@ Item {
         anchors.fill: parent
         anchors.margins: 6
         radius: 14
-        color: "#1e2227"
-        border.color: "#353b45"
+        color: (typeof karyonTheme !== "undefined") ? karyonTheme.cardBg : "#1e2227"
+        border.color: (typeof karyonTheme !== "undefined") ? karyonTheme.cardBorder : "#353b45"
         border.width: 1
 
         // Header with Icon and Title
@@ -56,7 +56,7 @@ Item {
 
                 Text {
                     text: root.titleText
-                    color: "#ffffff"
+                    color: (typeof karyonTheme !== "undefined") ? karyonTheme.textPrimary : "#ffffff"
                     font.pixelSize: 15
                     font.bold: true
                     elide: Text.ElideRight
@@ -65,7 +65,7 @@ Item {
 
                 Text {
                     text: root.subtitleText
-                    color: "#9da5b4"
+                    color: (typeof karyonTheme !== "undefined") ? karyonTheme.textSecondary : "#9da5b4"
                     font.pixelSize: 12
                     elide: Text.ElideRight
                     width: parent.width
@@ -87,14 +87,14 @@ Item {
                 width: 90
                 height: 34
                 radius: 6
-                color: cancelMa.containsMouse ? "#353b45" : "#282c34"
-                border.color: cancelMa.containsMouse ? "#4b5263" : "#3e4451"
+                color: cancelMa.containsMouse ? ((typeof karyonTheme !== "undefined") ? karyonTheme.controlHoverBg : "#353b45") : ((typeof karyonTheme !== "undefined") ? karyonTheme.controlBg : "#282c34")
+                border.color: cancelMa.containsMouse ? ((typeof karyonTheme !== "undefined") ? karyonTheme.accentHoverColor : "#4b5263") : ((typeof karyonTheme !== "undefined") ? karyonTheme.controlBorder : "#3e4451")
                 border.width: 1
 
                 Text {
                     anchors.centerIn: parent
                     text: "Cancel"
-                    color: cancelMa.containsMouse ? "#ffffff" : "#abb2bf"
+                    color: cancelMa.containsMouse ? ((typeof karyonTheme !== "undefined") ? karyonTheme.textPrimary : "#ffffff") : ((typeof karyonTheme !== "undefined") ? karyonTheme.textSecondary : "#abb2bf")
                     font.pixelSize: 12
                     font.bold: true
                 }

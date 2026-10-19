@@ -23,6 +23,7 @@ public:
     explicit KWinBridge(QObject *parent = nullptr);
     ~KWinBridge() override;
 
+    void stopDaemon();
     void queryCursor();
     void activateWindow(const QString &winId);
     void closeWindow(const QString &winId);

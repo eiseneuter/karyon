@@ -1,4 +1,5 @@
 #include "SettingsManager.h"
+#include <QColor>
 #include <algorithm>
 
 SettingsManager &SettingsManager::instance()
@@ -18,6 +19,20 @@ void SettingsManager::load()
 {
     m_triggerHoldMs = m_settings.value(QStringLiteral("trigger_hold_ms"), 120).toInt();
     m_triggerHoldMs = std::clamp(m_triggerHoldMs, 50, 800);
+
+    m_triggerType = m_settings.value(QStringLiteral("trigger_type"), QStringLiteral("mouse")).toString();
+    if (m_triggerType != QLatin1String("mouse") && m_triggerType != QLatin1String("keyboard")) {
+        m_triggerType = QStringLiteral("mouse");
+    }
+    m_triggerButton = m_settings.value(QStringLiteral("trigger_button"), 273).toInt();
+    if (m_triggerType == QLatin1String("mouse") && m_triggerButton <= 272) {
+        m_triggerButton = 273;
+    }
+    m_triggerKeySeq = m_settings.value(QStringLiteral("trigger_key_seq"), QString()).toString();
+    m_triggerDisplayName = m_settings.value(QStringLiteral("trigger_display_name"), QStringLiteral("Right Click")).toString();
+    if (m_triggerDisplayName == QLatin1String("Left Click")) {
+        m_triggerDisplayName = QStringLiteral("Right Click");
+    }
 
     m_gameModeEnabled = m_settings.value(QStringLiteral("game_mode_enabled"), true).toBool();
 
@@ -64,6 +79,11 @@ void SettingsManager::load()
         m_dateSeparator = QStringLiteral(".");
     }
     m_timeFormatIndex = std::clamp(m_settings.value(QStringLiteral("time_format_index"), 0).toInt(), 0, 1);
+    m_colorSchemeIndex = std::clamp(m_settings.value(QStringLiteral("color_scheme_index"), 0).toInt(), 0, 6);
+    m_customBaseColorHex = m_settings.value(QStringLiteral("custom_base_color_hex"), QStringLiteral("#22262d")).toString();
+    if (!QColor::isValidColorName(m_customBaseColorHex)) {
+        m_customBaseColorHex = QStringLiteral("#22262d");
+    }
 
     m_gestureLeft = m_settings.value(QStringLiteral("gesture_left"), QStringLiteral("select_all")).toString();
     m_gestureRight = m_settings.value(QStringLiteral("gesture_right"), QStringLiteral("paste")).toString();
@@ -86,6 +106,10 @@ void SettingsManager::load()
 void SettingsManager::save()
 {
     m_settings.setValue(QStringLiteral("trigger_hold_ms"), m_triggerHoldMs);
+    m_settings.setValue(QStringLiteral("trigger_type"), m_triggerType);
+    m_settings.setValue(QStringLiteral("trigger_button"), m_triggerButton);
+    m_settings.setValue(QStringLiteral("trigger_key_seq"), m_triggerKeySeq);
+    m_settings.setValue(QStringLiteral("trigger_display_name"), m_triggerDisplayName);
     m_settings.setValue(QStringLiteral("game_mode_enabled"), m_gameModeEnabled);
     m_settings.setValue(QStringLiteral("overlay_mouse_speed"), m_overlayMouseSpeed);
     m_settings.setValue(QStringLiteral("overlay_scale"), m_overlayScale);
@@ -108,6 +132,8 @@ void SettingsManager::save()
     m_settings.setValue(QStringLiteral("date_format_index"), m_dateFormatIndex);
     m_settings.setValue(QStringLiteral("date_separator"), m_dateSeparator);
     m_settings.setValue(QStringLiteral("time_format_index"), m_timeFormatIndex);
+    m_settings.setValue(QStringLiteral("color_scheme_index"), m_colorSchemeIndex);
+    m_settings.setValue(QStringLiteral("custom_base_color_hex"), m_customBaseColorHex);
     m_settings.setValue(QStringLiteral("gestures_enabled"), m_gesturesEnabled);
     m_settings.setValue(QStringLiteral("gesture_left"), m_gestureLeft);
     m_settings.setValue(QStringLiteral("gesture_right"), m_gestureRight);
@@ -136,6 +162,66 @@ void SettingsManager::setTriggerHoldMs(int ms)
     int clamped = std::clamp(ms, 50, 800);
     if (m_triggerHoldMs != clamped) {
         m_triggerHoldMs = clamped;
+        save();
+        emit settingsChanged();
+    }
+}
+
+QString SettingsManager::triggerType() const
+{
+    return m_triggerType;
+}
+
+void SettingsManager::setTriggerType(const QString &type)
+{
+    if (m_triggerType != type) {
+        m_triggerType = type;
+        save();
+        emit settingsChanged();
+    }
+}
+
+int SettingsManager::triggerButton() const
+{
+    return m_triggerButton;
+}
+
+void SettingsManager::setTriggerButton(int code)
+{
+    if (m_triggerType == QLatin1String("mouse") && code <= 272) {
+        code = 273;
+    }
+    if (m_triggerButton != code) {
+        m_triggerButton = code;
+        save();
+        emit settingsChanged();
+    }
+}
+
+QString SettingsManager::triggerKeySeq() const
+{
+    return m_triggerKeySeq;
+}
+
+void SettingsManager::setTriggerKeySeq(const QString &seq)
+{
+    if (m_triggerKeySeq != seq) {
+        m_triggerKeySeq = seq;
+        save();
+        emit settingsChanged();
+    }
+}
+
+QString SettingsManager::triggerDisplayName() const
+{
+    return m_triggerDisplayName;
+}
+
+void SettingsManager::setTriggerDisplayName(const QString &name)
+{
+    if (name == QLatin1String("Left Click")) return;
+    if (m_triggerDisplayName != name) {
+        m_triggerDisplayName = name;
         save();
         emit settingsChanged();
     }
@@ -479,6 +565,35 @@ void SettingsManager::setTimeFormatIndex(int index)
     }
 }
 
+int SettingsManager::colorSchemeIndex() const
+{
+    return m_colorSchemeIndex;
+}
+
+void SettingsManager::setColorSchemeIndex(int index)
+{
+    int clamped = std::clamp(index, 0, 6);
+    if (m_colorSchemeIndex != clamped) {
+        m_colorSchemeIndex = clamped;
+        save();
+        emit settingsChanged();
+    }
+}
+
+QString SettingsManager::customBaseColorHex() const
+{
+    return m_customBaseColorHex;
+}
+
+void SettingsManager::setCustomBaseColorHex(const QString &hex)
+{
+    if (m_customBaseColorHex != hex && QColor::isValidColorName(hex)) {
+        m_customBaseColorHex = hex;
+        save();
+        emit settingsChanged();
+    }
+}
+
 QString SettingsManager::gestureLeft() const { return m_gestureLeft; }
 void SettingsManager::setGestureLeft(const QString &action)
 {
@@ -662,6 +777,10 @@ void SettingsManager::setGestureCustomKeySequence(int direction, const QString &
 void SettingsManager::resetDefaults()
 {
     m_triggerHoldMs = 120;
+    m_triggerType = QStringLiteral("mouse");
+    m_triggerButton = 273; // BTN_RIGHT
+    m_triggerKeySeq.clear();
+    m_triggerDisplayName = QStringLiteral("Right Click");
     m_gameModeEnabled = true;
     m_overlayMouseSpeed = -0.5;
     m_overlayScale = 1.0;
@@ -684,6 +803,8 @@ void SettingsManager::resetDefaults()
     m_dateFormatIndex = 0;
     m_dateSeparator = QStringLiteral(".");
     m_timeFormatIndex = 0;
+    m_colorSchemeIndex = 0;
+    m_customBaseColorHex = QStringLiteral("#22262d");
 
     m_gesturesEnabled = true;
     m_gestureLeft = QStringLiteral("select_all");

@@ -109,6 +109,12 @@ Item {
 
             ctx.save();
 
+            var trailCol = (typeof karyonTheme !== "undefined") ? karyonTheme.trailColor : "#37d0ff";
+            var tc = Qt.color(trailCol);
+            var tr = Math.round(tc.r * 255);
+            var tg = Math.round(tc.g * 255);
+            var tb = Math.round(tc.b * 255);
+
             // Eleganter Leuchtschweif mit sichtbarerem Kopf und weichem Auslauf (von hinten nach vorne)
             for (var i = n - 1; i >= 0; --i) {
                 var t = i / (n - 1); // 0.0 (Spitze an der Maus) bis 1.0 (Schweifende)
@@ -126,12 +132,12 @@ Item {
                 // Angenehm leuchtende Deckkraft
                 var alpha = (1.0 - 0.70 * t) * 0.75 * root.globalFade;
 
-                // Unscharfer Radialgradient (lebendiges cyanblaues Leuchten)
+                // Unscharfer Radialgradient (dynamisch an Farbschema angepasst)
                 var grad = ctx.createRadialGradient(px, py, 0, px, py, r);
-                grad.addColorStop(0.0,  "rgba(240, 252, 255, " + (0.85 * alpha) + ")");
-                grad.addColorStop(0.35, "rgba(100, 215, 255, " + (0.58 * alpha) + ")");
-                grad.addColorStop(0.70, "rgba(45, 150, 255, "  + (0.28 * alpha) + ")");
-                grad.addColorStop(1.0,  "rgba(20, 100, 255, 0.0)");
+                grad.addColorStop(0.0,  "rgba(255, 255, 255, " + (0.90 * alpha) + ")");
+                grad.addColorStop(0.35, "rgba(" + tr + ", " + tg + ", " + tb + ", " + (0.65 * alpha) + ")");
+                grad.addColorStop(0.70, "rgba(" + Math.round(tr * 0.75) + ", " + Math.round(tg * 0.75) + ", " + Math.round(tb * 0.75) + ", " + (0.30 * alpha) + ")");
+                grad.addColorStop(1.0,  "rgba(" + tr + ", " + tg + ", " + tb + ", 0.0)");
 
                 ctx.fillStyle = grad;
                 ctx.beginPath();

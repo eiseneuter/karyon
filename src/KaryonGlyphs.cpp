@@ -1,4 +1,5 @@
 #include "KaryonGlyphs.h"
+#include "ThemeManager.h"
 #include "ProcessUtils.h"
 
 #include <QPainter>
@@ -56,7 +57,7 @@ bool KaryonGlyphs::hasGlyph(const QString &name)
             n == QLatin1String("karyon"));
 }
 
-QPixmap KaryonGlyphs::pixmap(const QString &name, int size)
+QPixmap KaryonGlyphs::pixmap(const QString &name, int size, const QColor &color)
 {
     QPixmap pix(size, size);
     pix.fill(Qt::transparent);
@@ -68,7 +69,12 @@ QPixmap KaryonGlyphs::pixmap(const QString &name, int size)
     double s = static_cast<double>(size) / 64.0;
     p.scale(s, s);
 
-    const QColor white(255, 255, 255);
+    QColor glyphColor = color;
+    if (!glyphColor.isValid()) {
+        bool isLight = ThemeManager::instance().isLight();
+        glyphColor = isLight ? QColor(44, 49, 58) : QColor(255, 255, 255);
+    }
+    const QColor white = glyphColor;
     QPen pen(white, 3.2);
     pen.setCapStyle(Qt::RoundCap);
     pen.setJoinStyle(Qt::RoundJoin);
@@ -371,17 +377,19 @@ QPixmap KaryonGlyphs::pixmap(const QString &name, int size)
     return pix;
 }
 
-QIcon KaryonGlyphs::icon(const QString &name, int size)
+QIcon KaryonGlyphs::icon(const QString &name, int size, const QColor &color)
 {
-    return QIcon(pixmap(name, size));
+    return QIcon(pixmap(name, size, color));
 }
 
 QString KaryonGlyphs::ensureGlyphCached(const QString &name, const QString &cacheDir, int size)
 {
     static QSet<QString> s_generated;
     QString norm = normalizeGlyphName(name);
+    bool isLight = ThemeManager::instance().isLight();
+    QString modeTag = isLight ? QStringLiteral("light_") : QStringLiteral("dark_");
     QDir().mkpath(cacheDir);
-    QString path = cacheDir + QStringLiteral("/glyph_") + norm + QStringLiteral(".png");
+    QString path = cacheDir + QStringLiteral("/glyph_") + modeTag + norm + QStringLiteral(".png");
     if (!s_generated.contains(path) || !QFile::exists(path)) {
         QPixmap pix = pixmap(norm, size);
         pix.save(path, "PNG");

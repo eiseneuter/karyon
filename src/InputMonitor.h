@@ -35,7 +35,15 @@ public:
     bool isGameModeActive() const { return m_gameModeActive.load(); }
 
     void setGameModeEnabled(bool enabled) { m_gameModeEnabled.store(enabled); }
-    bool isGameModeEnabled() const { return m_gameModeEnabled.load(); }
+    void setTrigger(const QString &type, int button, const QString &keySeq);
+    int triggerType() const { return m_triggerType.load(); }
+    int triggerButton() const { return m_triggerButton.load(); }
+
+    void setInhibited(bool inhibited) { m_inhibited.store(inhibited); }
+    bool isInhibited() const { return m_inhibited.load(); }
+
+    void setRecordingTrigger(bool rec) { m_isRecordingTrigger.store(rec); }
+    bool isRecordingTrigger() const { return m_isRecordingTrigger.load(); }
 
     // Gesture detection constants
     static constexpr double GESTURE_MIN_DISPLACEMENT = 60.0;
@@ -43,6 +51,8 @@ public:
 
 signals:
     void rightPressed();
+    void triggerPressed();
+    void inputCaptured(const QString &type, int button, const QString &keySeq, const QString &displayName);
     void holdTriggered(int deltaX, int deltaY);
     void holdReleased();
     void holdCancelled();
@@ -92,8 +102,14 @@ private:
     std::atomic<double> m_overlayMouseSpeed{-0.5};
     std::atomic<bool> m_gameModeActive{false};
     std::atomic<bool> m_gameModeEnabled{true};
+    std::atomic<int> m_triggerType{0}; // 0 = mouse, 1 = keyboard
+    std::atomic<int> m_triggerButton{273}; // BTN_RIGHT
+    std::vector<int> m_triggerKeyCodes;
+    std::atomic<bool> m_inhibited{false};
+    std::atomic<bool> m_isRecordingTrigger{false};
     std::thread m_thread;
     std::vector<DeviceInfo> m_devices;
+    std::vector<DeviceInfo> m_keyboards;
     std::string m_lastReportedMouse;
     std::chrono::steady_clock::time_point m_lastReportedTime{};
     std::chrono::steady_clock::time_point m_uinputCreatedTime{};

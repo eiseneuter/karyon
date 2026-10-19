@@ -2,6 +2,7 @@
 #include "InputMonitor.h"
 #include "KWinBridge.h"
 #include "SettingsManager.h"
+#include "ThemeManager.h"
 
 #include <QQuickView>
 #include <QQuickItem>
@@ -148,6 +149,7 @@ void CircleOverlay::prewarm()
     m_view->rootContext()->setContextProperty(QStringLiteral("timeFormatIndex"), SettingsManager::instance().timeFormatIndex());
     m_view->rootContext()->setContextProperty(QStringLiteral("detectedLocaleName"), QLocale().name());
     m_view->rootContext()->setContextProperty(QStringLiteral("overlayController"), this);
+    m_view->rootContext()->setContextProperty(QStringLiteral("karyonTheme"), &ThemeManager::instance());
 
     m_view->setSource(QUrl(QStringLiteral("qrc:/qt/qml/karyon/qml/Circle.qml")));
     m_view->create();
@@ -4082,6 +4084,7 @@ void CircleOverlay::handleHubWheel(int delta)
     }
 
     refreshCurrentMode();
+    updateAim(m_lastAimX, m_lastAimY);
 }
 
 void CircleOverlay::resetToWindowsMode()

@@ -16,6 +16,9 @@ find_package(KF6Service REQUIRED)
 find_package(KF6KIO REQUIRED)
 
 qt_policy(SET QTP0001 NEW)
+if(Qt6_VERSION VERSION_GREATER_EQUAL "6.8.0")
+    qt_policy(SET QTP0004 NEW)
+endif()
 
 qt_add_executable(karyon
     src/main.cpp
@@ -61,6 +64,8 @@ qt_add_executable(karyon
     src/InfoDialogController.cpp
     src/GameModeDetector.h
     src/GameModeDetector.cpp
+    src/ThemeManager.h
+    src/ThemeManager.cpp
 )
 
 qt_add_qml_module(karyon

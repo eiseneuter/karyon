@@ -85,6 +85,107 @@ bool isMouseDevice(int fd)
     return true;
 }
 
+bool isKeyboardDevice(int fd)
+{
+    char name[256] = {0};
+    if (ioctl(fd, EVIOCGNAME(sizeof(name)), name) >= 0) {
+        std::string sName(name);
+        if (sName.find("karyon-virtual") != std::string::npos) {
+            return false;
+        }
+        std::string lowerName = sName;
+        for (char &c : lowerName) c = std::tolower(c);
+        if (lowerName.find("power button") != std::string::npos ||
+            lowerName.find("sleep button") != std::string::npos ||
+            lowerName.find("video bus") != std::string::npos) {
+            return false;
+        }
+    }
+
+    unsigned long evBits[(EV_CNT + sizeof(long) * 8 - 1) / (sizeof(long) * 8)] = {0};
+    if (ioctl(fd, EVIOCGBIT(0, sizeof(evBits)), evBits) < 0) return false;
+    auto testBit = [](const unsigned long *arr, int bit) {
+        return (arr[bit / (sizeof(long) * 8)] & (1UL << (bit % (sizeof(long) * 8)))) != 0;
+    };
+    if (!testBit(evBits, EV_KEY)) return false;
+
+    // Must NOT have REL_X and REL_Y (otherwise it's a mouse/pointer)
+    unsigned long relBits[(REL_CNT + sizeof(long) * 8 - 1) / (sizeof(long) * 8)] = {0};
+    if (ioctl(fd, EVIOCGBIT(EV_REL, sizeof(relBits)), relBits) >= 0) {
+        if (testBit(relBits, REL_X) && testBit(relBits, REL_Y)) {
+            return false;
+        }
+    }
+
+    unsigned long keyBits[(KEY_CNT + sizeof(long) * 8 - 1) / (sizeof(long) * 8)] = {0};
+    if (ioctl(fd, EVIOCGBIT(EV_KEY, sizeof(keyBits)), keyBits) < 0) return false;
+
+    // Keyboards must have standard typing keys
+    if (!testBit(keyBits, KEY_A) || !testBit(keyBits, KEY_SPACE) || !testBit(keyBits, KEY_ENTER)) {
+        return false;
+    }
+
+    return true;
+}
+
+QString mouseButtonNameFromEvdev(int code)
+{
+    switch (code) {
+    case BTN_LEFT:    return QStringLiteral("Left Click");
+    case BTN_RIGHT:   return QStringLiteral("Right Click");
+    case BTN_MIDDLE:  return QStringLiteral("Middle Click");
+    case BTN_SIDE:    return QStringLiteral("Mouse Back (Button 4)");
+    case BTN_EXTRA:   return QStringLiteral("Mouse Forward (Button 5)");
+    case BTN_FORWARD: return QStringLiteral("Mouse Button 6");
+    case BTN_BACK:    return QStringLiteral("Mouse Button 7");
+    case BTN_TASK:    return QStringLiteral("Mouse Task (Button 8)");
+    default:
+        if (code >= BTN_MOUSE && code < BTN_JOYSTICK) {
+            return QStringLiteral("Mouse Button %1").arg(code - BTN_MOUSE + 1);
+        }
+        return QStringLiteral("Button %1").arg(code);
+    }
+}
+
+QString keyboardKeyNameFromEvdev(int code)
+{
+    if (code >= KEY_A && code <= KEY_Z) {
+        static const char *letters[] = {
+            "A", "B", "C", "D", "E", "F", "G", "H", "I", "J",
+            "K", "L", "M", "N", "O", "P", "Q", "R", "S", "T",
+            "U", "V", "W", "X", "Y", "Z"
+        };
+        return QString::fromLatin1(letters[code - KEY_A]);
+    }
+    if (code >= KEY_1 && code <= KEY_9) {
+        return QString::number(code - KEY_1 + 1);
+    }
+    if (code == KEY_0) return QStringLiteral("0");
+    if (code >= KEY_F1 && code <= KEY_F12) {
+        return QStringLiteral("F%1").arg(code - KEY_F1 + 1);
+    }
+    switch (code) {
+    case KEY_SPACE: return QStringLiteral("Space");
+    case KEY_ENTER: return QStringLiteral("Enter");
+    case KEY_ESC: return QStringLiteral("Esc");
+    case KEY_TAB: return QStringLiteral("Tab");
+    case KEY_BACKSPACE: return QStringLiteral("Backspace");
+    case KEY_DELETE: return QStringLiteral("Entf");
+    case KEY_INSERT: return QStringLiteral("Einfg");
+    case KEY_HOME: return QStringLiteral("Pos1");
+    case KEY_END: return QStringLiteral("Ende");
+    case KEY_PAGEUP: return QStringLiteral("BildAuf");
+    case KEY_PAGEDOWN: return QStringLiteral("BildAb");
+    case KEY_LEFT: return QStringLiteral("Links");
+    case KEY_RIGHT: return QStringLiteral("Rechts");
+    case KEY_UP: return QStringLiteral("Hoch");
+    case KEY_DOWN: return QStringLiteral("Runter");
+    case KEY_CAPSLOCK: return QStringLiteral("Caps Lock");
+    case KEY_PRINT: return QStringLiteral("Druck");
+    default: return QString();
+    }
+}
+
 bool hasPressedKeysOrButtons(int fd)
 {
     unsigned long keyBits[(KEY_CNT + sizeof(long) * 8 - 1) / (sizeof(long) * 8)] = {0};
@@ -128,8 +229,35 @@ InputMonitor::~InputMonitor()
 
 void InputMonitor::setOverlayMouseSpeed(double speed)
 {
-    m_overlayMouseSpeed.store(speed);
-    std::cout << "[InputMonitor] Overlay mouse speed updated: " << speed << "\n";
+    double oldSpeed = m_overlayMouseSpeed.exchange(speed);
+    if (std::abs(oldSpeed - speed) > 0.01) {
+        std::cout << "[InputMonitor] Overlay mouse speed updated: " << speed << "\n";
+    }
+}
+
+void InputMonitor::setTrigger(const QString &type, int button, const QString &keySeq)
+{
+    if (type == QLatin1String("keyboard")) {
+        m_triggerType.store(1);
+    } else {
+        m_triggerType.store(0);
+    }
+    m_triggerButton.store(button > 0 ? button : 273);
+
+    m_triggerKeyCodes.clear();
+    if (!keySeq.isEmpty()) {
+        const QStringList parts = keySeq.split(QLatin1Char(','), Qt::SkipEmptyParts);
+        for (const QString &p : parts) {
+            bool ok = false;
+            int k = p.trimmed().toInt(&ok);
+            if (ok && k > 0) {
+                m_triggerKeyCodes.push_back(k);
+            }
+        }
+    }
+    std::cout << "[InputMonitor] Trigger configured: type=" << (m_triggerType.load() == 1 ? "keyboard" : "mouse")
+              << ", button=" << m_triggerButton.load()
+              << ", keySeq=" << keySeq.toStdString() << "\n";
 }
 
 bool InputMonitor::start()
@@ -574,6 +702,14 @@ void InputMonitor::scanDevices()
 
             std::cout << "[InputMonitor] Mouse registered: " << entry.path().string() 
                       << " [" << sName << "] (pending safe grab)\n";
+        } else if (isKeyboardDevice(fd)) {
+            char devName[256] = {0};
+            ioctl(fd, EVIOCGNAME(sizeof(devName)), devName);
+            std::string sName = (devName[0] != '\0') ? std::string(devName) : entry.path().string();
+
+            m_keyboards.push_back({fd, entry.path().string(), false, sName});
+            std::cout << "[InputMonitor] Keyboard registered: " << entry.path().string()
+                      << " [" << sName << "] (passive monitoring)\n";
         } else {
             close(fd);
         }
@@ -605,12 +741,31 @@ bool InputMonitor::rescanDevices()
         }
     }
 
+    for (auto it = m_keyboards.begin(); it != m_keyboards.end();) {
+        bool alive = true;
+        char name[256];
+        if (it->fd < 0 || !fs::exists(it->path) || fcntl(it->fd, F_GETFD) < 0 ||
+            ioctl(it->fd, EVIOCGNAME(sizeof(name)), name) < 0) {
+            alive = false;
+        }
+        if (!alive) {
+            std::cout << "[InputMonitor] Keyboard disconnected/invalidated: " << it->path << "\n";
+            if (it->fd >= 0) {
+                close(it->fd);
+            }
+            it = m_keyboards.erase(it);
+            changed = true;
+        } else {
+            ++it;
+        }
+    }
+
     if (m_devices.empty() && changed) {
         m_lastReportedMouse.clear();
         emit mouseDisconnected();
     }
 
-    // 2. /dev/input nach neu eingesteckten Mäusen durchsuchen
+    // 2. /dev/input nach neu eingesteckten Geräten durchsuchen
     std::error_code ec;
     std::string newlyConnectedName;
     if (fs::exists("/dev/input", ec)) {
@@ -624,6 +779,14 @@ bool InputMonitor::rescanDevices()
                 if (dev.path == path) {
                     alreadyOpened = true;
                     break;
+                }
+            }
+            if (!alreadyOpened) {
+                for (const auto &kbd : m_keyboards) {
+                    if (kbd.path == path) {
+                        alreadyOpened = true;
+                        break;
+                    }
                 }
             }
             if (alreadyOpened) continue;
@@ -642,6 +805,15 @@ bool InputMonitor::rescanDevices()
 
                 std::cout << "[InputMonitor] Mouse registered (hotplug): " << path 
                           << " [" << sName << "] (pending safe grab)\n";
+            } else if (isKeyboardDevice(fd)) {
+                char devName[256] = {0};
+                ioctl(fd, EVIOCGNAME(sizeof(devName)), devName);
+                std::string sName = (devName[0] != '\0') ? std::string(devName) : path;
+
+                m_keyboards.push_back({fd, path, false, sName});
+                changed = true;
+                std::cout << "[InputMonitor] Keyboard registered (hotplug): " << path
+                          << " [" << sName << "] (passive monitoring)\n";
             } else {
                 close(fd);
             }
@@ -681,6 +853,13 @@ void InputMonitor::cleanup()
     m_devices.clear();
     m_lastReportedMouse.clear();
 
+    for (auto &kbd : m_keyboards) {
+        if (kbd.fd >= 0) {
+            close(kbd.fd);
+        }
+    }
+    m_keyboards.clear();
+
     if (m_uinputFd >= 0) {
         ioctl(m_uinputFd, UI_DEV_DESTROY);
         close(m_uinputFd);
@@ -718,6 +897,7 @@ void InputMonitor::workerLoop()
     bool aimDirty = false;
     double subpixelX = 0.0;
     double subpixelY = 0.0;
+    int wheelHiResAccum = 0;
 
     m_inotifyFd = inotify_init1(IN_NONBLOCK | IN_CLOEXEC);
     if (m_inotifyFd >= 0) {
@@ -730,12 +910,16 @@ void InputMonitor::workerLoop()
         for (const auto &dev : m_devices) {
             pfds.push_back({dev.fd, POLLIN, 0});
         }
+        for (const auto &kbd : m_keyboards) {
+            pfds.push_back({kbd.fd, POLLIN, 0});
+        }
         if (m_inotifyFd >= 0) {
             pfds.push_back({m_inotifyFd, POLLIN, 0});
         }
     };
     rebuildPfds();
 
+    std::vector<bool> activeKeys(KEY_CNT, false);
     int pendingHotplugRetries = 0;
     auto lastHotplugCheck = std::chrono::steady_clock::now();
     auto lastIdleScan = std::chrono::steady_clock::now();
@@ -753,6 +937,8 @@ void InputMonitor::workerLoop()
         int ret = poll(pfds.data(), pfds.size(), pollTimeout);
 
         auto now = std::chrono::steady_clock::now();
+        int currentTriggerBtn = m_triggerButton.load();
+        int cancelBtn = (currentTriggerBtn == BTN_LEFT) ? BTN_RIGHT : BTN_LEFT;
 
         if (state == State::Pending) {
             auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - pressTime).count();
@@ -762,6 +948,7 @@ void InputMonitor::workerLoop()
                     emit gestureFinished();
                 }
                 state = State::Triggered;
+                wheelHiResAccum = 0;
                 subpixelX = 0.0;
                 subpixelY = 0.0;
                 aimX = deltaX;
@@ -777,7 +964,7 @@ void InputMonitor::workerLoop()
                 pendingGestureDir = -1;
                 for (const auto &dev : m_devices) {
                     if (dev.grabbed && m_uinputFd >= 0) {
-                        emitEvent(m_uinputFd, EV_KEY, BTN_RIGHT, 1);
+                        emitEvent(m_uinputFd, EV_KEY, static_cast<uint16_t>(currentTriggerBtn), 1);
                         emitSyn(m_uinputFd);
                         break;
                     }
@@ -837,7 +1024,7 @@ void InputMonitor::workerLoop()
         // 2. Trennungs- und Fehlererkennung an FDs
         for (size_t i = 0; i < m_devices.size() && i < pfds.size(); ++i) {
             if (pfds[i].revents & (POLLHUP | POLLERR | POLLNVAL)) {
-                std::cout << "[InputMonitor] Poll hangup on " << m_devices[i].path << "\n";
+                std::cout << "[InputMonitor] Poll hangup on mouse " << m_devices[i].path << "\n";
                 if (m_devices[i].grabbed) ioctl(m_devices[i].fd, EVIOCGRAB, 0);
                 close(m_devices[i].fd);
                 m_devices.erase(m_devices.begin() + i);
@@ -850,11 +1037,114 @@ void InputMonitor::workerLoop()
             }
         }
 
+        size_t kbdOffset = m_devices.size();
+        for (size_t i = 0; i < m_keyboards.size() && (kbdOffset + i) < pfds.size(); ++i) {
+            if (pfds[kbdOffset + i].revents & (POLLHUP | POLLERR | POLLNVAL)) {
+                std::cout << "[InputMonitor] Poll hangup on keyboard " << m_keyboards[i].path << "\n";
+                close(m_keyboards[i].fd);
+                m_keyboards.erase(m_keyboards.begin() + i);
+                needsRebuild = true;
+                break;
+            }
+        }
+
         if (needsRebuild) {
             rebuildPfds();
             continue;
         }
 
+        // Trigger-Aufnahme-Modus: Alle Mausklicks und Tastendrücke für Trigger erfassen
+        if (m_isRecordingTrigger.load()) {
+            for (size_t i = 0; i < m_devices.size() && i < pfds.size(); ++i) {
+                if (!(pfds[i].revents & POLLIN)) continue;
+                auto &dev = m_devices[i];
+                struct input_event events[64];
+                ssize_t bytes = read(dev.fd, events, sizeof(events));
+                if (bytes <= 0) continue;
+                size_t cnt = bytes / sizeof(struct input_event);
+                for (size_t k = 0; k < cnt; ++k) {
+                    const auto &ev = events[k];
+                    // BTN_LEFT (272) ist für die UI-Bedienung reserviert - niemals als Trigger erfassen!
+                    if (ev.type == EV_KEY && ev.value == 1 && ev.code > BTN_LEFT && ev.code < BTN_JOYSTICK) {
+                        QString name = mouseButtonNameFromEvdev(ev.code);
+                        emit inputCaptured(QStringLiteral("mouse"), ev.code, QString(), name);
+                    }
+                }
+                if (dev.grabbed && m_uinputFd >= 0) {
+                    [[maybe_unused]] auto w = write(m_uinputFd, events, bytes);
+                }
+            }
+            for (size_t i = 0; i < m_keyboards.size() && (kbdOffset + i) < pfds.size(); ++i) {
+                if (!(pfds[kbdOffset + i].revents & POLLIN)) continue;
+                auto &kbd = m_keyboards[i];
+                struct input_event events[64];
+                ssize_t bytes = read(kbd.fd, events, sizeof(events));
+                if (bytes <= 0) continue;
+                size_t cnt = bytes / sizeof(struct input_event);
+                for (size_t k = 0; k < cnt; ++k) {
+                    const auto &ev = events[k];
+                    if (ev.type == EV_KEY) {
+                        if (ev.code < KEY_CNT) activeKeys[ev.code] = (ev.value != 0);
+                        if (ev.value == 1) {
+                            if (ev.code != KEY_LEFTCTRL && ev.code != KEY_RIGHTCTRL &&
+                                ev.code != KEY_LEFTALT && ev.code != KEY_RIGHTALT &&
+                                ev.code != KEY_LEFTSHIFT && ev.code != KEY_RIGHTSHIFT &&
+                                ev.code != KEY_LEFTMETA && ev.code != KEY_RIGHTMETA) {
+                                QStringList parts;
+                                std::vector<int> kseq;
+                                if (activeKeys[KEY_LEFTCTRL] || activeKeys[KEY_RIGHTCTRL]) {
+                                    parts << QStringLiteral("Strg");
+                                    kseq.push_back(KEY_LEFTCTRL);
+                                }
+                                if (activeKeys[KEY_LEFTALT] || activeKeys[KEY_RIGHTALT]) {
+                                    parts << QStringLiteral("Alt");
+                                    kseq.push_back(KEY_LEFTALT);
+                                }
+                                if (activeKeys[KEY_LEFTSHIFT] || activeKeys[KEY_RIGHTSHIFT]) {
+                                    parts << QStringLiteral("Shift");
+                                    kseq.push_back(KEY_LEFTSHIFT);
+                                }
+                                if (activeKeys[KEY_LEFTMETA] || activeKeys[KEY_RIGHTMETA]) {
+                                    parts << QStringLiteral("Super");
+                                    kseq.push_back(KEY_LEFTMETA);
+                                }
+                                QString kName = keyboardKeyNameFromEvdev(ev.code);
+                                if (!kName.isEmpty()) {
+                                    parts << kName;
+                                    kseq.push_back(ev.code);
+                                    QStringList seqStrs;
+                                    for (int sk : kseq) seqStrs << QString::number(sk);
+                                    emit inputCaptured(QStringLiteral("keyboard"), 0, seqStrs.join(QLatin1Char(',')), parts.join(QLatin1Char('+')));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            continue;
+        }
+
+        // Inhibited Modus: Einstellungen-Fenster ist offen -> volle Weiterleitung ohne Trigger-Interzeption
+        if (m_inhibited.load()) {
+            for (size_t i = 0; i < m_devices.size() && i < pfds.size(); ++i) {
+                if (!(pfds[i].revents & POLLIN)) continue;
+                auto &dev = m_devices[i];
+                struct input_event events[64];
+                ssize_t bytes = read(dev.fd, events, sizeof(events));
+                if (bytes <= 0) continue;
+                if (dev.grabbed && m_uinputFd >= 0) {
+                    [[maybe_unused]] auto w = write(m_uinputFd, events, bytes);
+                }
+            }
+            for (size_t i = 0; i < m_keyboards.size() && (kbdOffset + i) < pfds.size(); ++i) {
+                if (!(pfds[kbdOffset + i].revents & POLLIN)) continue;
+                struct input_event events[64];
+                [[maybe_unused]] auto bytes = read(m_keyboards[i].fd, events, sizeof(events));
+            }
+            continue;
+        }
+
+        // 3. Physische Maus-Events verarbeiten
         for (size_t i = 0; i < m_devices.size() && i < pfds.size(); ++i) {
             if (!(pfds[i].revents & POLLIN)) continue;
 
@@ -877,13 +1167,11 @@ void InputMonitor::workerLoop()
                 continue;
             }
 
-            // Solange das Gerät noch auf den sicheren EVIOCGRAB wartet (während der ersten 250ms nach
-            // uinput-Start oder solange noch eine Maustaste vom Startklick gehalten wird), laufen alle
-            // Klicks direkt über das physische Gerät an KWin/libinput. Wir verwerfen die gelesenen
-            // Events hier nur aus dem Puffer und prüfen sofort, ob die Taste inzwischen losgelassen wurde.
             if (!dev.grabbed && m_uinputFd >= 0) {
                 tryGrabPendingDevices();
-                continue;
+                if (!dev.grabbed) {
+                    continue;
+                }
             }
 
             int32_t passthruRelX = 0;
@@ -977,11 +1265,11 @@ void InputMonitor::workerLoop()
                     flushTriggeredRel();
                 }
 
-                // Linksklick während gedrückter rechter Maustaste -> Schließt Overlay sofort!
-                if (ev.type == EV_KEY && ev.code == BTN_LEFT) {
+                // Cancel-Taste (Standard: Linksklick; falls Trigger Linksklick ist: Rechtsklick)
+                if (ev.type == EV_KEY && ev.code == cancelBtn) {
                     m_leftDown.store(ev.value == 1);
                     if (state == State::Triggered) {
-                        if (ev.value == 1) { // Left Pressed
+                        if (ev.value == 1) { // Pressed
                             state = State::Cancelled;
                             pendingGestureDir = -1;
                             if (trailActive) {
@@ -1012,9 +1300,9 @@ void InputMonitor::workerLoop()
                             }
                             // Replay beider Klicks als normaler Doppel-/Akkordklick
                             if (dev.grabbed && m_uinputFd >= 0) {
-                                emitEvent(m_uinputFd, EV_KEY, BTN_RIGHT, 1);
+                                emitEvent(m_uinputFd, EV_KEY, static_cast<uint16_t>(currentTriggerBtn), 1);
                                 emitSyn(m_uinputFd);
-                                emitEvent(m_uinputFd, EV_KEY, BTN_LEFT, 1);
+                                emitEvent(m_uinputFd, EV_KEY, static_cast<uint16_t>(cancelBtn), 1);
                                 emitSyn(m_uinputFd);
                             }
                             continue;
@@ -1022,10 +1310,11 @@ void InputMonitor::workerLoop()
                     }
                 }
 
-                // Mittelklick während gedrückter rechter Maustaste -> Fenstermanipulation
-                if (ev.type == EV_KEY && ev.code == BTN_MIDDLE) {
+                // Mittelklick-Aktion (oder Sekundäraktion falls Trigger BTN_MIDDLE ist)
+                int actionBtn = (currentTriggerBtn == BTN_MIDDLE) ? BTN_RIGHT : BTN_MIDDLE;
+                if (ev.type == EV_KEY && ev.code == actionBtn && currentTriggerBtn != actionBtn) {
                     if (state == State::Triggered) {
-                        if (ev.value == 1) { // Middle Pressed
+                        if (ev.value == 1) { // Pressed
                             emit middleClicked();
                         }
                         continue; // Klick verschlucken
@@ -1034,11 +1323,12 @@ void InputMonitor::workerLoop()
                     }
                 }
 
-                if (ev.type == EV_KEY && ev.code == BTN_RIGHT) {
+                // Maus-Trigger Taste
+                if (m_triggerType.load() == 0 && ev.type == EV_KEY && ev.code == currentTriggerBtn) {
                     if (m_gameModeEnabled.load() && m_gameModeActive.load()) {
                         state = State::Idle;
                         if (dev.grabbed && m_uinputFd >= 0) {
-                            emitEvent(m_uinputFd, EV_KEY, BTN_RIGHT, ev.value);
+                            emitEvent(m_uinputFd, EV_KEY, static_cast<uint16_t>(currentTriggerBtn), ev.value);
                             emitSyn(m_uinputFd);
                         }
                         continue;
@@ -1054,6 +1344,7 @@ void InputMonitor::workerLoop()
                         pendingGestureDir = -1;
                         state = State::Pending;
                         emit rightPressed(); // Sofortiger KWin-Snapshot-Trigger
+                        emit triggerPressed();
                     } else if (ev.value == 0) { // Release
                         if (trailActive) {
                             trailActive = false;
@@ -1075,9 +1366,9 @@ void InputMonitor::workerLoop()
                             pendingGestureDir = -1;
                             if (dragDistance < 14.0f) {
                                 if (dev.grabbed && m_uinputFd >= 0) {
-                                    emitEvent(m_uinputFd, EV_KEY, BTN_RIGHT, 1);
+                                    emitEvent(m_uinputFd, EV_KEY, static_cast<uint16_t>(currentTriggerBtn), 1);
                                     emitSyn(m_uinputFd);
-                                    emitEvent(m_uinputFd, EV_KEY, BTN_RIGHT, 0);
+                                    emitEvent(m_uinputFd, EV_KEY, static_cast<uint16_t>(currentTriggerBtn), 0);
                                     emitSyn(m_uinputFd);
                                 }
                             }
@@ -1091,14 +1382,14 @@ void InputMonitor::workerLoop()
                             state = State::Idle;
                             pendingGestureDir = -1;
                             if (dev.grabbed && m_uinputFd >= 0) {
-                                emitEvent(m_uinputFd, EV_KEY, BTN_RIGHT, 0);
+                                emitEvent(m_uinputFd, EV_KEY, static_cast<uint16_t>(currentTriggerBtn), 0);
                                 emitSyn(m_uinputFd);
                             }
                         }
                     }
                 } else {
                     if (state == State::Gesture && ev.type == EV_REL) {
-                        // Geste ist erkannt: Trail folgt dem dynamischen Wisch-Schwung bis zum RMT-Release
+                        // Geste ist erkannt: Trail folgt dem dynamischen Wisch-Schwung bis zum Release
                         if (ev.code == REL_X) deltaX += ev.value;
                         if (ev.code == REL_Y) deltaY += ev.value;
                         auto now = std::chrono::steady_clock::now();
@@ -1148,7 +1439,7 @@ void InputMonitor::workerLoop()
                                 pendingGestureDir = -1;
                                 flushPassthruRel();
                                 if (dev.grabbed && m_uinputFd >= 0) {
-                                    emitEvent(m_uinputFd, EV_KEY, BTN_RIGHT, 1);
+                                    emitEvent(m_uinputFd, EV_KEY, static_cast<uint16_t>(currentTriggerBtn), 1);
                                     emitSyn(m_uinputFd);
                                 }
                             }
@@ -1187,6 +1478,14 @@ void InputMonitor::workerLoop()
                             } else if (ev.code == REL_WHEEL || ev.code == REL_WHEEL_HI_RES) {
                                 if (ev.code == REL_WHEEL) {
                                     emit wheelScrolled(ev.value);
+                                    wheelHiResAccum = 0;
+                                } else if (ev.code == REL_WHEEL_HI_RES) {
+                                    wheelHiResAccum += ev.value;
+                                    if (std::abs(wheelHiResAccum) >= 120) {
+                                        int steps = wheelHiResAccum / 120;
+                                        wheelHiResAccum -= steps * 120;
+                                        emit wheelScrolled(steps);
+                                    }
                                 }
                                 continue; // Wheel verschlucken
                             }
@@ -1219,6 +1518,79 @@ void InputMonitor::workerLoop()
 
             flushPassthruRel();
             flushTriggeredRel();
+        }
+
+        // 4. Physische Tastatur-Events verarbeiten
+        for (size_t i = 0; i < m_keyboards.size() && (kbdOffset + i) < pfds.size(); ++i) {
+            if (!(pfds[kbdOffset + i].revents & POLLIN)) continue;
+
+            auto &kbd = m_keyboards[i];
+            struct input_event events[64];
+            ssize_t bytes = read(kbd.fd, events, sizeof(events));
+            if (bytes <= 0) continue;
+
+            size_t count = bytes / sizeof(struct input_event);
+            for (size_t k = 0; k < count; ++k) {
+                const auto &ev = events[k];
+                if (ev.type == EV_KEY) {
+                    if (ev.code < KEY_CNT) {
+                        activeKeys[ev.code] = (ev.value != 0);
+                    }
+
+                    if (m_triggerType.load() == 1 && !m_triggerKeyCodes.empty()) {
+                        int mainKey = m_triggerKeyCodes.back();
+                        bool modifiersMatch = true;
+                        for (size_t m = 0; m + 1 < m_triggerKeyCodes.size(); ++m) {
+                            int mod = m_triggerKeyCodes[m];
+                            if (mod == KEY_LEFTCTRL || mod == KEY_RIGHTCTRL) {
+                                if (!activeKeys[KEY_LEFTCTRL] && !activeKeys[KEY_RIGHTCTRL]) modifiersMatch = false;
+                            } else if (mod == KEY_LEFTALT || mod == KEY_RIGHTALT) {
+                                if (!activeKeys[KEY_LEFTALT] && !activeKeys[KEY_RIGHTALT]) modifiersMatch = false;
+                            } else if (mod == KEY_LEFTSHIFT || mod == KEY_RIGHTSHIFT) {
+                                if (!activeKeys[KEY_LEFTSHIFT] && !activeKeys[KEY_RIGHTSHIFT]) modifiersMatch = false;
+                            } else if (mod == KEY_LEFTMETA || mod == KEY_RIGHTMETA) {
+                                if (!activeKeys[KEY_LEFTMETA] && !activeKeys[KEY_RIGHTMETA]) modifiersMatch = false;
+                            } else {
+                                if (mod < KEY_CNT && !activeKeys[mod]) modifiersMatch = false;
+                            }
+                        }
+
+                        if (ev.code == mainKey) {
+                            if (ev.value == 1 && modifiersMatch) { // Key pressed
+                                pressTime = std::chrono::steady_clock::now();
+                                deltaX = 0; deltaY = 0; dragDistance = 0.0f;
+                                trailActive = false; gestureFired = false; pendingGestureDir = -1;
+                                state = State::Pending;
+                                emit rightPressed();
+                                emit triggerPressed();
+                            } else if (ev.value == 0) { // Key released
+                                if (trailActive) {
+                                    trailActive = false;
+                                    emit gestureFinished();
+                                }
+                                if (state == State::Triggered) {
+                                    state = State::Idle;
+                                    subpixelX = 0.0; subpixelY = 0.0;
+                                    emit holdReleased();
+                                } else if (state == State::Pending || state == State::Cancelled || state == State::Gesture) {
+                                    state = State::Idle;
+                                }
+                            }
+                        }
+                    }
+
+                    if (ev.code == KEY_ESC && ev.value == 1) {
+                        if (state == State::Triggered || state == State::Pending) {
+                            state = State::Cancelled;
+                            if (trailActive) {
+                                trailActive = false;
+                                emit gestureFinished();
+                            }
+                            emit holdCancelled();
+                        }
+                    }
+                }
+            }
         }
     }
 }

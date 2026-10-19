@@ -1,8 +1,10 @@
 #include "SessionDialogController.h"
 #include "SessionManager.h"
 #include "KaryonGlyphs.h"
+#include "ThemeManager.h"
 
 #include <QQuickItem>
+#include <QQmlContext>
 #include <QGuiApplication>
 #include <QScreen>
 #include <QColor>
@@ -23,6 +25,7 @@ SessionDialogController::SessionDialogController(QObject *parent)
     m_view->setFlags(Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint | Qt::Dialog);
     m_view->setResizeMode(QQuickView::SizeRootObjectToView);
     m_view->setTitle(QStringLiteral("Karyon Session"));
+    m_view->rootContext()->setContextProperty(QStringLiteral("karyonTheme"), &ThemeManager::instance());
     m_view->setSource(QUrl(QStringLiteral("qrc:/qt/qml/karyon/qml/SessionDialog.qml")));
     m_view->create();
 

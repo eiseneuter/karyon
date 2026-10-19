@@ -1,5 +1,6 @@
 #include "SettingsController.h"
 #include "SettingsManager.h"
+#include "ThemeManager.h"
 #include "GestureManager.h"
 #include "PermissionManager.h"
 
@@ -8,17 +9,25 @@
 #include <QGuiApplication>
 #include <QScreen>
 #include <QColor>
+#include <QColorDialog>
 #include <QUrl>
 #include <QEvent>
 #include <QKeyEvent>
 #include <QLocale>
 #include <QRegularExpression>
+#include <QDBusInterface>
+#include <QDBusMessage>
+#include <QDBusConnection>
+#include <QDBusArgument>
 
 #include <KWindowSystem>
 #include <KX11Extras>
 #include <KOpenWithDialog>
 #include <KService>
 #include <linux/input-event-codes.h>
+#include <iostream>
+#include <unistd.h>
+#include <QTimer>
 
 SettingsController::SettingsController(QObject *parent)
     : QObject(parent)
@@ -30,6 +39,7 @@ SettingsController::SettingsController(QObject *parent)
     m_view->setTitle(QStringLiteral("Karyon Settings"));
 
     m_view->rootContext()->setContextProperty(QStringLiteral("settingsController"), this);
+    m_view->rootContext()->setContextProperty(QStringLiteral("karyonTheme"), &ThemeManager::instance());
     m_view->setSource(QUrl(QStringLiteral("qrc:/qt/qml/karyon/qml/SettingsDialog.qml")));
     m_view->create();
 
@@ -42,6 +52,7 @@ SettingsController::SettingsController(QObject *parent)
 
     connect(&SettingsManager::instance(), &SettingsManager::settingsChanged, this, [this]() {
         emit triggerHoldMsChanged();
+        emit triggerChanged();
         emit gameModeChanged();
         emit overlayMouseSpeedChanged();
         emit overlayScaleChanged();
@@ -64,6 +75,8 @@ SettingsController::SettingsController(QObject *parent)
         emit dateFormatIndexChanged();
         emit dateSeparatorChanged();
         emit timeFormatIndexChanged();
+        emit colorSchemeIndexChanged();
+        emit customBaseColorHexChanged();
         emit gesturesEnabledChanged();
         emit gestureLeftChanged();
         emit gestureRightChanged();
@@ -93,6 +106,116 @@ int SettingsController::triggerHoldMs() const
 void SettingsController::setTriggerHoldMs(int ms)
 {
     SettingsManager::instance().setTriggerHoldMs(ms);
+}
+
+QString SettingsController::triggerType() const
+{
+    return SettingsManager::instance().triggerType();
+}
+
+int SettingsController::triggerButton() const
+{
+    return SettingsManager::instance().triggerButton();
+}
+
+QString SettingsController::triggerKeySeq() const
+{
+    return SettingsManager::instance().triggerKeySeq();
+}
+
+QString SettingsController::triggerDisplayName() const
+{
+    if (SettingsManager::instance().triggerType() == QLatin1String("mouse") &&
+        SettingsManager::instance().triggerButton() == 273) {
+        return QStringLiteral("Right Click (def.)");
+    }
+    return SettingsManager::instance().triggerDisplayName();
+}
+
+void SettingsController::setIsRecordingTrigger(bool rec)
+{
+    if (m_isRecordingTrigger != rec) {
+        m_isRecordingTrigger = rec;
+        emit isRecordingTriggerChanged();
+    }
+}
+
+void SettingsController::setTrigger(const QString &type, int button, const QString &keySeq, const QString &displayName)
+{
+    if (type == QLatin1String("mouse") && button <= 272) {
+        return;
+    }
+    SettingsManager::instance().setTriggerType(type);
+    SettingsManager::instance().setTriggerButton(button);
+    SettingsManager::instance().setTriggerKeySeq(keySeq);
+    SettingsManager::instance().setTriggerDisplayName(displayName);
+    emit triggerChanged();
+}
+
+void SettingsController::onInputCaptured(const QString &type, int button, const QString &keySeq, const QString &displayName)
+{
+    if (m_isRecordingTrigger) {
+        emit triggerCaptured(type, button, keySeq, displayName);
+    }
+}
+
+QVariantMap SettingsController::processMouseEvent(int qtButton) const
+{
+    QVariantMap res;
+    res[QStringLiteral("valid")] = false;
+    res[QStringLiteral("type")] = QStringLiteral("mouse");
+    res[QStringLiteral("code")] = 0;
+    // Linksklick ist für UI-Bedienung (Save, Cancel, Focus) reserviert - niemals als Trigger wählbar
+    if (qtButton == Qt::LeftButton) {
+        return res;
+    }
+
+    int code = 0;
+    QString name;
+
+    switch (qtButton) {
+    case Qt::RightButton:
+        code = 273; // BTN_RIGHT
+        name = QStringLiteral("Right Click");
+        break;
+    case Qt::MiddleButton:
+        code = 274; // BTN_MIDDLE
+        name = QStringLiteral("Middle Click");
+        break;
+    case Qt::BackButton:
+        code = 275; // BTN_SIDE
+        name = QStringLiteral("Mouse Back (Button 4)");
+        break;
+    case Qt::ForwardButton:
+        code = 276; // BTN_EXTRA
+        name = QStringLiteral("Mouse Forward (Button 5)");
+        break;
+    case Qt::TaskButton:
+        code = 279; // BTN_TASK
+        name = QStringLiteral("Mouse Task (Button 8)");
+        break;
+    case Qt::ExtraButton4:
+        code = 277; // BTN_FORWARD
+        name = QStringLiteral("Mouse Button 6");
+        break;
+    case Qt::ExtraButton5:
+        code = 278; // BTN_BACK
+        name = QStringLiteral("Mouse Button 7");
+        break;
+    default:
+        if (qtButton > 0) {
+            code = 271 + (qtButton & 0xFF);
+            name = QStringLiteral("Mouse Button %1").arg(code - 271);
+        }
+        break;
+    }
+
+    if (code > 0 && !name.isEmpty()) {
+        res[QStringLiteral("valid")] = true;
+        res[QStringLiteral("code")] = code;
+        res[QStringLiteral("name")] = name;
+    }
+    return res;
 }
 
 bool SettingsController::gameMode() const
@@ -318,6 +441,132 @@ void SettingsController::setTimeFormatIndex(int index)
 QString SettingsController::detectedLocaleName() const
 {
     return QLocale().name();
+}
+
+int SettingsController::colorSchemeIndex() const
+{
+    return SettingsManager::instance().colorSchemeIndex();
+}
+
+void SettingsController::setColorSchemeIndex(int index)
+{
+    SettingsManager::instance().setColorSchemeIndex(index);
+}
+
+QString SettingsController::customBaseColorHex() const
+{
+    return SettingsManager::instance().customBaseColorHex();
+}
+
+void SettingsController::setCustomBaseColorHex(const QString &hex)
+{
+    SettingsManager::instance().setCustomBaseColorHex(hex);
+}
+
+void SettingsController::selectColorScheme(int index)
+{
+    SettingsManager::instance().setColorSchemeIndex(index);
+}
+
+void SettingsController::openColorDialog()
+{
+    QColor current = ThemeManager::instance().baseBg();
+    QColor chosen = QColorDialog::getColor(current, nullptr, QStringLiteral("Karyon - Select Base Color"),
+                                          QColorDialog::DontUseNativeDialog);
+    if (!chosen.isValid()) {
+        return;
+    }
+    QString hex = chosen.name(QColor::HexRgb);
+    SettingsManager::instance().setCustomBaseColorHex(hex);
+    SettingsManager::instance().setColorSchemeIndex(6);
+}
+
+void SettingsController::pickScreenColor()
+{
+    if (!m_portalRequestPath.isEmpty()) {
+        QDBusConnection::sessionBus().disconnect(
+            QStringLiteral("org.freedesktop.portal.Desktop"),
+            m_portalRequestPath,
+            QStringLiteral("org.freedesktop.portal.Request"),
+            QStringLiteral("Response"),
+            this,
+            SLOT(onPortalColorPicked(uint, QVariantMap))
+        );
+        m_portalRequestPath.clear();
+    }
+
+    QDBusInterface portal(QStringLiteral("org.freedesktop.portal.Desktop"),
+                          QStringLiteral("/org/freedesktop/portal/desktop"),
+                          QStringLiteral("org.freedesktop.portal.Screenshot"),
+                          QDBusConnection::sessionBus());
+    if (portal.isValid()) {
+        QVariantMap options;
+        QDBusMessage reply = portal.call(QStringLiteral("PickColor"), QStringLiteral(""), options);
+        if (reply.type() == QDBusMessage::ReplyMessage && !reply.arguments().isEmpty()) {
+            QDBusObjectPath handle = reply.arguments().at(0).value<QDBusObjectPath>();
+            if (!handle.path().isEmpty()) {
+                m_portalRequestPath = handle.path();
+                QDBusConnection::sessionBus().connect(
+                    QStringLiteral("org.freedesktop.portal.Desktop"),
+                    m_portalRequestPath,
+                    QStringLiteral("org.freedesktop.portal.Request"),
+                    QStringLiteral("Response"),
+                    this,
+                    SLOT(onPortalColorPicked(uint, QVariantMap))
+                );
+                return;
+            }
+        }
+    }
+
+    openColorDialog();
+}
+
+void SettingsController::onPortalColorPicked(uint response, const QVariantMap &results)
+{
+    if (!m_portalRequestPath.isEmpty()) {
+        QDBusConnection::sessionBus().disconnect(
+            QStringLiteral("org.freedesktop.portal.Desktop"),
+            m_portalRequestPath,
+            QStringLiteral("org.freedesktop.portal.Request"),
+            QStringLiteral("Response"),
+            this,
+            SLOT(onPortalColorPicked(uint, QVariantMap))
+        );
+        m_portalRequestPath.clear();
+    }
+
+    if (response != 0) {
+        return;
+    }
+
+    QVariant colVar = results.value(QStringLiteral("color"));
+    QColor picked;
+    if (colVar.canConvert<QDBusArgument>()) {
+        const QDBusArgument arg = colVar.value<QDBusArgument>();
+        if (arg.currentType() == QDBusArgument::StructureType) {
+            arg.beginStructure();
+            double r = 0.0, g = 0.0, b = 0.0;
+            arg >> r >> g >> b;
+            arg.endStructure();
+            picked = QColor::fromRgbF(std::clamp(r, 0.0, 1.0),
+                                      std::clamp(g, 0.0, 1.0),
+                                      std::clamp(b, 0.0, 1.0));
+        }
+    } else if (colVar.canConvert<QVariantList>()) {
+        QVariantList list = colVar.toList();
+        if (list.size() >= 3) {
+            picked = QColor::fromRgbF(std::clamp(list[0].toDouble(), 0.0, 1.0),
+                                      std::clamp(list[1].toDouble(), 0.0, 1.0),
+                                      std::clamp(list[2].toDouble(), 0.0, 1.0));
+        }
+    }
+
+    if (picked.isValid()) {
+        QString hex = picked.name(QColor::HexRgb);
+        SettingsManager::instance().setCustomBaseColorHex(hex);
+        SettingsManager::instance().setColorSchemeIndex(6);
+    }
 }
 
 QString SettingsController::gestureLeft() const { return SettingsManager::instance().gestureLeft(); }
@@ -608,12 +857,18 @@ void SettingsController::hideSettings()
     if (m_view) {
         m_view->hide();
     }
+    emit settingsVisibilityChanged(false);
 }
 
 void SettingsController::quitApp()
 {
+    std::cout << "[Karyon] Quit requested from Settings dialog.\n";
     hideSettings();
     qApp->quit();
+    QTimer::singleShot(1500, []() {
+        std::cout << "[Karyon] Safety timeout reached, terminating process.\n";
+        _exit(0);
+    });
 }
 
 void SettingsController::startWindowDrag()
@@ -628,7 +883,7 @@ void SettingsController::showSettings(const QPoint &cursorPos)
     if (!m_view) return;
 
     const int dlgWidth = 580;
-    const int dlgHeight = 640;
+    const int dlgHeight = 660;
     m_view->resize(dlgWidth, dlgHeight);
 
     QScreen *screen = nullptr;
@@ -651,6 +906,7 @@ void SettingsController::showSettings(const QPoint &cursorPos)
     m_view->show();
     m_view->requestActivate();
     m_view->raise();
+    emit settingsVisibilityChanged(true);
 
     QQuickItem *root = m_view->rootObject();
     if (root) {
@@ -668,15 +924,21 @@ void SettingsController::setIsRecordingKey(bool rec)
 
 bool SettingsController::eventFilter(QObject *obj, QEvent *event)
 {
-    if (obj == m_view && event->type() == QEvent::KeyPress) {
-        if (m_isRecordingKey) {
-            // Wenn der Key-Recorder aktiv ist, kein Schließen über Escape
-            return false;
-        }
-        auto *ke = static_cast<QKeyEvent *>(event);
-        if (ke->key() == Qt::Key_Escape) {
-            hideSettings();
-            return true;
+    if (obj == m_view) {
+        if (event->type() == QEvent::Hide) {
+            emit settingsVisibilityChanged(false);
+        } else if (event->type() == QEvent::Show) {
+            emit settingsVisibilityChanged(true);
+        } else if (event->type() == QEvent::KeyPress) {
+            if (m_isRecordingKey || m_isRecordingTrigger) {
+                // Wenn ein Recorder aktiv ist, kein Schließen über Escape
+                return false;
+            }
+            auto *ke = static_cast<QKeyEvent *>(event);
+            if (ke->key() == Qt::Key_Escape) {
+                hideSettings();
+                return true;
+            }
         }
     }
     return QObject::eventFilter(obj, event);

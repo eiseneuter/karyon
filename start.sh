@@ -24,7 +24,7 @@ fi
 
 # Terminate existing Karyon instances for exclusive mouse access
 echo "Stopping previous Karyon instances..."
-pkill -9 -f 'karyon' 2>/dev/null || true
+pkill -9 -i -f 'karyon' 2>/dev/null || true
 sleep 0.3
 
 # QT_QPA_PLATFORM=xcb for KWin/XWayland (synchronous cursor positioning & override-redirect without animations)

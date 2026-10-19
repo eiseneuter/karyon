@@ -5,8 +5,8 @@ Item {
     width: 460
     height: 245
 
-    readonly property color accentColor: "#0d7cd6"
-    readonly property color accentHoverColor: "#298fe6"
+    readonly property color accentColor: (typeof karyonTheme !== "undefined") ? karyonTheme.accentColor : "#0d7cd6"
+    readonly property color accentHoverColor: (typeof karyonTheme !== "undefined") ? karyonTheme.accentHoverColor : "#298fe6"
     readonly property color successColor: "#98c379"
     readonly property color errorColor: "#e06c75"
 
@@ -14,8 +14,8 @@ Item {
         id: card
         anchors.fill: parent
         radius: 10
-        color: "#1e2227"
-        border.color: "#353b45"
+        color: (typeof karyonTheme !== "undefined") ? karyonTheme.cardBg : "#1e2227"
+        border.color: (typeof karyonTheme !== "undefined") ? karyonTheme.cardBorder : "#353b45"
         border.width: 1
 
         // Header mit Icon, Titel und Drag-Möglichkeit
@@ -47,7 +47,7 @@ Item {
 
                 Text {
                     text: "Karyon"
-                    color: "#ffffff"
+                    color: (typeof karyonTheme !== "undefined") ? karyonTheme.textPrimary : "#ffffff"
                     font.pixelSize: 13
                     font.bold: true
                     anchors.verticalCenter: parent.verticalCenter
@@ -62,7 +62,7 @@ Item {
             anchors.left: parent.left
             anchors.right: parent.right
             height: 1
-            color: "#2c313a"
+            color: (typeof karyonTheme !== "undefined") ? karyonTheme.dividerColor : "#2c313a"
         }
 
         Column {
@@ -76,7 +76,7 @@ Item {
 
             Text {
                 text: "Input Permissions Required"
-                color: "#ffffff"
+                color: (typeof karyonTheme !== "undefined") ? karyonTheme.textPrimary : "#ffffff"
                 font.pixelSize: 12
                 font.bold: true
             }
@@ -85,7 +85,7 @@ Item {
                 width: parent.width
                 wrapMode: Text.WordWrap
                 text: "Karyon needs permission to access the Linux input subsystem to monitor mouse gestures and display the radial menu."
-                color: "#cdd3de"
+                color: (typeof karyonTheme !== "undefined") ? karyonTheme.textSecondary : "#cdd3de"
                 font.pixelSize: 11
                 lineHeight: 1.3
             }
@@ -93,7 +93,7 @@ Item {
             Rectangle {
                 width: parent.width
                 height: 1
-                color: "#2c313a"
+                color: (typeof karyonTheme !== "undefined") ? karyonTheme.dividerColor : "#2c313a"
             }
 
             // Status List
@@ -112,7 +112,7 @@ Item {
                     }
                     Text {
                         text: "/dev/uinput (Virtual Device Creation): "
-                        color: "#cdd3de"
+                        color: (typeof karyonTheme !== "undefined") ? karyonTheme.textSecondary : "#cdd3de"
                         font.pixelSize: 10
                     }
                     Text {
@@ -134,7 +134,7 @@ Item {
                     }
                     Text {
                         text: "/dev/input/event* (Hardware Mouse Capture): "
-                        color: "#cdd3de"
+                        color: (typeof karyonTheme !== "undefined") ? karyonTheme.textSecondary : "#cdd3de"
                         font.pixelSize: 10
                     }
                     Text {
@@ -167,17 +167,18 @@ Item {
 
             // Exit Button
             Rectangle {
+                id: exitBtn
                 width: 75
                 height: 28
                 radius: 4
-                color: exitMa.containsMouse ? "#353b45" : "#282c34"
-                border.color: "#3e4451"
+                color: exitMa.containsMouse ? ((typeof karyonTheme !== "undefined") ? karyonTheme.controlHoverBg : "#353b45") : ((typeof karyonTheme !== "undefined") ? karyonTheme.controlBg : "#282c34")
+                border.color: exitMa.containsMouse ? ((typeof karyonTheme !== "undefined") ? karyonTheme.accentHoverColor : "#4b5263") : ((typeof karyonTheme !== "undefined") ? karyonTheme.controlBorder : "#3e4451")
                 border.width: 1
 
                 Text {
                     anchors.centerIn: parent
                     text: "Exit"
-                    color: exitMa.containsMouse ? "#ffffff" : "#cdd3de"
+                    color: exitMa.containsMouse ? ((typeof karyonTheme !== "undefined") ? karyonTheme.textPrimary : "#ffffff") : ((typeof karyonTheme !== "undefined") ? karyonTheme.textSecondary : "#cdd3de")
                     font.pixelSize: 11
                     font.bold: true
                 }

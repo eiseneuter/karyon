@@ -13,6 +13,18 @@ public:
     int triggerHoldMs() const;
     void setTriggerHoldMs(int ms);
 
+    QString triggerType() const;
+    void setTriggerType(const QString &type);
+
+    int triggerButton() const;
+    void setTriggerButton(int code);
+
+    QString triggerKeySeq() const;
+    void setTriggerKeySeq(const QString &seq);
+
+    QString triggerDisplayName() const;
+    void setTriggerDisplayName(const QString &name);
+
     bool gameModeEnabled() const;
     void setGameModeEnabled(bool enabled);
 
@@ -79,6 +91,12 @@ public:
     int timeFormatIndex() const;
     void setTimeFormatIndex(int index);
 
+    int colorSchemeIndex() const;
+    void setColorSchemeIndex(int index);
+
+    QString customBaseColorHex() const;
+    void setCustomBaseColorHex(const QString &hex);
+
     bool gesturesEnabled() const;
     void setGesturesEnabled(bool enabled);
 
@@ -131,6 +149,10 @@ private:
     void save();
 
     int m_triggerHoldMs = 120;
+    QString m_triggerType = QStringLiteral("mouse");
+    int m_triggerButton = 273; // BTN_RIGHT
+    QString m_triggerKeySeq;
+    QString m_triggerDisplayName = QStringLiteral("Right Click");
     bool m_gameModeEnabled = true;
     double m_overlayMouseSpeed = -0.5;
     double m_overlayScale = 0.9;
@@ -153,6 +175,8 @@ private:
     int m_dateFormatIndex = 0;
     QString m_dateSeparator = QStringLiteral(".");
     int m_timeFormatIndex = 0;
+    int m_colorSchemeIndex = 0;
+    QString m_customBaseColorHex = QStringLiteral("#22262d");
 
     bool m_gesturesEnabled = true;
     QString m_gestureLeft = QStringLiteral("select_all");

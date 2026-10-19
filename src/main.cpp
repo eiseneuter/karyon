@@ -15,6 +15,7 @@
 #include <QProcess>
 #include <QtDBus>
 #include <QOpenGLContext>
+#include <QSurfaceFormat>
 #include <QQuickWindow>
 #include <QSGRendererInterface>
 #include <csignal>
@@ -105,70 +106,21 @@ void quietMessageHandler(QtMsgType type, const QMessageLogContext &/*context*/, 
         int fd = (g_origStderr >= 0) ? g_origStderr : STDERR_FILENO;
         (void)write(fd, out.data(), out.size());
         abort();
-    } else if (type == QtCriticalMsg) {
-        std::string out = "Error: " + msg.toStdString() + "\n";
+    } else if (type == QtCriticalMsg || type == QtWarningMsg) {
+        std::string out = (type == QtCriticalMsg ? "Error: " : "Warning: ") + msg.toStdString() + "\n";
         int fd = (g_origStderr >= 0) ? g_origStderr : STDERR_FILENO;
         (void)write(fd, out.data(), out.size());
     }
 }
 
 enum class GpuBackend {
-    Egl,
     Glx,
+    Egl,
     Software
 };
 
 GpuBackend probeHardwareGraphics()
 {
-    auto probeEgl = []() -> bool {
-        void *libx11 = dlopen("libX11.so.6", RTLD_LAZY);
-        if (!libx11) libx11 = dlopen("libX11.so", RTLD_LAZY);
-        if (!libx11) return false;
-
-        void *libegl = dlopen("libEGL.so.1", RTLD_LAZY);
-        if (!libegl) libegl = dlopen("libEGL.so", RTLD_LAZY);
-        if (!libegl) { dlclose(libx11); return false; }
-
-        typedef void* (*XOpenDisplayFn)(const char*);
-        typedef int (*XCloseDisplayFn)(void*);
-        typedef void* (*eglGetPlatformDisplayFn)(unsigned int, void*, const void*);
-        typedef void* (*eglGetDisplayFn)(void*);
-        typedef int (*eglInitializeFn)(void*, int*, int*);
-        typedef int (*eglTerminateFn)(void*);
-
-        auto xOpenDisplay = reinterpret_cast<XOpenDisplayFn>(dlsym(libx11, "XOpenDisplay"));
-        auto xCloseDisplay = reinterpret_cast<XCloseDisplayFn>(dlsym(libx11, "XCloseDisplay"));
-        auto eglGetPlatformDisplay = reinterpret_cast<eglGetPlatformDisplayFn>(dlsym(libegl, "eglGetPlatformDisplay"));
-        auto eglGetDisplay = reinterpret_cast<eglGetDisplayFn>(dlsym(libegl, "eglGetDisplay"));
-        auto eglInitialize = reinterpret_cast<eglInitializeFn>(dlsym(libegl, "eglInitialize"));
-        auto eglTerminate = reinterpret_cast<eglTerminateFn>(dlsym(libegl, "eglTerminate"));
-
-        if (!xOpenDisplay || !xCloseDisplay || (!eglGetPlatformDisplay && !eglGetDisplay) || !eglInitialize) {
-            dlclose(libegl); dlclose(libx11); return false;
-        }
-
-        void *dpy = xOpenDisplay(nullptr);
-        if (!dpy) { dlclose(libegl); dlclose(libx11); return false; }
-
-        void *edpy = nullptr;
-        if (eglGetPlatformDisplay) {
-            constexpr unsigned int EGL_PLATFORM_X11_KHR = 0x31D5;
-            edpy = eglGetPlatformDisplay(EGL_PLATFORM_X11_KHR, dpy, nullptr);
-        }
-        if (!edpy && eglGetDisplay) {
-            edpy = eglGetDisplay(dpy);
-        }
-        if (!edpy) { xCloseDisplay(dpy); dlclose(libegl); dlclose(libx11); return false; }
-
-        int major = 0, minor = 0;
-        int ok = eglInitialize(edpy, &major, &minor);
-        if (ok && eglTerminate) eglTerminate(edpy);
-        xCloseDisplay(dpy);
-        dlclose(libegl);
-        dlclose(libx11);
-        return ok != 0;
-    };
-
     auto probeGlx = []() -> bool {
         void *libx11 = dlopen("libX11.so.6", RTLD_LAZY);
         if (!libx11) libx11 = dlopen("libX11.so", RTLD_LAZY);
@@ -220,13 +172,65 @@ GpuBackend probeHardwareGraphics()
         return ok;
     };
 
+    auto probeEgl = []() -> bool {
+        void *libx11 = dlopen("libX11.so.6", RTLD_LAZY);
+        if (!libx11) libx11 = dlopen("libX11.so", RTLD_LAZY);
+        if (!libx11) return false;
+
+        void *libegl = dlopen("libEGL.so.1", RTLD_LAZY);
+        if (!libegl) libegl = dlopen("libEGL.so", RTLD_LAZY);
+        if (!libegl) { dlclose(libx11); return false; }
+
+        typedef void* (*XOpenDisplayFn)(const char*);
+        typedef int (*XCloseDisplayFn)(void*);
+        typedef void* (*eglGetPlatformDisplayFn)(unsigned int, void*, const void*);
+        typedef void* (*eglGetDisplayFn)(void*);
+        typedef int (*eglInitializeFn)(void*, int*, int*);
+        typedef int (*eglTerminateFn)(void*);
+
+        auto xOpenDisplay = reinterpret_cast<XOpenDisplayFn>(dlsym(libx11, "XOpenDisplay"));
+        auto xCloseDisplay = reinterpret_cast<XCloseDisplayFn>(dlsym(libx11, "XCloseDisplay"));
+        auto eglGetPlatformDisplay = reinterpret_cast<eglGetPlatformDisplayFn>(dlsym(libegl, "eglGetPlatformDisplay"));
+        auto eglGetDisplay = reinterpret_cast<eglGetDisplayFn>(dlsym(libegl, "eglGetDisplay"));
+        auto eglInitialize = reinterpret_cast<eglInitializeFn>(dlsym(libegl, "eglInitialize"));
+        auto eglTerminate = reinterpret_cast<eglTerminateFn>(dlsym(libegl, "eglTerminate"));
+
+        if (!xOpenDisplay || !xCloseDisplay || (!eglGetPlatformDisplay && !eglGetDisplay) || !eglInitialize) {
+            dlclose(libegl); dlclose(libx11); return false;
+        }
+
+        void *dpy = xOpenDisplay(nullptr);
+        if (!dpy) { dlclose(libegl); dlclose(libx11); return false; }
+
+        void *edpy = nullptr;
+        if (eglGetPlatformDisplay) {
+            constexpr unsigned int EGL_PLATFORM_X11_KHR = 0x31D5;
+            edpy = eglGetPlatformDisplay(EGL_PLATFORM_X11_KHR, dpy, nullptr);
+        }
+        if (!edpy && eglGetDisplay) {
+            edpy = eglGetDisplay(dpy);
+        }
+        if (!edpy) { xCloseDisplay(dpy); dlclose(libegl); dlclose(libx11); return false; }
+
+        int major = 0, minor = 0;
+        int ok = eglInitialize(edpy, &major, &minor);
+        if (ok && eglTerminate) eglTerminate(edpy);
+        xCloseDisplay(dpy);
+        dlclose(libegl);
+        dlclose(libx11);
+        return (ok != 0);
+    };
+
     pid_t pid = fork();
     if (pid == 0) {
-        if (probeEgl()) {
-            _exit(10);
-        }
+        // Preferred order: GLX first (mature X11/XWayland 32-bit ARGB visual support),
+        // EGL second (hardware fallback for drivers without GLX),
+        // Software third (fail-safe rasterizer).
         if (probeGlx()) {
             _exit(20);
+        }
+        if (probeEgl()) {
+            _exit(10);
         }
         _exit(30);
     }
@@ -246,8 +250,8 @@ GpuBackend probeHardwareGraphics()
 
     if (WIFEXITED(status)) {
         int code = WEXITSTATUS(status);
-        if (code == 10) return GpuBackend::Egl;
         if (code == 20) return GpuBackend::Glx;
+        if (code == 10) return GpuBackend::Egl;
     }
 
     return GpuBackend::Software;
@@ -327,21 +331,25 @@ int main(int argc, char *argv[])
     } else {
         std::cout << "[Graphics] Probing graphics hardware acceleration on X11/XWayland display...\n";
         GpuBackend backend = probeHardwareGraphics();
-        if (backend == GpuBackend::Egl) {
-            std::cout << "[Graphics] Hardware EGL acceleration verified. Enabling xcb_egl.\n";
-            qputenv("QT_XCB_GL_INTEGRATION", "xcb_egl");
-        } else if (backend == GpuBackend::Glx) {
-            std::cout << "[Graphics] EGL unavailable, Hardware GLX acceleration verified. Enabling xcb_glx.\n";
+        if (backend == GpuBackend::Glx) {
+            std::cout << "[Graphics] Hardware GLX acceleration verified. Enabling xcb_glx.\n";
             qputenv("QT_XCB_GL_INTEGRATION", "xcb_glx");
+        } else if (backend == GpuBackend::Egl) {
+            std::cout << "[Graphics] GLX unavailable, Hardware EGL acceleration verified. Enabling xcb_egl.\n";
+            qputenv("QT_XCB_GL_INTEGRATION", "xcb_egl");
         } else {
-            std::cout << "[Graphics] Neither EGL nor GLX functional or host driver incompatibility detected.\n";
-            std::cout << "[Graphics] Automatic fallback: Activating Qt Quick Software rendering (CPU rasterizer, zero GPU dependency).\n";
+            std::cout << "[Graphics] Neither GLX nor EGL available. Activating Qt Quick Software rendering fallback.\n";
             std::cout << "[Graphics] Overlay is guaranteed to render reliably on any system.\n";
             qputenv("QT_XCB_GL_INTEGRATION", "none");
             qputenv("QT_QUICK_BACKEND", "software");
             QQuickWindow::setSceneGraphBackend(QStringLiteral("software"));
         }
     }
+
+    // Configure default surface format with 8-bit alpha buffer to guarantee 32-bit ARGB visual allocation
+    QSurfaceFormat defaultFormat;
+    defaultFormat.setAlphaBufferSize(8);
+    QSurfaceFormat::setDefaultFormat(defaultFormat);
 
     QApplication app(argc, argv);
     // Re-apply default QLocale after QApplication constructor (which calls setlocale internally)
@@ -434,17 +442,35 @@ int main(int argc, char *argv[])
     std::signal(SIGTERM, handleSignal);
     std::signal(SIGHUP, handleSignal);
 
-    // Initialisiere dynamische Einstellungen für InputMonitor (Trigger Hold & Mouse Speed & Game Mode)
+    // Initialisiere dynamische Einstellungen für InputMonitor (Trigger Hold & Mouse Speed & Game Mode & Trigger Key/Button)
     monitor.setHoldTriggerMs(SettingsManager::instance().triggerHoldMs());
     monitor.setOverlayMouseSpeed(SettingsManager::instance().overlayMouseSpeed());
     monitor.setGameModeEnabled(SettingsManager::instance().gameModeEnabled());
     monitor.setGameModeActive(kwinBridge.isActiveWindowGame());
+    monitor.setTrigger(
+        SettingsManager::instance().triggerType(),
+        SettingsManager::instance().triggerButton(),
+        SettingsManager::instance().triggerKeySeq()
+    );
 
     QObject::connect(&SettingsManager::instance(), &SettingsManager::settingsChanged, [&monitor]() {
         monitor.setHoldTriggerMs(SettingsManager::instance().triggerHoldMs());
         monitor.setOverlayMouseSpeed(SettingsManager::instance().overlayMouseSpeed());
         monitor.setGameModeEnabled(SettingsManager::instance().gameModeEnabled());
+        monitor.setTrigger(
+            SettingsManager::instance().triggerType(),
+            SettingsManager::instance().triggerButton(),
+            SettingsManager::instance().triggerKeySeq()
+        );
     });
+
+    QObject::connect(&settingsController, &SettingsController::settingsVisibilityChanged, &monitor, [&monitor](bool visible) {
+        monitor.setInhibited(visible);
+    });
+    QObject::connect(&settingsController, &SettingsController::isRecordingTriggerChanged, &monitor, [&monitor, &settingsController]() {
+        monitor.setRecordingTrigger(settingsController.isRecordingTrigger());
+    });
+    QObject::connect(&monitor, &InputMonitor::inputCaptured, &settingsController, &SettingsController::onInputCaptured);
 
     QObject::connect(&kwinBridge, &KWinBridge::activeWindowGameStatusChanged, &monitor, [&monitor](bool isGame) {
         monitor.setGameModeActive(isGame);
@@ -503,7 +529,11 @@ int main(int argc, char *argv[])
         } else if (actionId == 2) { // Settings
             showSettings();
         } else if (actionId == 3 || actionId == 4) { // Quit
+            std::cout << "[Karyon] Quit requested from tray action.\n";
             app.quit();
+            QTimer::singleShot(1500, []() {
+                _exit(0);
+            });
         }
     });
 
@@ -548,7 +578,13 @@ int main(int argc, char *argv[])
 
     QObject::connect(infoAction, &QAction::triggered, showInfo);
     QObject::connect(settingsAction, &QAction::triggered, showSettings);
-    QObject::connect(quitAction, &QAction::triggered, &app, &QApplication::quit);
+    QObject::connect(quitAction, &QAction::triggered, [&app]() {
+        std::cout << "[Karyon] Quit requested from tray menu.\n";
+        app.quit();
+        QTimer::singleShot(1500, []() {
+            _exit(0);
+        });
+    });
 
     QObject::connect(&trayIcon, &QSystemTrayIcon::activated, [showSettings](QSystemTrayIcon::ActivationReason reason) {
         if (reason == QSystemTrayIcon::Trigger) {
@@ -619,12 +655,14 @@ int main(int argc, char *argv[])
     QPoint gestureStartPos;
     bool inGesture = false;
 
-    // Sobald die rechte Taste gedrückt wird: sofort echte globale Cursorposition via KWin abfragen
-    QObject::connect(&monitor, &InputMonitor::rightPressed, &kwinBridge, [&kwinBridge, &gestureStartPos, &inGesture]() {
+    // Sobald die Trigger-Taste gedrückt wird: sofort echte globale Cursorposition via KWin abfragen
+    auto onTriggerPress = [&kwinBridge, &gestureStartPos, &inGesture]() {
         gestureStartPos = kwinBridge.lastCursorPos();
         inGesture = false;
         kwinBridge.queryCursor();
-    }, Qt::QueuedConnection);
+    };
+    QObject::connect(&monitor, &InputMonitor::rightPressed, &kwinBridge, onTriggerPress, Qt::QueuedConnection);
+    QObject::connect(&monitor, &InputMonitor::triggerPressed, &kwinBridge, onTriggerPress, Qt::QueuedConnection);
 
     QObject::connect(&kwinBridge, &KWinBridge::cursorPosUpdated, [&gestureStartPos, &inGesture](const QPoint &pos) {
         if (!inGesture) {
@@ -729,11 +767,17 @@ int main(int argc, char *argv[])
         }
     }, Qt::QueuedConnection);
 
-    // Scrollrad bei gedrückter rechter Maustaste -> Maximieren (UP) / Minimieren (DOWN) auf Segmenten, Lautstärke im Lautstärkebereich, Kategorie-Wechsel im Hub
+    // Scrollrad bei geöffnetem Overlay:
+    // - Im Lautstärkebereich: Lautstärkeregelung
+    // - Auf einem Fenster-Segment: Maximieren (UP) / Minimieren (DOWN)
+    // - Im Hub oder bei fehlendem Fenstertarget: Kategoriewechsel (Windows, Apps, Files) mit sauberem 150ms-Debounce
     static qint64 lastScrollUpTime = 0;
     static qint64 lastScrollDownTime = 0;
+    static qint64 lastHubWheelTime = 0;
 
     QObject::connect(&monitor, &InputMonitor::wheelScrolled, &overlay, [&overlay, &kwinBridge](int delta) {
+        if (!overlay.isVisible()) return;
+
         if (overlay.isCursorInVolumeArea()) {
             int vStep = SettingsManager::instance().volumeStep();
             int step = (delta > 0) ? vStep : -vStep;
@@ -743,7 +787,9 @@ int main(int argc, char *argv[])
 
         QString winId = overlay.manipulationTargetWindowId();
         if (winId.isEmpty()) {
-            if (overlay.isCursorInHub() || overlay.mode() != OverlayMode::Windows) {
+            qint64 now = QDateTime::currentMSecsSinceEpoch();
+            if (now - lastHubWheelTime >= 150) {
+                lastHubWheelTime = now;
                 overlay.handleHubWheel(delta);
             }
             return;
@@ -847,11 +893,22 @@ int main(int argc, char *argv[])
         }
     }, Qt::QueuedConnection);
 
+    QObject::connect(&app, &QCoreApplication::aboutToQuit, [&]() {
+        std::cout << "[Karyon] Application shutting down...\n";
+        monitor.stop();
+        kwinBridge.stopDaemon();
+        settingsController.hideSettings();
+        infoController.closeDialog();
+        overlay.hideOverlay();
+    });
+
     if (!monitor.start()) {
         std::cerr << "Error starting input monitor.\n";
         return 1;
     }
 
     std::cout << "Karyon C++ active. Hold right mouse button for 120 ms.\n";
-    return app.exec();
+    int ret = app.exec();
+    std::cout << "[Karyon] Application terminated cleanly.\n";
+    _exit(ret);
 }

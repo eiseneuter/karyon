@@ -5,8 +5,8 @@ Item {
     width: 520
     height: 560
 
-    readonly property color accentColor: "#0d7cd6"
-    readonly property color accentHoverColor: "#298fe6"
+    readonly property color accentColor: (typeof karyonTheme !== "undefined") ? karyonTheme.accentColor : "#0d7cd6"
+    readonly property color accentHoverColor: (typeof karyonTheme !== "undefined") ? karyonTheme.accentHoverColor : "#298fe6"
 
     focus: true
     Component.onCompleted: root.forceActiveFocus()
@@ -18,8 +18,8 @@ Item {
         id: card
         anchors.fill: parent
         radius: 12
-        color: "#1e2227"
-        border.color: "#353b45"
+        color: (typeof karyonTheme !== "undefined") ? karyonTheme.cardBg : "#1e2227"
+        border.color: (typeof karyonTheme !== "undefined") ? karyonTheme.cardBorder : "#353b45"
         border.width: 1
 
         // Header mit Icon, Titel und Drag-Möglichkeit
@@ -55,14 +55,14 @@ Item {
 
                     Text {
                         text: "Karyon"
-                        color: "#ffffff"
+                        color: (typeof karyonTheme !== "undefined") ? karyonTheme.textPrimary : "#ffffff"
                         font.pixelSize: 14
                         font.bold: true
                     }
 
                     Text {
                         text: "Quick Guide & Info"
-                        color: "#96a2b4"
+                        color: (typeof karyonTheme !== "undefined") ? karyonTheme.textSecondary : "#96a2b4"
                         font.pixelSize: 11
                         anchors.verticalCenter: parent.verticalCenter
                     }
@@ -74,7 +74,7 @@ Item {
                 width: 26
                 height: 26
                 radius: 5
-                color: closeXMa.containsMouse ? "#353b45" : "transparent"
+                color: closeXMa.containsMouse ? ((typeof karyonTheme !== "undefined") ? karyonTheme.controlHoverBg : "#353b45") : "transparent"
                 anchors.right: parent.right
                 anchors.rightMargin: 12
                 anchors.verticalCenter: parent.verticalCenter
@@ -82,7 +82,7 @@ Item {
                 Text {
                     anchors.centerIn: parent
                     text: "✕"
-                    color: closeXMa.containsMouse ? "#ffffff" : "#cdd3de"
+                    color: closeXMa.containsMouse ? ((typeof karyonTheme !== "undefined") ? karyonTheme.textPrimary : "#ffffff") : ((typeof karyonTheme !== "undefined") ? karyonTheme.textSecondary : "#cdd3de")
                     font.pixelSize: 13
                     font.bold: true
                 }
@@ -104,7 +104,7 @@ Item {
             anchors.left: parent.left
             anchors.right: parent.right
             height: 1
-            color: "#282c34"
+            color: (typeof karyonTheme !== "undefined") ? karyonTheme.dividerColor : "#282c34"
         }
 
         // Scrollbarer Anleitungsbereich (knappe Stichpunkte, keine Fließtextsätze)
@@ -140,18 +140,30 @@ Item {
 
                     Row {
                         spacing: 6
-                        Text { text: "• Hold RMB:"; color: "#ffffff"; font.pixelSize: 11; font.bold: true }
-                        Text { text: "Open overlay • Aim & release to trigger"; color: "#cdd3de"; font.pixelSize: 11 }
+                        width: parent.width
+                        Text {
+                            text: "• Hold Trigger:"
+                            color: (typeof karyonTheme !== "undefined") ? karyonTheme.textPrimary : "#ffffff"
+                            font.pixelSize: 11
+                            font.bold: true
+                        }
+                        Text {
+                            width: parent.width - 95
+                            wrapMode: Text.WordWrap
+                            text: "Open overlay • Aim & release to trigger. RMB is default. Keep in mind: Karyon is designed for use of RMB! Some custom trigger buttons do not work well or at all."
+                            color: (typeof karyonTheme !== "undefined") ? karyonTheme.textSecondary : "#cdd3de"
+                            font.pixelSize: 11
+                        }
                     }
                     Row {
                         spacing: 6
-                        Text { text: "• Mouse Wheel in Hub:"; color: "#ffffff"; font.pixelSize: 11; font.bold: true }
-                        Text { text: "Switch categories (Windows, Apps, Files)"; color: "#cdd3de"; font.pixelSize: 11 }
+                        Text { text: "• Mouse Wheel in Hub:"; color: (typeof karyonTheme !== "undefined") ? karyonTheme.textPrimary : "#ffffff"; font.pixelSize: 11; font.bold: true }
+                        Text { text: "Switch categories (Windows, Apps, Files)"; color: (typeof karyonTheme !== "undefined") ? karyonTheme.textSecondary : "#cdd3de"; font.pixelSize: 11 }
                     }
                     Row {
                         spacing: 6
-                        Text { text: "• Left-Click:"; color: "#ffffff"; font.pixelSize: 11; font.bold: true }
-                        Text { text: "Cancel & close overlay without action"; color: "#cdd3de"; font.pixelSize: 11 }
+                        Text { text: "• Left-Click:"; color: (typeof karyonTheme !== "undefined") ? karyonTheme.textPrimary : "#ffffff"; font.pixelSize: 11; font.bold: true }
+                        Text { text: "Cancel & close overlay without action"; color: (typeof karyonTheme !== "undefined") ? karyonTheme.textSecondary : "#cdd3de"; font.pixelSize: 11 }
                     }
                 }
 
@@ -169,18 +181,18 @@ Item {
 
                     Row {
                         spacing: 6
-                        Text { text: "• Middle-Click (MMB):"; color: "#ffffff"; font.pixelSize: 11; font.bold: true }
-                        Text { text: "Close targeted window"; color: "#cdd3de"; font.pixelSize: 11 }
+                        Text { text: "• Middle-Click (MMB):"; color: (typeof karyonTheme !== "undefined") ? karyonTheme.textPrimary : "#ffffff"; font.pixelSize: 11; font.bold: true }
+                        Text { text: "Close targeted window"; color: (typeof karyonTheme !== "undefined") ? karyonTheme.textSecondary : "#cdd3de"; font.pixelSize: 11 }
                     }
                     Row {
                         spacing: 6
-                        Text { text: "• Wheel Up:"; color: "#ffffff"; font.pixelSize: 11; font.bold: true }
-                        Text { text: "Maximize / Restore targeted window"; color: "#cdd3de"; font.pixelSize: 11 }
+                        Text { text: "• Wheel Up:"; color: (typeof karyonTheme !== "undefined") ? karyonTheme.textPrimary : "#ffffff"; font.pixelSize: 11; font.bold: true }
+                        Text { text: "Maximize / Restore targeted window"; color: (typeof karyonTheme !== "undefined") ? karyonTheme.textSecondary : "#cdd3de"; font.pixelSize: 11 }
                     }
                     Row {
                         spacing: 6
-                        Text { text: "• Wheel Down:"; color: "#ffffff"; font.pixelSize: 11; font.bold: true }
-                        Text { text: "Minimize / Restore targeted window"; color: "#cdd3de"; font.pixelSize: 11 }
+                        Text { text: "• Wheel Down:"; color: (typeof karyonTheme !== "undefined") ? karyonTheme.textPrimary : "#ffffff"; font.pixelSize: 11; font.bold: true }
+                        Text { text: "Minimize / Restore targeted window"; color: (typeof karyonTheme !== "undefined") ? karyonTheme.textSecondary : "#cdd3de"; font.pixelSize: 11 }
                     }
                 }
 
@@ -198,13 +210,13 @@ Item {
 
                     Row {
                         spacing: 6
-                        Text { text: "• Pin / Unpin:"; color: "#ffffff"; font.pixelSize: 11; font.bold: true }
-                        Text { text: "Aim at needle icon and release RMB"; color: "#cdd3de"; font.pixelSize: 11 }
+                        Text { text: "• Pin / Unpin:"; color: (typeof karyonTheme !== "undefined") ? karyonTheme.textPrimary : "#ffffff"; font.pixelSize: 11; font.bold: true }
+                        Text { text: "Aim at needle icon and release RMB"; color: (typeof karyonTheme !== "undefined") ? karyonTheme.textSecondary : "#cdd3de"; font.pixelSize: 11 }
                     }
                     Row {
                         spacing: 6
-                        Text { text: "• Supported for pinning:"; color: "#ffffff"; font.pixelSize: 11; font.bold: true }
-                        Text { text: "Primary window instances, Applications, Recent Files"; color: "#cdd3de"; font.pixelSize: 11 }
+                        Text { text: "• Supported for pinning:"; color: (typeof karyonTheme !== "undefined") ? karyonTheme.textPrimary : "#ffffff"; font.pixelSize: 11; font.bold: true }
+                        Text { text: "Primary window instances, Applications, Recent Files"; color: (typeof karyonTheme !== "undefined") ? karyonTheme.textSecondary : "#cdd3de"; font.pixelSize: 11 }
                     }
                 }
 
@@ -222,13 +234,13 @@ Item {
 
                     Row {
                         spacing: 6
-                        Text { text: "• Media Buttons:"; color: "#ffffff"; font.pixelSize: 11; font.bold: true }
-                        Text { text: "Previous Track • Play / Pause • Next Track"; color: "#cdd3de"; font.pixelSize: 11 }
+                        Text { text: "• Media Buttons:"; color: (typeof karyonTheme !== "undefined") ? karyonTheme.textPrimary : "#ffffff"; font.pixelSize: 11; font.bold: true }
+                        Text { text: "Previous Track • Play / Pause • Next Track"; color: (typeof karyonTheme !== "undefined") ? karyonTheme.textSecondary : "#cdd3de"; font.pixelSize: 11 }
                     }
                     Row {
                         spacing: 6
-                        Text { text: "• Volume (Hub bottom) / Mute (entire Hub):"; color: "#ffffff"; font.pixelSize: 11; font.bold: true }
-                        Text { text: "Mouse wheel changes volume • Middle-click toggles mute"; color: "#cdd3de"; font.pixelSize: 11 }
+                        Text { text: "• Volume (Hub bottom) / Mute (entire Hub):"; color: (typeof karyonTheme !== "undefined") ? karyonTheme.textPrimary : "#ffffff"; font.pixelSize: 11; font.bold: true }
+                        Text { text: "Mouse wheel changes volume • Middle-click toggles mute"; color: (typeof karyonTheme !== "undefined") ? karyonTheme.textSecondary : "#cdd3de"; font.pixelSize: 11 }
                     }
                 }
 
@@ -246,8 +258,8 @@ Item {
 
                     Row {
                         spacing: 6
-                        Text { text: "• Live Status:"; color: "#ffffff"; font.pixelSize: 11; font.bold: true }
-                        Text { text: "Window segments mirror live tray icons (badges, notification indicators)"; color: "#cdd3de"; font.pixelSize: 11 }
+                        Text { text: "• Live Status:"; color: (typeof karyonTheme !== "undefined") ? karyonTheme.textPrimary : "#ffffff"; font.pixelSize: 11; font.bold: true }
+                        Text { text: "Window segments mirror live tray icons (badges, notification indicators)"; color: (typeof karyonTheme !== "undefined") ? karyonTheme.textSecondary : "#cdd3de"; font.pixelSize: 11 }
                     }
                 }
 
@@ -265,13 +277,13 @@ Item {
 
                     Row {
                         spacing: 6
-                        Text { text: "• Execute:"; color: "#ffffff"; font.pixelSize: 11; font.bold: true }
-                        Text { text: "Hold RMB + fast swipe (8 directions) • Release RMB to trigger"; color: "#cdd3de"; font.pixelSize: 11 }
+                        Text { text: "• Execute:"; color: (typeof karyonTheme !== "undefined") ? karyonTheme.textPrimary : "#ffffff"; font.pixelSize: 11; font.bold: true }
+                        Text { text: "Hold RMB + fast swipe (8 directions) • Release RMB to trigger"; color: (typeof karyonTheme !== "undefined") ? karyonTheme.textSecondary : "#cdd3de"; font.pixelSize: 11 }
                     }
                     Row {
                         spacing: 6
-                        Text { text: "• Cancel:"; color: "#ffffff"; font.pixelSize: 11; font.bold: true }
-                        Text { text: "Left-click while swiping cancels gesture"; color: "#cdd3de"; font.pixelSize: 11 }
+                        Text { text: "• Cancel:"; color: (typeof karyonTheme !== "undefined") ? karyonTheme.textPrimary : "#ffffff"; font.pixelSize: 11; font.bold: true }
+                        Text { text: "Left-click while swiping cancels gesture"; color: (typeof karyonTheme !== "undefined") ? karyonTheme.textSecondary : "#cdd3de"; font.pixelSize: 11 }
                     }
                 }
             }
@@ -284,7 +296,7 @@ Item {
             anchors.left: parent.left
             anchors.right: parent.right
             height: 1
-            color: "#282c34"
+            color: (typeof karyonTheme !== "undefined") ? karyonTheme.dividerColor : "#282c34"
         }
 
         // Footer mit Versions- & Projekthinweis sowie OK-Button
@@ -302,15 +314,15 @@ Item {
                 spacing: 1
 
                 Text {
-                    text: "Karyon 3.0 • © 2026 eisen"
-                    color: "#96a2b4"
+                    text: "Karyon 3.1 • © 2026 eisen"
+                    color: (typeof karyonTheme !== "undefined") ? karyonTheme.textMuted : "#96a2b4"
                     font.pixelSize: 11
                     font.bold: true
                 }
 
                 Text {
                     text: "https://github.com/eiseneuter/karyon"
-                    color: "#6c788c"
+                    color: (typeof karyonTheme !== "undefined") ? karyonTheme.textSubtle : "#6c788c"
                     font.pixelSize: 10
                 }
             }
