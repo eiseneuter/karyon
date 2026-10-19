@@ -1,66 +1,65 @@
 # Karyon
 
-Radial overlay launcher for KDE Plasma 6 (Wayland **and** X11). Karyon is designed to be your central hub for multitasking, window management, and rapid interactions.
+Radial overlay launcher for KDE Plasma 6 (Wayland & X11). Fast, cursor-centered multitasking, window management, and desktop navigation.
 
 ![Karyon](resources/screenshot.png)
 
-By holding the right mouse button, Karyon opens a sleek, highly responsive radial menu right at your cursor. It provides instant access to open windows, favorite applications, recent files, and essential system functions.
-
-**The Ultimate Minimalist Workspace:**  
-Karyon is fully capable of entirely replacing your KDE Plasma Panel (Task Manager), System Tray, and Application Launcher. By consolidating these core desktop components into a single, cursor-centered overlay, Karyon empowers you to hide all traditional panels. The result is a radically clean, distraction-free, and highly efficient desktop experience where your tools appear instantly.
+Hold your trigger button (default: RMB) to open a sleek radial menu right at your cursor. Karyon provides instant access to open windows, apps, recent files, and system controls — letting you completely hide traditional desktop panels for a clean, distraction-free workspace.
 
 ---
 
-## Features & Usage
+## Features & Controls
 
-### 1. General Operation
-* **Trigger & Select:** Hold the right mouse button to open the overlay. Hover over the desired item and let the right mouse button go to select it.
-* **Cancel:** Left-click anywhere while the overlay is open to cancel and close it without making a selection.
-* **Category Switching:** Use your mouse wheel inside the central hub to switch between categories (**Windows**, **Apps**, and **Files**).
-* **Volume Control:** Use your mouse wheel to adjust the system volume in the dedicated Volume Control Area at the bottom of the central hub.
-* **Media Controls:** When media is actively playing or paused, smart media controls (Previous, Play/Pause, Next) appear dynamically. Activate them (hover and release) to control playback.
-* **Mute Audio:** Middle-click anywhere in the central hub to toggle system mute.
-* **Window Management:** Hover directly over an open window segment and scroll the mouse wheel **Up** to Maximize (or Restore) the window, and **Down** to Minimize (or Restore) it. Middle-click directly on the segment closes the window.
+### 1. General Controls
+* **Trigger & Select:** Hold the trigger button to open. Hover over an item and release to activate.
+* **Cancel:** Left-click while open to dismiss without action.
+* **Category Switch:** Scroll the mouse wheel inside the hub to cycle through **Windows**, **Apps**, and **Files**.
+* **Volume Control:** Scroll inside the volume arc at the bottom of the hub.
+* **Mute Audio:** Middle-click anywhere inside the hub to toggle mute.
+* **Media Controls:** Dynamic controls (Prev / Play-Pause / Next) appear automatically when media is active.
+* **Window Management:** Hover directly over a window icon in the ring:
+  * **Scroll Up:** Maximize / Restore
+  * **Scroll Down:** Minimize / Restore
+  * **Middle-Click:** Close window
 
-### 2. Navigation & Window Management
-* **Smart Ring Layout:** Karyon arranges your open windows, frequent apps, and recent files in concentric rings around your cursor. Windows and applications are strictly ordered based on usage (Most Recently Used), so your current context is always exactly where you need it.
-* **Interactive Segment Bars (Drill-Down):** Hovering over the outer edge of segments reveals interactive bars:
-  * **Drill-Down Bar:** Appears on segments that contain deeper options or application sub-menus. Hovering over it drills down into the respective app or category.
-* **Contextual Badges:**
-  * **Window Counter Badge:** A numerical badge on application segments indicating how many open windows belong to that application. Hovering over this badge transforms it into a close button (X), allowing you to close the entire application group by releasing the right mouse button.
-  * **Pin Badge:** Hover over the pin icon and release to permanently pin an application or file to your overlay. Pinned items stay in place even when closed, ensuring your most vital tools are always exactly where you expect them.
-  * **Job Progress Indicators:** When file operations or downloads are running via KDE Frameworks (KIO), segments pulse or display active progress rings.
+### 2. Navigation & Rings
+* **Concentric Rings:** Open windows and apps are organized in rings by Most Recently Used (MRU) order.
+* **Drill-Down Bars:** Hovering the outer edge opens submenus, categories, or grouped window lists.
+* **Context Badges:**
+  * **Window Counter / Group Close:** Shows open window count; hover the counter to close the whole app group.
+  * **Pinning:** Hover the pin icon and release to permanently pin favorite apps or files.
+  * **Job Progress:** Displays active progress rings for ongoing file transfers and downloads (KIO).
 
-### 3. Gestures (Fast-Action)
-* **Mouse Gestures:** Flick your mouse in any of the 8 directions while holding the right mouse button to invoke gestures (like *copy*, *paste*, *maximize*, *virtual desktop switch*, or custom shortcuts). Actions trigger immediately upon flicking.
-* **Important:** Gestures are designed to be extremely fast. They must be initiated *without* opening the visual overlay. Press the right mouse button and immediately flick your mouse to execute the gesture seamlessly.
+### 3. Gestures (Trigger + Quick Swipe)
+* **Instant Actions:** Hold the trigger and immediately flick the mouse in one of 8 directions (copy, paste, desktop switch, etc.). Executes instantly without opening the visual overlay.
+* **Trail Visualizer:** Optional visual trail to assist gesture feedback (toggleable in settings).
 
-### 4. Embedded Utilities & System Hub
-* **Central Hub:** The center of the radial menu acts as an orientation guide and information center. It prominently displays an icon indicating the currently active category (Windows, Apps, or Files), along with real-time system information (clock and date).
-* **System Tray:** Access your system's tray icons directly within Karyon. Hovering over a tray icon and releasing the right mouse button opens its native Plasma flyout window (just like the real system tray), giving you full access to its controls.
-* **Session Controls:** Access quick power options to lock the screen, switch user, log out, sleep, restart, or shut down cleanly.
-* **Volume Control:** Adjust the system volume instantly using your mouse wheel inside the dedicated Volume Control Area at the bottom of the hub.
+### 4. Hub & Desktop Integration
+* **Central Hub:** Displays active category, clock, date, and status indicators.
+* **System Tray:** Access running tray icons and open their native Plasma popup menus.
+* **Session Controls:** Fast access to lock, logout, suspend, restart, and shutdown.
+* **Show Desktop:** Toggle desktop visibility directly from the ring.
 
 ### 5. Game Mode & Deep Sleep
-Karyon is built to never get in your way when gaming.
-* **Automatic Detection:** Karyon automatically detects active games (via `.desktop` categories, Steam, Lutris, and Heroic). When a game is focused, Karyon enters Game Mode without requiring manual configuration.
-* **Deep Sleep:** While Game Mode is active, Karyon suspends all background polling and forwards your mouse inputs 1:1 with zero overhead. As soon as you switch back to desktop applications, Karyon wakes up instantly.
+* **Auto-Detection:** Automatically detects games (Steam, Lutris, Heroic, Wine/Proton).
+* **Zero Overhead:** Suspends polling and forwards mouse input 1:1 with zero overhead while in-game. Wakes up immediately when returning to desktop apps.
 
 ---
 
-## Configuration & Customization
-Karyon features a dedicated settings panel accessible via the system tray icon (which can also be reached directly through the overlay itself). Here you can:
-* **Customize Hold Time:** Adjust the hold-time to invoke the overlay or firing a gesture.
-* **Adjust Aesthetics:** Change overlay scale and transparency.
-* **Tweak Layout:** Toggle individual segments, rings, or utilities on or off to keep the overlay minimal or fully loaded.
+## Configuration
+
+Accessible via the tray icon or the overlay settings segment:
+* **Trigger Button / Key:** Configure RMB, extra mouse buttons, or keyboard shortcuts.
+* **Timings & Speed:** Adjust hold trigger delay (ms) and overlay mouse speed.
+* **Appearance:** Customize scale (up to 1.5x), transparency, and date/time format.
+* **Toggles:** Enable or disable individual categories, gesture trail, media/volume controls, and Game Mode.
 
 ---
 
-## Technical Background (How it works)
-Karyon uses several advanced techniques to achieve deep system integration and maximum performance on both Wayland and X11:
-* **Global Input Interception (evdev/uinput):** To reliably capture the mouse trigger anywhere on the screen (even in Wayland, where global hotkeys are strictly isolated for security), Karyon directly reads from `/dev/input/event*` and uses `uinput` to create a virtual proxy mouse and keyboard. This allows Karyon to intercept and consume the trigger button before the compositor even sees it.
-* **Fullscreen Overlays (Wayland & X11):** Karyon renders as a frameless, override-redirect top-level window (`Qt::BypassWindowManagerHint`), ensuring the overlay draws seamlessly on top of all windows, including fullscreen applications.
-* **Hardware-Accelerated Qt Quick / QML:** Karyon utilizes Qt Quick's GPU-accelerated scene graph (OpenGL / Vulkan) for vector rendering and animations, drawing with sub-millisecond frame latency while keeping CPU usage minimal.
+## Architecture
+* **Low-Level Input (evdev / uinput):** Low-latency interception of trigger events across Wayland & X11 via a virtual input device without desktop compositor restrictions.
+* **Frameless Top-Level Window:** Rendered directly over all windows and full-screen apps via `Qt::BypassWindowManagerHint`.
+* **GPU-Accelerated Qt Quick:** Hardware-accelerated vector drawing with sub-millisecond render latency.
 
 ---
 
@@ -72,27 +71,23 @@ Karyon uses several advanced techniques to achieve deep system integration and m
 
 ---
 
-## Run (from source)
+## Quick Start
+
+### Run from Source
 ```bash
 ./start.sh
 ```
-Karyon automatically builds incrementally and runs natively against your host's Qt 6 and KDE Frameworks 6 libraries.
 
----
-
-## Build a self-contained AppImage (X11 + Wayland)
+### Build AppImage (Docker)
 ```bash
 ./build_appimage_docker.sh
 ```
-This builds a standalone, self-contained AppImage on Ubuntu 22.04 LTS (glibc 2.35) bundling Qt 6, KDE Frameworks 6, and all runtime dependencies. The resulting file is created in `dist/Karyon-x86_64.AppImage`.
+Produces a standalone AppImage in `dist/Karyon-x86_64.AppImage`.
 
----
-
-## Permissions
-Karyon needs one-time input access (`/dev/input/event*` and `/dev/uinput`). The application automatically displays a permission setup dialog on first launch to configure the required udev rule via Polkit (`pkexec`).
+### Permissions
+Karyon requires access to `/dev/input/event*` and `/dev/uinput`. On first launch, a Polkit dialog automatically sets up the required udev rule.
 
 ---
 
 ## License
-This project is licensed under the **GNU General Public License v3.0 or later** (GPL-3.0-or-later).  
-See the [LICENSE](LICENSE) file for details.
+This project is licensed under the **GNU General Public License v3.0 or later** (GPL-3.0-or-later). See [LICENSE](LICENSE) for details.

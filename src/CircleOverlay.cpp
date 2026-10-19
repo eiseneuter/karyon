@@ -4032,14 +4032,53 @@ QString CircleOverlay::selectedWindowId() const
 
 bool CircleOverlay::isCursorOnSegment() const
 {
-    if (!m_view || !m_view->rootObject()) return false;
-    return m_view->rootObject()->property("isCursorOnSegment").toBool();
+    if (isCursorInHub()) return false;
+
+    if (m_selectedRing < 1 || m_selectedIndex < 0) return false;
+
+    double dist = std::hypot(m_lastAimX, m_lastAimY);
+    int innerR1 = hubRadius() + ringGap();
+    int outerR1 = innerR1 + ringDepth();
+    int innerR2 = outerR1 + ring2Gap();
+    int outerR2 = innerR2 + ring2Depth();
+    int innerR3 = outerR2 + ring3Gap();
+    int outerR3 = innerR3 + ring3Depth();
+
+    int innerR = 0;
+    int outerR = 0;
+    if (m_selectedRing == 1) {
+        innerR = innerR1;
+        outerR = outerR1;
+    } else if (m_selectedRing == 2) {
+        innerR = innerR2;
+        outerR = outerR2;
+    } else if (m_selectedRing == 3) {
+        innerR = innerR3;
+        outerR = outerR3;
+    } else {
+        return false;
+    }
+
+    if (dist < innerR || dist > outerR) {
+        return false;
+    }
+
+    if (m_view && m_view->rootObject()) {
+        return m_view->rootObject()->property("isCursorOnSegment").toBool();
+    }
+    return true;
 }
 
 bool CircleOverlay::isCursorInHub() const
 {
-    if (!m_view || !m_view->rootObject()) return false;
-    return m_view->rootObject()->property("isCursorInHub").toBool();
+    double dist = std::hypot(m_lastAimX, m_lastAimY);
+    if (dist < (hubRadius() + ringGap() / 2.0)) {
+        return true;
+    }
+    if (m_view && m_view->rootObject()) {
+        return m_view->rootObject()->property("isCursorInHub").toBool();
+    }
+    return false;
 }
 
 void CircleOverlay::handleHubWheel(int delta)

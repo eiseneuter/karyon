@@ -782,6 +782,7 @@ int main(int argc, char *argv[])
     QObject::connect(&monitor, &InputMonitor::wheelScrolled, &overlay, [&overlay, &kwinBridge](int delta) {
         if (!overlay.isVisible()) return;
 
+        // 1. Im Lautstärkebereich des Hubs: Lautstärkeregelung
         if (overlay.isCursorInVolumeArea()) {
             int vStep = SettingsManager::instance().volumeStep();
             int step = (delta > 0) ? vStep : -vStep;
@@ -789,13 +790,19 @@ int main(int argc, char *argv[])
             return;
         }
 
-        QString winId = overlay.manipulationTargetWindowId();
-        if (winId.isEmpty()) {
+        // 2. Im Hub (außerhalb des Lautstärkebereichs): Kategoriewechsel (Windows, Apps, Files) mit sauberem 150ms-Debounce
+        if (overlay.isCursorInHub()) {
             qint64 now = QDateTime::currentMSecsSinceEpoch();
             if (now - lastHubWheelTime >= 150) {
                 lastHubWheelTime = now;
                 overlay.handleHubWheel(delta);
             }
+            return;
+        }
+
+        // 3. Auf einem Fenster-Segment/Icon im Ring: Maximieren (UP) / Minimieren (DOWN)
+        QString winId = overlay.manipulationTargetWindowId();
+        if (winId.isEmpty()) {
             return;
         }
 

@@ -176,7 +176,7 @@ Item {
         return id;
     }
 
-    // Nur true, wenn der Cursor auf einem Segment liegt oder sich außerhalb des Overlays im Sektor des äußersten Segments befindet
+    // Nur true, wenn der Cursor physisch auf dem gezeichneten Segment/Icon im Ring liegt
     readonly property bool isCursorOnSegment: {
         if (selectedRing < 1 || selectedIndex < 0) return false;
         var dx = aimOffsetX;
@@ -184,12 +184,20 @@ Item {
         var dist = Math.sqrt(dx * dx + dy * dy);
         var angle = Math.atan2(dy, dx);
 
-        var innerR1 = circleRadius + ringGap;
-        var outerR1 = innerR1 + ringDepth;
-        var innerR2 = outerR1 + ring2Gap;
-        var outerR2 = innerR2 + ring2Depth;
-        var innerR3 = outerR2 + ring3Gap;
-        var outerR3 = innerR3 + ring3Depth;
+        var cRadius = (typeof circleRadius !== "undefined" ? circleRadius : 75);
+        var rGap = (typeof ringGap !== "undefined" ? ringGap : 10);
+        var rDepth = (typeof ringDepth !== "undefined" ? ringDepth : 46);
+        var r2Gap = (typeof ring2Gap !== "undefined" ? ring2Gap : 10);
+        var r2Depth = (typeof ring2Depth !== "undefined" ? ring2Depth : 46);
+        var r3Gap = (typeof ring3Gap !== "undefined" ? ring3Gap : 10);
+        var r3Depth = (typeof ring3Depth !== "undefined" ? ring3Depth : 46);
+
+        var innerR1 = cRadius + rGap;
+        var outerR1 = innerR1 + rDepth;
+        var innerR2 = outerR1 + r2Gap;
+        var outerR2 = innerR2 + r2Depth;
+        var innerR3 = outerR2 + r3Gap;
+        var outerR3 = innerR3 + r3Depth;
 
         var innerR = 0;
         var outerR = 0;
@@ -220,40 +228,10 @@ Item {
         // Im Hub (dist < innerR): NIE auf dem Segment
         if (dist < innerR) return false;
 
-        // Liegt der Cursor physisch im Ring?
+        // Liegt der Cursor physisch im Ring des Segments?
         if (dist <= outerR) return true;
 
-        // Cursor ist außerhalb des Rings (dist > outerR):
-        // Gültig, wenn dieses Segment in dieser Richtung das äußerste existierende Segment ist
-        if (selectedRing === 3) return true;
-        if (selectedRing === 2) {
-            var numS3 = (hasRing3Active && segmentList3 && segmentList3.length) ? segmentList3.length : 0;
-            for (var k3 = 0; k3 < numS3; k3++) {
-                var d3 = angle - segmentList3[k3].angle;
-                while (d3 > Math.PI) d3 -= 2 * Math.PI;
-                while (d3 < -Math.PI) d3 += 2 * Math.PI;
-                if (Math.abs(d3) <= (segmentList3[k3].span / 2.0)) return false;
-            }
-            return true;
-        }
-        if (selectedRing === 1) {
-            var numS3b = (hasRing3Active && segmentList3 && segmentList3.length) ? segmentList3.length : 0;
-            for (var k3b = 0; k3b < numS3b; k3b++) {
-                var d3b = angle - segmentList3[k3b].angle;
-                while (d3b > Math.PI) d3b -= 2 * Math.PI;
-                while (d3b < -Math.PI) d3b += 2 * Math.PI;
-                if (Math.abs(d3b) <= (segmentList3[k3b].span / 2.0)) return false;
-            }
-            var numS2 = (hasRing2Active && segmentList2 && segmentList2.length) ? segmentList2.length : 0;
-            for (var k2 = 0; k2 < numS2; k2++) {
-                var d2 = angle - segmentList2[k2].angle;
-                while (d2 > Math.PI) d2 -= 2 * Math.PI;
-                while (d2 < -Math.PI) d2 += 2 * Math.PI;
-                if (Math.abs(d2) <= (segmentList2[k2].span / 2.0)) return false;
-            }
-            return true;
-        }
-
+        // Außerhalb des Rings (dist > outerR): NICHT auf dem Segment/Icon
         return false;
     }
 

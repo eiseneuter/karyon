@@ -123,7 +123,13 @@ public:
     bool isCounterBadgeHovered() const { return m_isCounterBadgeHovered; }
     QStringList currentGroupWindowIds() const;
 
-    bool isCursorInVolumeArea() const { return m_showVolumeControlEnabled && m_isVolumeHovered; }
+    bool isCursorInVolumeArea() const {
+        if (!m_showVolumeControlEnabled) return false;
+        double dist = std::hypot(m_lastAimX, m_lastAimY);
+        int r = hubRadius();
+        if (dist <= r && m_lastAimY >= ((r / 3.0) + 7.0)) return true;
+        return m_isVolumeHovered;
+    }
     bool volumeScrolledThisSession() const { return m_volumeScrolledThisSession; }
     void stepVolume(int stepPercent);
     void toggleMute();
