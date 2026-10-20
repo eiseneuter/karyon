@@ -32,6 +32,7 @@ namespace {
 bool isExcludedNonMouse(const QString &devName)
 {
     static const QStringList nonMouseKeywords = {
+        QStringLiteral("keyboard"),
         QStringLiteral("touchpad"), QStringLiteral("trackpad"), QStringLiteral("glidepoint"),
         QStringLiteral("trackpoint"), QStringLiteral("trackstick"), QStringLiteral("pointstick"),
         QStringLiteral("dualpoint"), QStringLiteral("tpps/2"), QStringLiteral("stick"),
@@ -61,7 +62,8 @@ bool isMouseDevice(int fd)
         }
         std::string lowerName = sName;
         for (char &c : lowerName) c = std::tolower(c);
-        if (lowerName.find("touchpad") != std::string::npos ||
+        if (lowerName.find("keyboard") != std::string::npos ||
+            lowerName.find("touchpad") != std::string::npos ||
             lowerName.find("trackpad") != std::string::npos ||
             lowerName.find("consumer control") != std::string::npos ||
             lowerName.find("system control") != std::string::npos) {
@@ -81,6 +83,13 @@ bool isMouseDevice(int fd)
 
     if (!testBit(relBits, REL_X) || !testBit(relBits, REL_Y)) return false;
     if (!testBit(keyBits, BTN_LEFT) && !testBit(keyBits, BTN_RIGHT)) return false;
+
+    // Geräte mit Schreibmaschinentasten (A, Leertaste, Enter) niemals als Maus einstufen!
+    // Verbundgeräte (z. B. Dell KB216 Multimedia Keyboard) melden oft Pseudo-Mausachsen,
+    // dürfen aber keinesfalls per EVIOCGRAB exklusiv als Maus übernommen werden.
+    if (testBit(keyBits, KEY_A) && testBit(keyBits, KEY_SPACE) && testBit(keyBits, KEY_ENTER)) {
+        return false;
+    }
 
     return true;
 }
@@ -108,14 +117,6 @@ bool isKeyboardDevice(int fd)
         return (arr[bit / (sizeof(long) * 8)] & (1UL << (bit % (sizeof(long) * 8)))) != 0;
     };
     if (!testBit(evBits, EV_KEY)) return false;
-
-    // Must NOT have REL_X and REL_Y (otherwise it's a mouse/pointer)
-    unsigned long relBits[(REL_CNT + sizeof(long) * 8 - 1) / (sizeof(long) * 8)] = {0};
-    if (ioctl(fd, EVIOCGBIT(EV_REL, sizeof(relBits)), relBits) >= 0) {
-        if (testBit(relBits, REL_X) && testBit(relBits, REL_Y)) {
-            return false;
-        }
-    }
 
     unsigned long keyBits[(KEY_CNT + sizeof(long) * 8 - 1) / (sizeof(long) * 8)] = {0};
     if (ioctl(fd, EVIOCGBIT(EV_KEY, sizeof(keyBits)), keyBits) < 0) return false;
