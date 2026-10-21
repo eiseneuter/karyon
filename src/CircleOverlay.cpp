@@ -2954,6 +2954,15 @@ void CircleOverlay::partitionCategories(QList<OverlaySegment> &outRing1,
         return seg;
     };
 
+    double activeCatAngle = -M_PI / 2.0;
+    const QString targetCatId = QStringLiteral("cat:") + QString::number(activeCatIndex);
+    for (const auto &seg : outRing1) {
+        if (seg.windowId == targetCatId) {
+            activeCatAngle = seg.angle;
+            break;
+        }
+    }
+
     int r2Count = std::min((int)apps.size(), 15);
     const int r2Outer = r1Outer + ring2Gap() + ring2Depth();
     const double gapAng2 = (double)segGap() / r2Outer;
@@ -2963,7 +2972,7 @@ void CircleOverlay::partitionCategories(QList<OverlaySegment> &outRing1,
     if (segAng2 > maxSegAng2) segAng2 = maxSegAng2;
     double step2 = segAng2 + gapAng2;
 
-    double r2Start = -M_PI / 2.0 - ((r2Count - 1) * step2) / 2.0;
+    double r2Start = activeCatAngle - ((r2Count - 1) * step2) / 2.0;
     for (int k = 0; k < r2Count; ++k) {
         double angle = r2Start + k * step2;
         outRing2.append(makeAppSeg(apps[k], angle, segAng2, 2));
@@ -2979,7 +2988,7 @@ void CircleOverlay::partitionCategories(QList<OverlaySegment> &outRing1,
         if (segAng3 > maxSegAng3) segAng3 = maxSegAng3;
         double step3 = segAng3 + gapAng3;
 
-        double r3Start = -M_PI / 2.0 - ((r3Count - 1) * step3) / 2.0;
+        double r3Start = activeCatAngle - ((r3Count - 1) * step3) / 2.0;
         for (int k = 0; k < r3Count; ++k) {
             double angle = r3Start + k * step3;
             outRing3.append(makeAppSeg(apps[15 + k], angle, segAng3, 3));
