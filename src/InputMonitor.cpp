@@ -1484,6 +1484,13 @@ void InputMonitor::workerLoop()
 
                                 if (ev.code == REL_X) { aimX += effDelta; aimDirty = true; trigBatchDirty = true; }
                                 else if (ev.code == REL_Y) { aimY += effDelta; aimDirty = true; trigBatchDirty = true; }
+
+                                const double maxAimDist = 550.0;
+                                double curDist = std::hypot(aimX, aimY);
+                                if (curDist > maxAimDist) {
+                                    aimX = static_cast<int>(std::round(aimX * maxAimDist / curDist));
+                                    aimY = static_cast<int>(std::round(aimY * maxAimDist / curDist));
+                                }
                                 continue;
                             } else if (ev.code == REL_WHEEL || ev.code == REL_WHEEL_HI_RES) {
                                 if (ev.code == REL_WHEEL) {

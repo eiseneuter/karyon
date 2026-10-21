@@ -737,9 +737,13 @@ int main(int argc, char *argv[])
             if (!cur.isNull() && (cur.x() != 0 || cur.y() != 0)) {
                 if (!overlay.containsCursor(cur)) {
                     overlay.updateAim(cur.x() - overlay.centerX(), cur.y() - overlay.centerY());
+                } else if (!overlay.isQmlPointerActive()) {
+                    // Fallback für Spiele mit Pointer-Lock / unsichtbarem Systemcursor:
+                    // QML empfängt keine Events vom Compositor -> Hardware-Deltas aus InputMonitor übernehmen!
+                    overlay.updateAimFallback(aimX, aimY);
                 }
             } else {
-                overlay.updateAim(aimX, aimY);
+                overlay.updateAimFallback(aimX, aimY);
             }
         }
     }, Qt::QueuedConnection);

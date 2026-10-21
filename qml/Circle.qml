@@ -98,6 +98,7 @@ Item {
     property bool isCounterBadgeHovered: false
     property real aimOffsetX: 0
     property real aimOffsetY: -20
+    property bool fallbackCursorActive: (typeof overlayController !== "undefined" && overlayController) ? overlayController.fallbackCursorActive : false
 
     readonly property bool isCursorInHub: {
         var dx = aimOffsetX;
@@ -1328,9 +1329,19 @@ Item {
         anchors.fill: parent
         hoverEnabled: true
         acceptedButtons: Qt.NoButton
+        cursorShape: Qt.ArrowCursor
+
+        onEntered: function() {
+            if (typeof overlayController !== "undefined" && overlayController) {
+                overlayController.reportQmlPointerMoved();
+            }
+        }
 
         onPositionChanged: function(mouse) {
             if (overlayDropArea.containsDrag) return;
+            if (typeof overlayController !== "undefined" && overlayController) {
+                overlayController.reportQmlPointerMoved();
+            }
             var cx = root.width / 2;
             var cy = root.height / 2;
             setAimOffset(mouse.x - cx, mouse.y - cy);
@@ -1349,6 +1360,53 @@ Item {
             var cx = root.width / 2;
             var cy = root.height / 2;
             setAimOffset(drag.x - cx, drag.y - cy);
+        }
+    }
+
+    // Visueller Aiming-Indikator (Zielpunkt / Software-Cursor)
+    // Erscheint, wenn KWin/Compositor-Events ausbleiben (z. B. im Spiel bei Pointer-Lock)
+    Item {
+        id: virtualAimCursor
+        visible: fallbackCursorActive
+        enabled: false
+        z: 95
+        x: (root.width / 2) + aimOffsetX - width / 2
+        y: (root.height / 2) + aimOffsetY - height / 2
+        width: 18
+        height: 18
+
+        // Äußerer dunkler Kontrastring
+        Rectangle {
+            anchors.centerIn: parent
+            width: 16
+            height: 16
+            radius: 8
+            color: "transparent"
+            border.color: "#000000"
+            border.width: 3
+            opacity: 0.6
+        }
+
+        // Weißer Halo-Ring
+        Rectangle {
+            anchors.centerIn: parent
+            width: 14
+            height: 14
+            radius: 7
+            color: "transparent"
+            border.color: "#ffffff"
+            border.width: 2
+        }
+
+        // Innerer weißer Kern mit feiner dunkler Kontur
+        Rectangle {
+            anchors.centerIn: parent
+            width: 6
+            height: 6
+            radius: 3
+            color: "#ffffff"
+            border.color: "#000000"
+            border.width: 1
         }
     }
 

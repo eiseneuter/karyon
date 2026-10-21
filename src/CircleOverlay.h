@@ -60,6 +60,8 @@ enum class RecentAppsStage {
 class CircleOverlay : public QObject
 {
     Q_OBJECT
+    Q_PROPERTY(bool fallbackCursorActive READ fallbackCursorActive NOTIFY fallbackCursorActiveChanged)
+
 
 public:
     static constexpr int HUB_RADIUS = 75;           // Durchmesser 150 px
@@ -85,6 +87,10 @@ public:
     void showAt(const QPoint &cursorPos, const QList<WindowInfo> &windows, InputMonitor *monitor = nullptr);
     void refresh(const QList<WindowInfo> &windows);
     void updateAim(int offsetX, int offsetY);
+    void updateAimFallback(int offsetX, int offsetY);
+    bool fallbackCursorActive() const { return m_fallbackCursorActive; }
+    Q_INVOKABLE void reportQmlPointerMoved();
+    bool isQmlPointerActive() const;
     QString selectedWindowId() const;
     bool isCursorOnSegment() const;
     bool isCursorInHub() const;
@@ -148,6 +154,7 @@ public slots:
 signals:
     void overlayShown();
     void overlayHidden();
+    void fallbackCursorActiveChanged(bool active);
 
 private:
     std::unique_ptr<QQuickView> m_view;
@@ -232,6 +239,8 @@ private:
     bool m_showMediaControlsEnabled = true;
     bool m_showVolumeControlEnabled = true;
     bool m_desktopShowing = false;
+    std::chrono::steady_clock::time_point m_lastQmlPointerTime{};
+    bool m_fallbackCursorActive = false;
 
     OverlayMode m_mode = OverlayMode::Windows;
     RecentAppsStage m_recentStage = RecentAppsStage::Recents;

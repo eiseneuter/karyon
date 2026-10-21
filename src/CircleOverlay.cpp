@@ -116,6 +116,7 @@ void CircleOverlay::applyWindowProperties()
         Qt::Tool |
         Qt::WindowDoesNotAcceptFocus
     );
+    m_view->setCursor(Qt::ArrowCursor);
 
     m_view->setColor(QColor(Qt::transparent));
     m_view->setResizeMode(QQuickView::SizeRootObjectToView);
@@ -3667,6 +3668,11 @@ void CircleOverlay::showAt(const QPoint &cursorPos, const QList<WindowInfo> &win
 
     m_isPinHovered = false;
     m_isCounterBadgeHovered = false;
+    m_lastQmlPointerTime = std::chrono::steady_clock::time_point{};
+    if (m_fallbackCursorActive) {
+        m_fallbackCursorActive = false;
+        emit fallbackCursorActiveChanged(false);
+    }
 
     // Initiale Mausposition: cursorOffsetY über dem Zentrum -> Vorauswahl von Ring 1
     m_lastAimX = 0;
@@ -3701,6 +3707,34 @@ void CircleOverlay::updateAim(int offsetX, int offsetY)
     QMetaObject::invokeMethod(m_view->rootObject(), "setAimOffset",
                               Q_ARG(QVariant, offsetX),
                               Q_ARG(QVariant, offsetY));
+}
+
+void CircleOverlay::updateAimFallback(int offsetX, int offsetY)
+{
+    if (!m_fallbackCursorActive) {
+        m_fallbackCursorActive = true;
+        emit fallbackCursorActiveChanged(true);
+    }
+    updateAim(offsetX, offsetY);
+}
+
+void CircleOverlay::reportQmlPointerMoved()
+{
+    m_lastQmlPointerTime = std::chrono::steady_clock::now();
+    if (m_fallbackCursorActive) {
+        m_fallbackCursorActive = false;
+        emit fallbackCursorActiveChanged(false);
+    }
+}
+
+bool CircleOverlay::isQmlPointerActive() const
+{
+    if (m_lastQmlPointerTime.time_since_epoch().count() == 0) {
+        return false;
+    }
+    auto now = std::chrono::steady_clock::now();
+    auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - m_lastQmlPointerTime).count();
+    return elapsed < 150;
 }
 
 void CircleOverlay::handleAimChanged(int offsetX, int offsetY, bool isDrilldown, const QString &curId, int selRing, int selIdx, bool isPinHovered, bool isVolumeHovered, bool isCounterBadgeHovered)
@@ -4166,6 +4200,10 @@ void CircleOverlay::hideOverlay()
     m_volumeScrolledThisSession = false;
     m_isPinHovered = false;
     m_isCounterBadgeHovered = false;
+    if (m_fallbackCursorActive) {
+        m_fallbackCursorActive = false;
+        emit fallbackCursorActiveChanged(false);
+    }
     if (m_view && m_view->rootObject()) {
         m_view->rootObject()->setProperty("volumeScrolledThisSession", false);
     }
