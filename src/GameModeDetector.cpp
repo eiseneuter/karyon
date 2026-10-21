@@ -20,6 +20,17 @@ bool GameModeDetector::isLauncherUI(const QString &resourceClass, const QString 
     QString rc = resourceClass.trimmed().toLower();
     QString df = desktopFileName.trimmed().toLower();
 
+    // Sonderfall Steam: Spiele, die unter Steam gestartet werden (nativ oder Wine/Proton),
+    // erben in KWin oft den Desktop-Dateinamen 'steam'/'steam.desktop' oder den Flatpak-ID.
+    // Wenn die Fensterklasse (resourceClass) weder 'steam' noch 'steamwebhelper' ist,
+    // handelt es sich um das gestartete Spiel, keinesfalls um das Steam-Client-UI!
+    if ((df == QLatin1String("steam") || df == QLatin1String("steam.desktop") ||
+         df == QLatin1String("com.valvesoftware.steam") || df == QLatin1String("com.valvesoftware.steam.desktop")) &&
+        !rc.isEmpty() && rc != QLatin1String("steam") && rc != QLatin1String("steamwebhelper") &&
+        !rc.contains(QLatin1String("steamwebhelper"))) {
+        return false;
+    }
+
     static const QSet<QString> launcherClasses = {
         QStringLiteral("steam"),
         QStringLiteral("steamwebhelper"),
@@ -232,6 +243,15 @@ bool GameModeDetector::checkProtonAndLauncherEnv(int pid, const QString &resourc
         return true;
     }
 
+    QString rc = resourceClass.trimmed().toLower();
+    QString df = desktopFileName.trimmed().toLower();
+    if ((df == QLatin1String("steam") || df == QLatin1String("steam.desktop") ||
+         df == QLatin1String("com.valvesoftware.steam") || df == QLatin1String("com.valvesoftware.steam.desktop")) &&
+        !rc.isEmpty() && rc != QLatin1String("steam") && rc != QLatin1String("steamwebhelper") &&
+        !rc.contains(QLatin1String("steamwebhelper"))) {
+        return true;
+    }
+
     if (pid <= 0) return false;
 
     // /proc/<pid>/environ prüfen (Nullbyte-separiert)
@@ -308,17 +328,28 @@ bool GameModeDetector::checkProcessPathAndWine(int pid, const QString &resourceC
     if (pid <= 0) return false;
 
     QString exePath = QFile::symLinkTarget(QStringLiteral("/proc/%1/exe").arg(pid));
-    if (exePath.isEmpty()) return false;
+    QString cmdline;
+    QFile cmdFile(QStringLiteral("/proc/%1/cmdline").arg(pid));
+    if (cmdFile.open(QIODevice::ReadOnly)) {
+        cmdline = QString::fromUtf8(cmdFile.read(4096));
+        cmdFile.close();
+    }
+
+    auto pathMatches = [](const QString &p) {
+        if (p.isEmpty()) return false;
+        return p.contains(QLatin1String("/steamapps/"), Qt::CaseInsensitive) ||
+               p.contains(QLatin1String("pressure-vessel"), Qt::CaseInsensitive) ||
+               p.contains(QLatin1String("/PortWINE/"), Qt::CaseInsensitive) ||
+               p.contains(QLatin1String("PortProton"), Qt::CaseInsensitive) ||
+               p.contains(QLatin1String("/bottles/bottles/"), Qt::CaseInsensitive) ||
+               p.contains(QLatin1String("/Games/"), Qt::CaseInsensitive) ||
+               p.contains(QLatin1String("/Heroic/"), Qt::CaseInsensitive) ||
+               p.contains(QLatin1String("/PrismLauncher/instances/"), Qt::CaseInsensitive) ||
+               p.contains(QLatin1String("/.minecraft/"), Qt::CaseInsensitive);
+    };
 
     // Bekannte Gaming-Verzeichnisse
-    if (exePath.contains(QLatin1String("/steamapps/common/"), Qt::CaseInsensitive) ||
-        exePath.contains(QLatin1String("/PortWINE/"), Qt::CaseInsensitive) ||
-        exePath.contains(QLatin1String("PortProton"), Qt::CaseInsensitive) ||
-        exePath.contains(QLatin1String("/bottles/bottles/"), Qt::CaseInsensitive) ||
-        exePath.contains(QLatin1String("/Games/"), Qt::CaseInsensitive) ||
-        exePath.contains(QLatin1String("/Heroic/"), Qt::CaseInsensitive) ||
-        exePath.contains(QLatin1String("/PrismLauncher/instances/"), Qt::CaseInsensitive) ||
-        exePath.contains(QLatin1String("/.minecraft/"), Qt::CaseInsensitive)) {
+    if (pathMatches(exePath) || pathMatches(cmdline)) {
         return true;
     }
 

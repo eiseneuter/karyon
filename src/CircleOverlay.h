@@ -84,13 +84,12 @@ public:
     ~CircleOverlay() override;
 
     void prewarm();
-    void showAt(const QPoint &cursorPos, const QList<WindowInfo> &windows, InputMonitor *monitor = nullptr);
+    void showAt(const QPoint &cursorPos, const QList<WindowInfo> &windows, InputMonitor *monitor = nullptr, bool isGame = false);
     void refresh(const QList<WindowInfo> &windows);
     void updateAim(int offsetX, int offsetY);
-    void updateAimFallback(int offsetX, int offsetY);
+    void onHardwareCursorMoved(int aimX, int aimY, const QPoint &kwinCurPos);
     bool fallbackCursorActive() const { return m_fallbackCursorActive; }
     Q_INVOKABLE void reportQmlPointerMoved();
-    bool isQmlPointerActive() const;
     QString selectedWindowId() const;
     bool isCursorOnSegment() const;
     bool isCursorInHub() const;
@@ -239,8 +238,10 @@ private:
     bool m_showMediaControlsEnabled = true;
     bool m_showVolumeControlEnabled = true;
     bool m_desktopShowing = false;
-    std::chrono::steady_clock::time_point m_lastQmlPointerTime{};
     bool m_fallbackCursorActive = false;
+    bool m_isGameActive = false;
+    bool m_qmlPointerEverMoved = false;
+    int m_hardwareMoveCountWithoutQml = 0;
 
     OverlayMode m_mode = OverlayMode::Windows;
     RecentAppsStage m_recentStage = RecentAppsStage::Recents;

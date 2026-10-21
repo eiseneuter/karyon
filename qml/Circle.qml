@@ -544,6 +544,18 @@ Item {
         }
     }
 
+    Connections {
+        target: (typeof overlayController !== "undefined") ? overlayController : null
+        function onOverlayShown() {
+            overlayMouseArea.initialPointerX = -1;
+            overlayMouseArea.initialPointerY = -1;
+        }
+        function onOverlayHidden() {
+            overlayMouseArea.initialPointerX = -1;
+            overlayMouseArea.initialPointerY = -1;
+        }
+    }
+
     // Hub (Zentralkreis, Durchmesser 150px) mit normalem dunklem Segmenthintergrund
     Rectangle {
         id: hubCircle
@@ -1331,17 +1343,29 @@ Item {
         acceptedButtons: Qt.NoButton
         cursorShape: Qt.ArrowCursor
 
-        onEntered: function() {
-            if (typeof overlayController !== "undefined" && overlayController) {
-                overlayController.reportQmlPointerMoved();
-            }
-        }
+        property int initialPointerX: -1
+        property int initialPointerY: -1
 
         onPositionChanged: function(mouse) {
             if (overlayDropArea.containsDrag) return;
-            if (typeof overlayController !== "undefined" && overlayController) {
-                overlayController.reportQmlPointerMoved();
+
+            // Erstes synthetisches Event beim Einblenden des Overviews ignorieren
+            if (initialPointerX < 0) {
+                initialPointerX = mouse.x;
+                initialPointerY = mouse.y;
+                return;
             }
+
+            var dx = mouse.x - initialPointerX;
+            var dy = mouse.y - initialPointerY;
+            // Erst wenn sich der Compositor-Cursor tatsächlich vom Ursprungspunkt wegbewegt (> 4 Pixel),
+            // liegt echte Mausbewegung vom Fenstermanager vor:
+            if ((dx * dx + dy * dy) > 16) {
+                if (typeof overlayController !== "undefined" && overlayController) {
+                    overlayController.reportQmlPointerMoved();
+                }
+            }
+
             var cx = root.width / 2;
             var cy = root.height / 2;
             setAimOffset(mouse.x - cx, mouse.y - cy);

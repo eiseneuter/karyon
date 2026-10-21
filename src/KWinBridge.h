@@ -33,7 +33,7 @@ public:
     bool isDesktopShowing() const { return m_desktopShowing; }
     void setOverlayOpen(bool open) { m_overlayOpen = open; }
     bool isOverlayOpen() const { return m_overlayOpen; }
-    bool isActiveWindowGame() const { return m_activeWindowIsGame; }
+    bool isActiveWindowGame() const;
     QPoint lastCursorPos() const;
     QList<WindowInfo> lastWindows() const;
     QString activeWindowId() const { return m_mruOrder.isEmpty() ? QString() : m_mruOrder.first(); }

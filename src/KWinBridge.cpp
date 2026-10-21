@@ -72,7 +72,7 @@ var initList = [];
 
 for (var i = 0; i < wins.length; i++) {
     var w = wins[i];
-    if (!w || !w.normalWindow || w.skipTaskbar || w.deleted || w.resourceClass === "karyon") continue;
+    if (!w || (!w.normalWindow && !w.fullScreen) || (w.skipTaskbar && !w.fullScreen) || w.deleted || w.resourceClass === "karyon") continue;
     initList.push({
         id: w.internalId.toString(),
         rc: w.resourceClass,
@@ -111,14 +111,14 @@ if (initC) {
 callDBus("%1", "%2", "%3", "onDaemonInit", JSON.stringify(initList));
 
 workspace.windowActivated.connect(function(w) {
-    if (w && w.normalWindow && !w.skipTaskbar && !w.deleted && w.resourceClass !== "karyon") {
+    if (w && (w.normalWindow || w.fullScreen) && !w.deleted && w.resourceClass !== "karyon") {
         callDBus("%1", "%2", "%3", "onWindowActivated",
                  w.internalId.toString(), w.resourceClass, w.desktopFileName, w.caption, (w.minimized === true), (w.pid ? w.pid : 0));
     }
 });
 
 workspace.windowAdded.connect(function(w) {
-    if (w && w.normalWindow && !w.skipTaskbar && !w.deleted && w.resourceClass !== "karyon") {
+    if (w && (w.normalWindow || w.fullScreen) && (w.fullScreen || !w.skipTaskbar) && !w.deleted && w.resourceClass !== "karyon") {
         callDBus("%1", "%2", "%3", "onWindowAdded",
                  w.internalId.toString(), w.resourceClass, w.desktopFileName, w.caption, (w.minimized === true), (w.pid ? w.pid : 0));
     }
@@ -324,6 +324,15 @@ QPoint KWinBridge::lastCursorPos() const
         return qpos;
     }
     return m_lastPos;
+}
+
+bool KWinBridge::isActiveWindowGame() const
+{
+    if (!m_mruOrder.isEmpty() && m_knownWindows.contains(m_mruOrder.first())) {
+        const WindowInfo &top = m_knownWindows[m_mruOrder.first()];
+        return GameModeDetector::isGame(top.resourceClass, top.desktopFileName, top.caption, top.pid);
+    }
+    return m_activeWindowIsGame;
 }
 
 void KWinBridge::queryCursor()

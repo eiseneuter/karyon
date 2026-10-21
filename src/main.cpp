@@ -721,30 +721,19 @@ int main(int argc, char *argv[])
             }
         }
 
-        overlay.showAt(pos, kwinBridge.lastWindows(), &monitor);
+        overlay.showAt(pos, kwinBridge.lastWindows(), &monitor, kwinBridge.isActiveWindowGame());
     }, Qt::QueuedConnection);
 
     // Aiming im Normalbetrieb erfolgt flackerfrei über MouseArea/DropArea in QML anhand der Compositor-Cursorposition.
     // Verlässt der Cursor bei gedrückter RMT das Overlay-Fenster (oder bei aktivem Drag & Drop),
     // steuert cursorMoved das Segment-Aiming direkt und übergangslos über die globale Cursorposition:
-    QObject::connect(&monitor, &InputMonitor::cursorMoved, &overlay, [&overlay, &monitor](int aimX, int aimY) {
+    QObject::connect(&monitor, &InputMonitor::cursorMoved, &overlay, [&overlay, &kwinBridge, &monitor](int aimX, int aimY) {
         if (!overlay.isVisible()) return;
 
         if (monitor.isLeftDown()) {
             overlay.updateAim(aimX, aimY);
         } else {
-            QPoint cur = QCursor::pos();
-            if (!cur.isNull() && (cur.x() != 0 || cur.y() != 0)) {
-                if (!overlay.containsCursor(cur)) {
-                    overlay.updateAim(cur.x() - overlay.centerX(), cur.y() - overlay.centerY());
-                } else if (!overlay.isQmlPointerActive()) {
-                    // Fallback für Spiele mit Pointer-Lock / unsichtbarem Systemcursor:
-                    // QML empfängt keine Events vom Compositor -> Hardware-Deltas aus InputMonitor übernehmen!
-                    overlay.updateAimFallback(aimX, aimY);
-                }
-            } else {
-                overlay.updateAimFallback(aimX, aimY);
-            }
+            overlay.onHardwareCursorMoved(aimX, aimY, kwinBridge.lastCursorPos());
         }
     }, Qt::QueuedConnection);
 
