@@ -279,7 +279,7 @@ Item {
                         }
 
                         Text {
-                            text: "Version 3.1"
+                            text: "Version 3.2"
                             color: (typeof karyonTheme !== "undefined") ? karyonTheme.textMuted : "#96a2b4"
                             font.pixelSize: 11
                             anchors.verticalCenter: parent.verticalCenter

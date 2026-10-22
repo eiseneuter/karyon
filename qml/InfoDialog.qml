@@ -314,7 +314,7 @@ Item {
                 spacing: 1
 
                 Text {
-                    text: "Karyon 3.1 • © 2026 eisen"
+                    text: "Karyon 3.2 • © 2026 eisen"
                     color: (typeof karyonTheme !== "undefined") ? karyonTheme.textMuted : "#96a2b4"
                     font.pixelSize: 11
                     font.bold: true

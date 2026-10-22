@@ -1284,18 +1284,11 @@ Item {
         id: overlayMouseArea
         anchors.fill: parent
         hoverEnabled: true
-        acceptedButtons: Qt.AllButtons
+        acceptedButtons: Qt.NoButton
         cursorShape: Qt.ArrowCursor
 
         property int initialPointerX: -1
         property int initialPointerY: -1
-
-        onPressed: function(mouse) {
-            mouse.accepted = true;
-        }
-        onReleased: function(mouse) {
-            mouse.accepted = true;
-        }
 
         onPositionChanged: function(mouse) {
             if (overlayDropArea.containsDrag) return;

@@ -950,6 +950,11 @@ void InputMonitor::workerLoop()
         bool anyReleased = false;
         for (size_t b = 0; b < uinputBtnDown.size(); ++b) {
             if (uinputBtnDown[b]) {
+                // Wenn LMT physisch gedrückt gehalten wird (aktives Drag & Drop),
+                // darf BTN_LEFT keinesfalls zwangsweise losgelassen werden!
+                if (b == BTN_LEFT && m_leftDown.load()) {
+                    continue;
+                }
                 emitEvent(m_uinputFd, EV_KEY, static_cast<uint16_t>(b), 0);
                 uinputBtnDown[b] = false;
                 anyReleased = true;
@@ -985,7 +990,8 @@ void InputMonitor::workerLoop()
 
         if (state == State::Pending) {
             auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - pressTime).count();
-            if (dragDistance < 14.0f && elapsed >= m_holdTriggerMs.load()) {
+            bool isLmbDrag = m_leftDown.load();
+            if ((dragDistance < 14.0f || isLmbDrag) && elapsed >= m_holdTriggerMs.load()) {
                 if (trailActive) {
                     trailActive = false;
                     emit gestureFinished();
@@ -998,7 +1004,7 @@ void InputMonitor::workerLoop()
                 aimY = -20 + deltaY;
                 emit holdTriggered(deltaX, deltaY);
                 emit cursorMoved(aimX, aimY);
-            } else if (dragDistance >= 14.0f && elapsed > GESTURE_TIME_WINDOW_MS) {
+            } else if (!isLmbDrag && dragDistance >= 14.0f && elapsed > GESTURE_TIME_WINDOW_MS) {
                 if (trailActive) {
                     trailActive = false;
                     emit gestureFinished();
@@ -1484,7 +1490,8 @@ void InputMonitor::workerLoop()
                         if (ev.code == REL_Y) deltaY += ev.value;
                         dragDistance += std::abs(ev.value);
 
-                        if (!trailActive && !gestureFired && dragDistance >= 6.0f) {
+                        bool isLmbDrag = m_leftDown.load();
+                        if (!isLmbDrag && !trailActive && !gestureFired && dragDistance >= 6.0f) {
                             trailActive = true;
                             emit gestureStarted();
                         }
@@ -1497,7 +1504,7 @@ void InputMonitor::workerLoop()
                             auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - pressTime).count();
                             double dispSq = static_cast<double>(deltaX) * deltaX + static_cast<double>(deltaY) * deltaY;
 
-                            if (dispSq >= GESTURE_MIN_DISPLACEMENT * GESTURE_MIN_DISPLACEMENT && elapsed <= GESTURE_TIME_WINDOW_MS) {
+                            if (!isLmbDrag && dispSq >= GESTURE_MIN_DISPLACEMENT * GESTURE_MIN_DISPLACEMENT && elapsed <= GESTURE_TIME_WINDOW_MS) {
                                 gestureFired = true;
                                 state = State::Gesture;
                                 int dir = GestureManager::determineDirection(deltaX, deltaY);
@@ -1507,7 +1514,7 @@ void InputMonitor::workerLoop()
                                     trailActive = false;
                                     emit gestureFinished();
                                 }
-                            } else if (dragDistance > 14.0f && elapsed > GESTURE_TIME_WINDOW_MS) {
+                            } else if (!isLmbDrag && dragDistance > 14.0f && elapsed > GESTURE_TIME_WINDOW_MS) {
                                 if (trailActive) {
                                     trailActive = false;
                                     emit gestureFinished();
