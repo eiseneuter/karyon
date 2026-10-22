@@ -132,7 +132,10 @@ Item {
         var dy = aimOffsetY;
         var dist = Math.sqrt(dx * dx + dy * dy);
 
-        if (dist < outerR - 15 || dist > outerR + 35) return false;
+        // Drilldown NUR innerhalb des gezeichneten Drilldown-Streifens (outerR - 15 bis outerR) auslösen.
+        // Der Bereich außerhalb des Segments (z.B. Tooltip-Bereich) darf KEINEN Drilldown auslösen,
+        // damit geöffnete Ring-2-Segmente nicht schon beim bloßen Vorbeistreifen geschlossen werden.
+        if (dist < outerR - 15 || dist > outerR) return false;
 
         var angle = Math.atan2(dy, dx);
         var diff = angle - seg.angle;
