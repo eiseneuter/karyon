@@ -2318,6 +2318,9 @@ void CircleOverlay::populateSegments(const QList<WindowInfo> &windows, bool &out
                                   Q_ARG(QVariant, QVariant::fromValue(segmentList3)),
                                   Q_ARG(QVariant, outHasRing2),
                                   Q_ARG(QVariant, outHasRing3));
+        // Auswahl nach dem Neuaufbau aus QML zurücklesen, damit C++ nie mit veralteten Indizes arbeitet
+        m_selectedRing = m_view->rootObject()->property("selectedRing").toInt();
+        m_selectedIndex = m_view->rootObject()->property("selectedIndex").toInt();
     }
 }
 
@@ -3439,6 +3442,9 @@ void CircleOverlay::populateRecentAppsSegments(bool &outHasRing2, bool &outHasRi
                                   Q_ARG(QVariant, QVariant::fromValue(segmentList3)),
                                   Q_ARG(QVariant, outHasRing2),
                                   Q_ARG(QVariant, outHasRing3));
+        // Auswahl nach dem Neuaufbau aus QML zurücklesen, damit C++ nie mit veralteten Indizes arbeitet
+        m_selectedRing = m_view->rootObject()->property("selectedRing").toInt();
+        m_selectedIndex = m_view->rootObject()->property("selectedIndex").toInt();
     }
 }
 
@@ -3541,6 +3547,9 @@ void CircleOverlay::populateRecentFilesSegments(bool &outHasRing2, bool &outHasR
                                   Q_ARG(QVariant, QVariant::fromValue(segmentList3)),
                                   Q_ARG(QVariant, outHasRing2),
                                   Q_ARG(QVariant, outHasRing3));
+        // Auswahl nach dem Neuaufbau aus QML zurücklesen, damit C++ nie mit veralteten Indizes arbeitet
+        m_selectedRing = m_view->rootObject()->property("selectedRing").toInt();
+        m_selectedIndex = m_view->rootObject()->property("selectedIndex").toInt();
     }
 }
 
