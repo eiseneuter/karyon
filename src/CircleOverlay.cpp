@@ -3689,6 +3689,7 @@ void CircleOverlay::showAt(const QPoint &cursorPos, const QList<WindowInfo> &win
     m_isGameActive = isGame;
     m_qmlPointerEverMoved = false;
     m_hardwareMoveCountWithoutQml = 0;
+    m_overlayShownTime = std::chrono::steady_clock::now();
     bool shouldShowFallback = isGame;
     if (m_fallbackCursorActive != shouldShowFallback) {
         m_fallbackCursorActive = shouldShowFallback;
@@ -3747,8 +3748,11 @@ void CircleOverlay::onHardwareCursorMoved(int aimX, int aimY, const QPoint &kwin
     // 2. QML hat noch kein Event empfangen:
     m_hardwareMoveCountWithoutQml++;
 
-    // Wenn als Spiel erkannt, ODER nach mindestens 15 Hardware-Paketen ohne QML-Event (Pointer-Lock / versteckter Cursor):
-    if (m_isGameActive || m_hardwareMoveCountWithoutQml >= 15) {
+    auto elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - m_overlayShownTime).count();
+
+    // Wenn als Spiel erkannt, ODER nach mindestens 20 Hardware-Paketen UND mindestens 120ms ohne QML-Event (Pointer-Lock / versteckter Cursor):
+    if (m_isGameActive || (m_hardwareMoveCountWithoutQml >= 20 && elapsedMs >= 120)) {
         if (!m_fallbackCursorActive) {
             m_fallbackCursorActive = true;
             emit fallbackCursorActiveChanged(true);

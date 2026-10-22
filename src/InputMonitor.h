@@ -45,6 +45,8 @@ public:
     void setRecordingTrigger(bool rec) { m_isRecordingTrigger.store(rec); }
     bool isRecordingTrigger() const { return m_isRecordingTrigger.load(); }
 
+    void requestReleaseButtons() { m_releaseButtonsRequested.store(true); }
+
     // Gesture detection constants
     static constexpr double GESTURE_MIN_DISPLACEMENT = 60.0;
     static constexpr int GESTURE_TIME_WINDOW_MS = 350;
@@ -97,6 +99,7 @@ private:
 
     std::atomic<bool> m_running{false};
     std::atomic<bool> m_rescanRequested{false};
+    std::atomic<bool> m_releaseButtonsRequested{false};
     std::atomic<bool> m_leftDown{false};
     std::atomic<int> m_holdTriggerMs{120};
     std::atomic<double> m_overlayMouseSpeed{-0.5};

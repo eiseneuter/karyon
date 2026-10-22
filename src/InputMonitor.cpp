@@ -871,6 +871,10 @@ void InputMonitor::cleanup()
     m_keyboards.clear();
 
     if (m_uinputFd >= 0) {
+        for (int b = BTN_MOUSE; b < BTN_JOYSTICK; ++b) {
+            emitEvent(m_uinputFd, EV_KEY, static_cast<uint16_t>(b), 0);
+        }
+        emitSyn(m_uinputFd);
         ioctl(m_uinputFd, UI_DEV_DESTROY);
         close(m_uinputFd);
         m_uinputFd = -1;
@@ -930,6 +934,32 @@ void InputMonitor::workerLoop()
     rebuildPfds();
 
     std::vector<bool> activeKeys(KEY_CNT, false);
+    std::vector<bool> uinputBtnDown(KEY_MAX + 1, false);
+
+    auto emitUInputButton = [&](uint16_t code, int32_t val) {
+        if (m_uinputFd < 0) return;
+        emitEvent(m_uinputFd, EV_KEY, code, val);
+        emitSyn(m_uinputFd);
+        if (code < uinputBtnDown.size()) {
+            uinputBtnDown[code] = (val != 0);
+        }
+    };
+
+    auto releaseAllUInputButtons = [&]() {
+        if (m_uinputFd < 0) return;
+        bool anyReleased = false;
+        for (size_t b = 0; b < uinputBtnDown.size(); ++b) {
+            if (uinputBtnDown[b]) {
+                emitEvent(m_uinputFd, EV_KEY, static_cast<uint16_t>(b), 0);
+                uinputBtnDown[b] = false;
+                anyReleased = true;
+            }
+        }
+        if (anyReleased) {
+            emitSyn(m_uinputFd);
+        }
+    };
+
     int pendingHotplugRetries = 0;
     auto lastHotplugCheck = std::chrono::steady_clock::now();
     auto lastIdleScan = std::chrono::steady_clock::now();
@@ -941,6 +971,10 @@ void InputMonitor::workerLoop()
             }
         }
 
+        if (m_releaseButtonsRequested.exchange(false)) {
+            releaseAllUInputButtons();
+        }
+
         tryGrabPendingDevices();
 
         int pollTimeout = (state == State::Pending) ? 5 : 25;
@@ -948,7 +982,6 @@ void InputMonitor::workerLoop()
 
         auto now = std::chrono::steady_clock::now();
         int currentTriggerBtn = m_triggerButton.load();
-        int cancelBtn = (currentTriggerBtn == BTN_LEFT) ? BTN_RIGHT : BTN_LEFT;
 
         if (state == State::Pending) {
             auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - pressTime).count();
@@ -974,8 +1007,7 @@ void InputMonitor::workerLoop()
                 pendingGestureDir = -1;
                 for (const auto &dev : m_devices) {
                     if (dev.grabbed && m_uinputFd >= 0) {
-                        emitEvent(m_uinputFd, EV_KEY, static_cast<uint16_t>(currentTriggerBtn), 1);
-                        emitSyn(m_uinputFd);
+                        emitUInputButton(static_cast<uint16_t>(currentTriggerBtn), 1);
                         break;
                     }
                 }
@@ -1275,129 +1307,164 @@ void InputMonitor::workerLoop()
                     flushTriggeredRel();
                 }
 
-                // Cancel-Taste (Standard: Linksklick; falls Trigger Linksklick ist: Rechtsklick)
-                if (ev.type == EV_KEY && ev.code == cancelBtn) {
-                    m_leftDown.store(ev.value == 1);
+                if (ev.type == EV_KEY) {
+                    bool isMouseTrigger = (m_triggerType.load() == 0);
+                    int currentTriggerBtn = m_triggerButton.load();
+                    bool isTrigger = isMouseTrigger && (ev.code == currentTriggerBtn);
+                    int actionBtn = (isMouseTrigger && currentTriggerBtn == BTN_MIDDLE) ? BTN_RIGHT : BTN_MIDDLE;
+                    bool isAction = (ev.code == actionBtn);
+
+                    if (ev.code == BTN_LEFT) {
+                        m_leftDown.store(ev.value == 1);
+                    }
+
+                    // 1. STATE: Triggered (Radial Overlay ist geöffnet und aktiv)
                     if (state == State::Triggered) {
-                        if (ev.value == 1) { // Pressed
-                            state = State::Cancelled;
-                            pendingGestureDir = -1;
-                            if (trailActive) {
-                                trailActive = false;
-                                emit gestureFinished();
+                        if (isTrigger) {
+                            if (ev.value == 0) { // Trigger losgelassen -> Segment auswählen!
+                                state = State::Idle;
+                                pendingGestureDir = -1;
+                                subpixelX = 0.0;
+                                subpixelY = 0.0;
+                                emit holdReleased();
+                                releaseAllUInputButtons();
                             }
-                            emit holdCancelled();
-                            continue; // Klick verschlucken
-                        }
-                    } else if (state == State::Cancelled || state == State::Gesture) {
-                        if (ev.value == 1) {
-                            state = State::Cancelled;
-                            pendingGestureDir = -1;
-                            if (trailActive) {
-                                trailActive = false;
-                                emit gestureFinished();
+                            continue;
+                        } else if (isAction) {
+                            if (ev.value == 1) { // Mittelklick-Aktion (Fenster schließen / Mute)
+                                emit middleClicked();
                             }
-                            emit holdCancelled();
-                        }
-                        continue; // Release/Click verschlucken
-                    } else if (state == State::Pending) {
-                        if (ev.value == 1) {
-                            state = State::Idle;
-                            pendingGestureDir = -1;
-                            if (trailActive) {
-                                trailActive = false;
-                                emit gestureFinished();
-                            }
-                            // Replay beider Klicks als normaler Doppel-/Akkordklick
-                            if (dev.grabbed && m_uinputFd >= 0) {
-                                emitEvent(m_uinputFd, EV_KEY, static_cast<uint16_t>(currentTriggerBtn), 1);
-                                emitSyn(m_uinputFd);
-                                emitEvent(m_uinputFd, EV_KEY, static_cast<uint16_t>(cancelBtn), 1);
-                                emitSyn(m_uinputFd);
+                            continue;
+                        } else {
+                            // JEDER andere Mausklick (LMT, RMT falls anderer Trigger, Daumentasten etc.):
+                            // Bricht das Overlay sauber ab, OHNE Klicks an Hintergrundfenster weiterzuleiten!
+                            if (ev.value == 1) {
+                                state = State::Cancelled;
+                                pendingGestureDir = -1;
+                                if (trailActive) {
+                                    trailActive = false;
+                                    emit gestureFinished();
+                                }
+                                emit holdCancelled();
+                                releaseAllUInputButtons();
                             }
                             continue;
                         }
                     }
-                }
 
-                // Mittelklick-Aktion (oder Sekundäraktion falls Trigger BTN_MIDDLE ist)
-                int actionBtn = (currentTriggerBtn == BTN_MIDDLE) ? BTN_RIGHT : BTN_MIDDLE;
-                if (ev.type == EV_KEY && ev.code == actionBtn && currentTriggerBtn != actionBtn) {
-                    if (state == State::Triggered) {
-                        if (ev.value == 1) { // Pressed
-                            emit middleClicked();
-                        }
-                        continue; // Klick verschlucken
-                    } else if (state == State::Cancelled || state == State::Gesture) {
-                        continue;
-                    }
-                }
-
-                // Maus-Trigger Taste
-                if (m_triggerType.load() == 0 && ev.type == EV_KEY && ev.code == currentTriggerBtn) {
-                    if (m_gameModeEnabled.load() && m_gameModeActive.load()) {
-                        state = State::Idle;
-                        if (dev.grabbed && m_uinputFd >= 0) {
-                            emitEvent(m_uinputFd, EV_KEY, static_cast<uint16_t>(currentTriggerBtn), ev.value);
-                            emitSyn(m_uinputFd);
-                        }
-                        continue;
-                    }
-
-                    if (ev.value == 1) { // Press
-                        pressTime = std::chrono::steady_clock::now();
-                        deltaX = 0;
-                        deltaY = 0;
-                        dragDistance = 0.0f;
-                        trailActive = false;
-                        gestureFired = false;
-                        pendingGestureDir = -1;
-                        state = State::Pending;
-                        emit rightPressed(); // Sofortiger KWin-Snapshot-Trigger
-                        emit triggerPressed();
-                    } else if (ev.value == 0) { // Release
-                        if (trailActive) {
-                            trailActive = false;
-                            emit gestureFinished();
-                        }
-
-                        if (state == State::Gesture) {
-                            state = State::Idle;
-                            pendingGestureDir = -1;
-                            // Geste wurde bereits beim Schwellenwert direkt ausgelöst. Release verschlucken.
-                            continue;
-                        } else if (state == State::Cancelled) {
-                            state = State::Idle;
-                            pendingGestureDir = -1;
-                            // Release verschlucken
-                            continue;
-                        } else if (state == State::Pending) {
-                            state = State::Idle;
-                            pendingGestureDir = -1;
-                            if (dragDistance < 14.0f) {
-                                if (dev.grabbed && m_uinputFd >= 0) {
-                                    emitEvent(m_uinputFd, EV_KEY, static_cast<uint16_t>(currentTriggerBtn), 1);
-                                    emitSyn(m_uinputFd);
-                                    emitEvent(m_uinputFd, EV_KEY, static_cast<uint16_t>(currentTriggerBtn), 0);
-                                    emitSyn(m_uinputFd);
+                    // 2. STATE: Pending (Trigger gedrückt, wartet auf Haltezeit / Geste)
+                    else if (state == State::Pending) {
+                        if (isTrigger) {
+                            if (ev.value == 0) { // Vor Haltezeit losgelassen -> Kurzklick
+                                state = State::Idle;
+                                pendingGestureDir = -1;
+                                if (trailActive) {
+                                    trailActive = false;
+                                    emit gestureFinished();
+                                }
+                                if (dragDistance < 14.0f) {
+                                    if (dev.grabbed && m_uinputFd >= 0) {
+                                        emitUInputButton(static_cast<uint16_t>(currentTriggerBtn), 1);
+                                        emitUInputButton(static_cast<uint16_t>(currentTriggerBtn), 0);
+                                    }
                                 }
                             }
-                        } else if (state == State::Triggered) {
+                            continue;
+                        } else {
+                            // JEDE andere Maustaste während Pending bricht die Auslösung sofort ab.
+                            // Keinerlei Akkord-/Doppelklick-Weiterleitung, um Hänger und Fokusverlust zu verhindern!
+                            if (ev.value == 1) {
+                                state = State::Cancelled;
+                                pendingGestureDir = -1;
+                                if (trailActive) {
+                                    trailActive = false;
+                                    emit gestureFinished();
+                                }
+                                emit holdCancelled();
+                                releaseAllUInputButtons();
+                            }
+                            continue;
+                        }
+                    }
+
+                    // 3. STATE: Cancelled (Overlay geschlossen, wartet auf physischen Trigger-Release)
+                    else if (state == State::Cancelled) {
+                        if (isTrigger && ev.value == 0) {
                             state = State::Idle;
                             pendingGestureDir = -1;
-                            subpixelX = 0.0;
-                            subpixelY = 0.0;
-                            emit holdReleased();
-                        } else if (state == State::Dragging) {
+                            releaseAllUInputButtons();
+                        }
+                        continue;
+                    }
+
+                    // 4. STATE: Gesture (Geste erkannt, wartet auf Trigger-Release)
+                    else if (state == State::Gesture) {
+                        if (isTrigger && ev.value == 0) {
+                            state = State::Idle;
+                            pendingGestureDir = -1;
+                            releaseAllUInputButtons();
+                        } else if (!isTrigger && ev.value == 1) {
+                            state = State::Cancelled;
+                            pendingGestureDir = -1;
+                            if (trailActive) {
+                                trailActive = false;
+                                emit gestureFinished();
+                            }
+                            releaseAllUInputButtons();
+                        }
+                        continue;
+                    }
+
+                    // 5. STATE: Dragging (Desktop-Drag mit Triggertaste)
+                    else if (state == State::Dragging) {
+                        if (isTrigger && ev.value == 0) {
                             state = State::Idle;
                             pendingGestureDir = -1;
                             if (dev.grabbed && m_uinputFd >= 0) {
-                                emitEvent(m_uinputFd, EV_KEY, static_cast<uint16_t>(currentTriggerBtn), 0);
-                                emitSyn(m_uinputFd);
+                                emitUInputButton(static_cast<uint16_t>(currentTriggerBtn), 0);
+                            }
+                            releaseAllUInputButtons();
+                            continue;
+                        } else if (!isTrigger && ev.value == 1) {
+                            state = State::Idle;
+                            pendingGestureDir = -1;
+                            releaseAllUInputButtons();
+                            continue;
+                        }
+                        if (!isTrigger) continue;
+                    }
+
+                    // 6. STATE: Idle (Normaler Desktop-Zustand)
+                    else if (state == State::Idle) {
+                        if (isTrigger) {
+                            if (m_gameModeEnabled.load() && m_gameModeActive.load()) {
+                                if (dev.grabbed && m_uinputFd >= 0) {
+                                    emitUInputButton(static_cast<uint16_t>(currentTriggerBtn), ev.value);
+                                }
+                                continue;
+                            }
+
+                            if (ev.value == 1) {
+                                pressTime = std::chrono::steady_clock::now();
+                                deltaX = 0;
+                                deltaY = 0;
+                                dragDistance = 0.0f;
+                                trailActive = false;
+                                gestureFired = false;
+                                pendingGestureDir = -1;
+                                state = State::Pending;
+                                emit rightPressed();
+                                emit triggerPressed();
+                                continue;
+                            } else if (ev.value == 0) {
+                                releaseAllUInputButtons();
+                                continue;
                             }
                         }
+                        // Wenn !isTrigger in Idle:
+                        // Normaler Mausklick auf dem Desktop -> Weiterleitung nach unten zu Passthrough!
                     }
-                } else {
+                }
                     if (state == State::Gesture && ev.type == EV_REL) {
                         // Geste ist erkannt: Trail folgt dem dynamischen Wisch-Schwung bis zum Release
                         if (ev.code == REL_X) deltaX += ev.value;
@@ -1449,8 +1516,7 @@ void InputMonitor::workerLoop()
                                 pendingGestureDir = -1;
                                 flushPassthruRel();
                                 if (dev.grabbed && m_uinputFd >= 0) {
-                                    emitEvent(m_uinputFd, EV_KEY, static_cast<uint16_t>(currentTriggerBtn), 1);
-                                    emitSyn(m_uinputFd);
+                                    emitUInputButton(static_cast<uint16_t>(currentTriggerBtn), 1);
                                 }
                             }
                         }
@@ -1511,7 +1577,7 @@ void InputMonitor::workerLoop()
                         }
                     }
 
-                    if (dev.grabbed && m_uinputFd >= 0 && state != State::Cancelled) {
+                    if (dev.grabbed && m_uinputFd >= 0) {
                         if (ev.type == EV_REL && (ev.code == REL_X || ev.code == REL_Y)) {
                             if (ev.code == REL_X) passthruRelX += ev.value;
                             else passthruRelY += ev.value;
@@ -1526,16 +1592,18 @@ void InputMonitor::workerLoop()
                             }
                         } else {
                             flushPassthruRel();
+                            if (ev.type == EV_KEY && ev.code < uinputBtnDown.size()) {
+                                uinputBtnDown[ev.code] = (ev.value != 0);
+                            }
                             [[maybe_unused]] auto w = write(m_uinputFd, &ev, sizeof(ev));
                             nonRelPassthruSinceSyn = true;
                         }
                     }
                 }
-            }
 
-            flushPassthruRel();
-            flushTriggeredRel();
-        }
+                flushPassthruRel();
+                flushTriggeredRel();
+            }
 
         // 4. Physische Tastatur-Events verarbeiten
         for (size_t i = 0; i < m_keyboards.size() && (kbdOffset + i) < pfds.size(); ++i) {
@@ -1589,8 +1657,10 @@ void InputMonitor::workerLoop()
                                     state = State::Idle;
                                     subpixelX = 0.0; subpixelY = 0.0;
                                     emit holdReleased();
+                                    releaseAllUInputButtons();
                                 } else if (state == State::Pending || state == State::Cancelled || state == State::Gesture) {
                                     state = State::Idle;
+                                    releaseAllUInputButtons();
                                 }
                             }
                         }
@@ -1604,6 +1674,7 @@ void InputMonitor::workerLoop()
                                 emit gestureFinished();
                             }
                             emit holdCancelled();
+                            releaseAllUInputButtons();
                         }
                     }
                 }

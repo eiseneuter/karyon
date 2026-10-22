@@ -1284,11 +1284,18 @@ Item {
         id: overlayMouseArea
         anchors.fill: parent
         hoverEnabled: true
-        acceptedButtons: Qt.NoButton
+        acceptedButtons: Qt.AllButtons
         cursorShape: Qt.ArrowCursor
 
         property int initialPointerX: -1
         property int initialPointerY: -1
+
+        onPressed: function(mouse) {
+            mouse.accepted = true;
+        }
+        onReleased: function(mouse) {
+            mouse.accepted = true;
+        }
 
         onPositionChanged: function(mouse) {
             if (overlayDropArea.containsDrag) return;
@@ -1302,9 +1309,9 @@ Item {
 
             var dx = mouse.x - initialPointerX;
             var dy = mouse.y - initialPointerY;
-            // Erst wenn sich der Compositor-Cursor tatsächlich vom Ursprungspunkt wegbewegt (> 4 Pixel),
+            // Sobald sich der Compositor-Cursor tatsächlich vom Ursprungspunkt wegbewegt,
             // liegt echte Mausbewegung vom Fenstermanager vor:
-            if ((dx * dx + dy * dy) > 16) {
+            if ((dx * dx + dy * dy) >= 4) {
                 if (typeof overlayController !== "undefined" && overlayController) {
                     overlayController.reportQmlPointerMoved();
                 }

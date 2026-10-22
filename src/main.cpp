@@ -747,8 +747,11 @@ int main(int argc, char *argv[])
     // Synchronisation des Show-Desktop-Zustands
     QObject::connect(&kwinBridge, &KWinBridge::showDesktopChanged, &overlay, &CircleOverlay::setDesktopShowing);
 
-    // Linksklick während gedrückter rechter Maustaste -> Schließt Overlay sofort ohne Aktion
-    QObject::connect(&monitor, &InputMonitor::holdCancelled, &overlay, &CircleOverlay::hideOverlay, Qt::QueuedConnection);
+    // Abbruch-Aktion (z.B. Linksklick bei RMB-Trigger, RMT bei Custom-Trigger, ESC) -> Schließt Overlay sofort ohne Aktion
+    QObject::connect(&monitor, &InputMonitor::holdCancelled, &overlay, [&overlay, &monitor]() {
+        overlay.hideOverlay();
+        monitor.requestReleaseButtons();
+    }, Qt::QueuedConnection);
 
     // Mittelklick bei gedrückter rechter Maustaste -> System-Mute IM GANZEN HUB, darüber hinaus aber nirgends
     QObject::connect(&monitor, &InputMonitor::middleClicked, &overlay, [&overlay, &kwinBridge]() {

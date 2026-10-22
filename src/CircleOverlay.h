@@ -242,6 +242,7 @@ private:
     bool m_isGameActive = false;
     bool m_qmlPointerEverMoved = false;
     int m_hardwareMoveCountWithoutQml = 0;
+    std::chrono::steady_clock::time_point m_overlayShownTime{};
 
     OverlayMode m_mode = OverlayMode::Windows;
     RecentAppsStage m_recentStage = RecentAppsStage::Recents;
