@@ -1,5 +1,6 @@
 #include "TrayManager.h"
 #include "ProcessUtils.h"
+#include "AppManager.h"
 #include <QProcess>
 #include <QCoreApplication>
 #include <QFile>
@@ -15,6 +16,89 @@
 namespace {
 std::function<void(int)> s_karyonActionCb;
 std::function<void()> s_karyonSettingsCb;
+
+struct SNIToolTip {
+    QString iconName;
+    QImage image;
+    QString title;
+    QString subTitle;
+};
+
+static bool isGenericTrayName(const QString &str)
+{
+    QString s = str.trimmed().toLower();
+    if (s.isEmpty()) return true;
+    if (s.startsWith(QLatin1String("chrome_status_icon")) ||
+        s.startsWith(QLatin1String("chromium_status_icon")) ||
+        s.startsWith(QLatin1String("electron_status_icon")) ||
+        s.startsWith(QLatin1String("appindicator-")) ||
+        s.startsWith(QLatin1String("status_icon_")) ||
+        s.startsWith(QLatin1String("sni-"))) {
+        return true;
+    }
+    if (s == QLatin1String("chrome") ||
+        s == QLatin1String("chromium") ||
+        s == QLatin1String("electron") ||
+        s == QLatin1String("status_icon") ||
+        s == QLatin1String("application") ||
+        s == QLatin1String("window") ||
+        s == QLatin1String("app")) {
+        return true;
+    }
+    bool ok = false;
+    s.toInt(&ok);
+    if (ok) return true;
+    return false;
+}
+
+static SNIToolTip parseToolTip(const QVariant &ttVar)
+{
+    SNIToolTip result;
+    QVariant v = ttVar;
+    if (v.canConvert<QDBusVariant>()) {
+        v = v.value<QDBusVariant>().variant();
+    }
+    if (!v.canConvert<QDBusArgument>()) {
+        return result;
+    }
+    try {
+        const QDBusArgument ttArg = v.value<QDBusArgument>();
+        if (ttArg.currentType() == QDBusArgument::StructureType) {
+            ttArg.beginStructure();
+            ttArg >> result.iconName;
+
+            if (!ttArg.atEnd()) {
+                ttArg.beginArray();
+                while (!ttArg.atEnd()) {
+                    ttArg.beginStructure();
+                    int w = 0, h = 0;
+                    QByteArray bytes;
+                    ttArg >> w >> h >> bytes;
+                    ttArg.endStructure();
+                    if (w > 0 && h > 0 && bytes.size() == w * h * 4 && result.image.isNull()) {
+                        QImage img(w, h, QImage::Format_ARGB32);
+                        const quint32 *src = reinterpret_cast<const quint32 *>(bytes.constData());
+                        quint32 *dst = reinterpret_cast<quint32 *>(img.bits());
+                        for (int i = 0; i < w * h; ++i) {
+                            dst[i] = qFromBigEndian(src[i]);
+                        }
+                        result.image = img;
+                    }
+                }
+                ttArg.endArray();
+            }
+
+            if (!ttArg.atEnd()) {
+                ttArg >> result.title;
+            }
+            if (!ttArg.atEnd()) {
+                ttArg >> result.subTitle;
+            }
+            ttArg.endStructure();
+        }
+    } catch (...) {}
+    return result;
+}
 }
 
 void TrayManager::setKaryonActionCallback(std::function<void(int)> cb)
@@ -148,24 +232,133 @@ QList<TrayProgramItem> TrayManager::runningPrograms()
             continue; // Ungültiges / nicht existentes SNI-Objekt
         }
 
-        QString title = props.value(QStringLiteral("Title")).toString();
-        if (title.isEmpty()) {
-            QString clean = id;
-            int idx = clean.indexOf(QLatin1String("_status_icon"));
-            if (idx > 0) clean = clean.left(idx);
-            if (!clean.isEmpty()) {
-                clean[0] = clean[0].toUpper();
-                title = clean;
+        // 0. Prozess- und App-Erkennung via servicePid
+        AppEntry detectedApp;
+        QString exeTarget;
+        if (servicePid > 0) {
+            exeTarget = QFile::symLinkTarget(QStringLiteral("/proc/%1/exe").arg(servicePid));
+
+            // AppImage?
+            detectedApp = AppManager::resolveAppImageFromPid(servicePid);
+
+            // Flatpak?
+            if (detectedApp.id.isEmpty()) {
+                QFile envFile(QStringLiteral("/proc/%1/environ").arg(servicePid));
+                if (envFile.open(QIODevice::ReadOnly)) {
+                    QByteArray envData = envFile.readAll();
+                    for (const auto &tok : envData.split('\0')) {
+                        if (tok.startsWith("FLATPAK_ID=")) {
+                            QString flatpakId = QString::fromUtf8(tok.mid(11)).trimmed();
+                            if (!flatpakId.isEmpty()) {
+                                detectedApp = AppManager::findApp(flatpakId, flatpakId);
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Exe-Pfad?
+            if (detectedApp.id.isEmpty() && !exeTarget.isEmpty()) {
+                detectedApp = AppManager::findAppByExec(exeTarget);
+            }
+
+            // Binary Name?
+            if (detectedApp.id.isEmpty() && !exeTarget.isEmpty()) {
+                QString binName = QFileInfo(exeTarget).fileName();
+                if (!binName.isEmpty() && !isGenericTrayName(binName)) {
+                    detectedApp = AppManager::findApp(binName, binName);
+                }
+            }
+        }
+
+        // 1. ToolTip auslesen (oft der einzige Ort, an dem Electron-Apps wie Bitwarden/Discord ihren echten Namen hinterlegen)
+        SNIToolTip tt = parseToolTip(props.value(QStringLiteral("ToolTip")));
+        if (detectedApp.id.isEmpty() && !tt.title.isEmpty() && !isGenericTrayName(tt.title)) {
+            detectedApp = AppManager::findApp(tt.title.toLower(), tt.title);
+            if (detectedApp.id.isEmpty()) {
+                QString df = AppManager::findDesktopFilePathCaseInsensitive(tt.title);
+                if (!df.isEmpty()) {
+                    detectedApp = AppManager::findApp(df, df);
+                }
+            }
+        }
+
+        // 2. Cmdline prüfen, falls immer noch unaufgelöst
+        if (detectedApp.id.isEmpty() && servicePid > 0) {
+            QFile cmdFile(QStringLiteral("/proc/%1/cmdline").arg(servicePid));
+            if (cmdFile.open(QIODevice::ReadOnly)) {
+                QByteArray cmdData = cmdFile.readAll();
+                for (const auto &argBytes : cmdData.split('\0')) {
+                    QString arg = QString::fromUtf8(argBytes).trimmed();
+                    if (arg.isEmpty() || arg.startsWith(QLatin1Char('-'))) continue;
+                    QString fn = QFileInfo(arg).fileName();
+                    if (!fn.isEmpty() && !isGenericTrayName(fn)) {
+                        detectedApp = AppManager::findApp(fn, fn);
+                        if (!detectedApp.id.isEmpty()) break;
+                    }
+                }
+            }
+        }
+
+        // Prüfen, ob der Prozess tatsächlich Google Chrome oder Chromium ist
+        bool isActuallyChrome = (!exeTarget.isEmpty() &&
+            (exeTarget.contains(QLatin1String("google-chrome"), Qt::CaseInsensitive) ||
+             exeTarget.contains(QLatin1String("chromium"), Qt::CaseInsensitive) ||
+             exeTarget.endsWith(QLatin1String("/chrome"))));
+
+        auto isGeneric = [&](const QString &str) {
+            if (isActuallyChrome && (str.compare(QLatin1String("chrome"), Qt::CaseInsensitive) == 0 ||
+                                     str.compare(QLatin1String("chromium"), Qt::CaseInsensitive) == 0)) {
+                return false;
+            }
+            return isGenericTrayName(str);
+        };
+
+        // 3. Titel auflösen
+        QString title = props.value(QStringLiteral("Title")).toString().trimmed();
+        if (title.isEmpty() || isGeneric(title)) {
+            if (!tt.title.isEmpty() && !isGeneric(tt.title)) {
+                title = tt.title;
+            } else if (!detectedApp.name.isEmpty()) {
+                title = detectedApp.name;
+            } else if (!tt.subTitle.isEmpty() && !isGeneric(tt.subTitle)) {
+                title = tt.subTitle;
             } else {
-                title = id;
+                QString clean = id;
+                int idx = clean.indexOf(QLatin1String("_status_icon"));
+                if (idx > 0) clean = clean.left(idx);
+                if (!clean.isEmpty() && !isGeneric(clean)) {
+                    clean[0] = clean[0].toUpper();
+                    title = clean;
+                } else if (!detectedApp.name.isEmpty()) {
+                    title = detectedApp.name;
+                } else {
+                    title = id;
+                }
+            }
+        }
+
+        // 4. Echte App-ID auflösen (verhindert 'chrome_status_icon_1' als Key für Bitwarden/Discord)
+        QString finalId = id;
+        if (isGeneric(id) || id.startsWith(QLatin1String("chrome_status_icon")) || id.startsWith(QLatin1String("chromium_status_icon"))) {
+            if (!detectedApp.id.isEmpty()) {
+                finalId = detectedApp.id;
+            } else if (!tt.title.isEmpty() && !isGeneric(tt.title)) {
+                finalId = tt.title.toLower();
+            } else if (servicePid > 0 && !exeTarget.isEmpty()) {
+                QString bn = QFileInfo(exeTarget).fileName();
+                if (!bn.isEmpty() && !isGeneric(bn)) {
+                    finalId = bn;
+                }
             }
         }
 
         QString status = props.value(QStringLiteral("Status")).toString();
         bool isAttention = (status == QLatin1String("NeedsAttention"));
-        QString iconName = props.value(QStringLiteral("IconName")).toString();
+        QString iconName = props.value(QStringLiteral("IconName")).toString().trimmed();
         if (isAttention) {
-            QString attName = props.value(QStringLiteral("AttentionIconName")).toString();
+            QString attName = props.value(QStringLiteral("AttentionIconName")).toString().trimmed();
             if (!attName.isEmpty()) {
                 iconName = attName;
             }
@@ -186,7 +379,10 @@ QList<TrayProgramItem> TrayManager::runningPrograms()
             menuPath = menuVar.toString();
         }
 
-        auto parsePixArg = [](const QVariant &pixVar) -> QImage {
+        auto parsePixArg = [](QVariant pixVar) -> QImage {
+            if (pixVar.canConvert<QDBusVariant>()) {
+                pixVar = pixVar.value<QDBusVariant>().variant();
+            }
             if (!pixVar.canConvert<QDBusArgument>()) return QImage();
             try {
                 const QDBusArgument pixArg = pixVar.value<QDBusArgument>();
@@ -228,7 +424,7 @@ QList<TrayProgramItem> TrayManager::runningPrograms()
             }
         }
 
-        // 2. IconPixmap (live vom Programm gerendert, z.B. Telegram Unread-Badge)
+        // 2. IconPixmap (live vom Programm gerendert, z.B. Telegram Unread-Badge oder Bitwarden Tray)
         if (icon.isNull() && props.contains(QStringLiteral("IconPixmap"))) {
             primaryPixImg = parsePixArg(props.value(QStringLiteral("IconPixmap")));
             if (!primaryPixImg.isNull()) {
@@ -236,31 +432,51 @@ QList<TrayProgramItem> TrayManager::runningPrograms()
             }
         }
 
-        // 3. Direct file check in IconThemePath (z.B. Steam)
-        if (icon.isNull() && !iconThemePath.isEmpty() && !iconName.isEmpty()) {
-            QStringList candidates = {
-                iconThemePath + QLatin1Char('/') + iconName + QStringLiteral(".png"),
-                iconThemePath + QLatin1Char('/') + iconName + QStringLiteral(".svg"),
-                iconThemePath + QLatin1Char('/') + iconName,
-                iconThemePath + QStringLiteral("/32x32/") + iconName + QStringLiteral(".png"),
-                iconThemePath + QStringLiteral("/48x48/") + iconName + QStringLiteral(".png"),
-                iconThemePath + QStringLiteral("/scalable/") + iconName + QStringLiteral(".svg")
-            };
-            for (const auto &cand : candidates) {
-                if (QFile::exists(cand)) {
-                    icon = QIcon(cand);
-                    if (!icon.isNull() && !icon.availableSizes().isEmpty()) break;
+        // 3. ToolTip-Image (falls IconPixmap leer war, aber im ToolTip ein Icon übergeben wurde)
+        if (icon.isNull() && !tt.image.isNull()) {
+            icon = QIcon(QPixmap::fromImage(tt.image));
+        }
+
+        // 4. Direct file check in IconThemePath (z.B. Steam oder Electron temp assets)
+        if (icon.isNull() && !iconThemePath.isEmpty()) {
+            if (!iconName.isEmpty()) {
+                QStringList candidates = {
+                    iconThemePath + QLatin1Char('/') + iconName + QStringLiteral(".png"),
+                    iconThemePath + QLatin1Char('/') + iconName + QStringLiteral(".svg"),
+                    iconThemePath + QLatin1Char('/') + iconName,
+                    iconThemePath + QStringLiteral("/32x32/") + iconName + QStringLiteral(".png"),
+                    iconThemePath + QStringLiteral("/48x48/") + iconName + QStringLiteral(".png"),
+                    iconThemePath + QStringLiteral("/scalable/") + iconName + QStringLiteral(".svg")
+                };
+                for (const auto &cand : candidates) {
+                    if (QFile::exists(cand)) {
+                        icon = QIcon(cand);
+                        if (!icon.isNull() && !icon.availableSizes().isEmpty()) break;
+                    }
+                }
+            }
+            if (icon.isNull()) {
+                QDir itpDir(iconThemePath);
+                if (itpDir.exists()) {
+                    QStringList imgFiles = itpDir.entryList({QStringLiteral("*.png"), QStringLiteral("*.svg")}, QDir::Files);
+                    for (const auto &f : imgFiles) {
+                        QIcon candIcon(itpDir.filePath(f));
+                        if (!candIcon.isNull() && !candIcon.availableSizes().isEmpty()) {
+                            icon = candIcon;
+                            break;
+                        }
+                    }
                 }
             }
         }
 
-        // 4. IconName in system theme
-        if (icon.isNull() && !iconName.isEmpty()) {
+        // 5. IconName in system theme (nur wenn nicht generisch "chrome" bei Nicht-Chrome)
+        if (icon.isNull() && !iconName.isEmpty() && !isGeneric(iconName)) {
             icon = QIcon::fromTheme(iconName);
         }
 
-        // 5. IconName in pixmaps or local icons
-        if (icon.isNull() && !iconName.isEmpty()) {
+        // 6. IconName in pixmaps or local icons
+        if (icon.isNull() && !iconName.isEmpty() && !isGeneric(iconName)) {
             QStringList pixDirs = {
                 QStringLiteral("/usr/share/pixmaps"),
                 QDir::homePath() + QStringLiteral("/.local/share/pixmaps"),
@@ -280,20 +496,36 @@ QList<TrayProgramItem> TrayManager::runningPrograms()
             }
         }
 
-        // 6. By ID / Desktop-File lookup (z.B. steam, cachy-update, telegram)
+        // 7. Icon der erkannten App (Desktop-File der eigentlichen Anwendung, z.B. Bitwarden)
+        if (icon.isNull() && !detectedApp.icon.isEmpty()) {
+            if (QFile::exists(detectedApp.icon)) {
+                icon = QIcon(detectedApp.icon);
+            } else {
+                icon = QIcon::fromTheme(detectedApp.icon);
+            }
+        }
+        if (icon.isNull() && !detectedApp.id.isEmpty()) {
+            icon = QIcon::fromTheme(detectedApp.id);
+        }
+
+        // 8. By ID / Desktop-File lookup (steam, telegram, cachy-update, etc.)
         if (icon.isNull()) {
-            QString cleanId = id;
+            QString cleanId = finalId;
             int idx = cleanId.indexOf(QLatin1String("_status_icon"));
             if (idx > 0) cleanId = cleanId.left(idx);
             idx = cleanId.indexOf(QLatin1Char('.'));
             QString baseId = (idx > 0) ? cleanId.left(idx) : cleanId;
 
             for (const auto &tryKey : {cleanId, cleanId.toLower(), baseId, baseId.toLower()}) {
+                if (tryKey.isEmpty() || isGeneric(tryKey)) continue;
+
                 icon = QIcon::fromTheme(tryKey);
                 if (!icon.isNull() && !icon.availableSizes().isEmpty()) break;
 
                 // Check .desktop file in standard locations
-                for (const auto &appDir : {QDir::homePath() + QStringLiteral("/.local/share/applications"), QStringLiteral("/usr/share/applications")}) {
+                for (const auto &appDir : {QDir::homePath() + QStringLiteral("/.local/share/applications"),
+                                           QStringLiteral("/usr/share/applications"),
+                                           QStringLiteral("/var/lib/flatpak/exports/share/applications")}) {
                     QString dfPath = appDir + QLatin1Char('/') + tryKey + QStringLiteral(".desktop");
                     if (QFile::exists(dfPath)) {
                         QSettings df(dfPath, QSettings::IniFormat);
@@ -312,6 +544,12 @@ QList<TrayProgramItem> TrayManager::runningPrograms()
                 if (!icon.isNull() && !icon.availableSizes().isEmpty()) break;
             }
         }
+
+        // 9. ToolTip-Titel als Icon-Key (z.B. "bitwarden")
+        if (icon.isNull() && !tt.title.isEmpty() && !isGeneric(tt.title)) {
+            icon = QIcon::fromTheme(tt.title.toLower());
+        }
+
         if (icon.isNull()) {
             icon = QIcon::fromTheme(QStringLiteral("application-x-executable"));
         }
@@ -322,7 +560,7 @@ QList<TrayProgramItem> TrayManager::runningPrograms()
             bool isDuplicate = false;
             for (const auto &existing : items) {
                 if (existing.pid == servicePid &&
-                    existing.id.compare(id, Qt::CaseInsensitive) == 0 &&
+                    existing.id.compare(finalId, Qt::CaseInsensitive) == 0 &&
                     existing.title.compare(title, Qt::CaseInsensitive) == 0) {
                     isDuplicate = true;
                     break;
@@ -334,13 +572,13 @@ QList<TrayProgramItem> TrayManager::runningPrograms()
         }
 
         TrayProgramItem prog;
-        prog.service = (id.compare(QLatin1String("karyon"), Qt::CaseInsensitive) == 0)
+        prog.service = (finalId.compare(QLatin1String("karyon"), Qt::CaseInsensitive) == 0)
             ? QStringLiteral("org.kde.karyon")
             : service;
         prog.path = path;
-        prog.id = (id.compare(QLatin1String("karyon"), Qt::CaseInsensitive) == 0)
+        prog.id = (finalId.compare(QLatin1String("karyon"), Qt::CaseInsensitive) == 0)
             ? QStringLiteral("karyon")
-            : id;
+            : finalId;
         prog.title = title;
         prog.iconName = iconName;
         prog.menuPath = (prog.id == QLatin1String("karyon") && menuPath.isEmpty())

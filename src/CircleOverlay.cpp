@@ -1014,7 +1014,9 @@ void CircleOverlay::partitionWindows(const QList<WindowInfo> &mru,
 
             if (trayMatch) {
                 seg.windowId = QStringLiteral("tray_prog|%1|%2").arg(trayMatch->service, trayMatch->path);
-                seg.appKey = QStringLiteral("tray_prog_%1").arg(trayMatch->id);
+                QString cleanKey = QStringLiteral("tray_prog_") + trayMatch->service + QLatin1Char('_') + trayMatch->id;
+                cleanKey.replace(QLatin1Char('/'), QLatin1Char('_')).replace(QLatin1Char(':'), QLatin1Char('_')).replace(QLatin1Char('.'), QLatin1Char('_'));
+                seg.appKey = cleanKey;
                 seg.resourceClass = trayMatch->id;
                 seg.desktopFileName = QStringLiteral("tray_prog|%1|%2").arg(trayMatch->service, trayMatch->path);
                 seg.caption = trayMatch->title.isEmpty() ? item.name : trayMatch->title;
@@ -2237,8 +2239,8 @@ void CircleOverlay::populateSegments(const QList<WindowInfo> &windows, bool &out
                 for (const auto &prog : m_cachedTrayPrograms) {
                     if (QStringLiteral("%1|%2").arg(prog.service, prog.path) == progKey ||
                         QStringLiteral("%1:%2").arg(prog.service, prog.path) == progKey) {
-                        QString cleanKey = QStringLiteral("tray_prog_") + prog.id;
-                        cleanKey.replace(QLatin1Char('/'), QLatin1Char('_')).replace(QLatin1Char(':'), QLatin1Char('_'));
+                        QString cleanKey = QStringLiteral("tray_prog_") + prog.service + QLatin1Char('_') + prog.id;
+                        cleanKey.replace(QLatin1Char('/'), QLatin1Char('_')).replace(QLatin1Char(':'), QLatin1Char('_')).replace(QLatin1Char('.'), QLatin1Char('_'));
                         QString revKey = QStringLiteral("%1_v%2").arg(cleanKey, QString::number(m_trayIconRevision));
                         iconPath = tmpDir + QStringLiteral("/") + revKey + QStringLiteral(".png");
                         if (!QFile::exists(iconPath)) {
@@ -3139,7 +3141,9 @@ void CircleOverlay::partitionTray(QList<OverlaySegment> &outRing1, QList<Overlay
         const auto &p = progs[i];
         OverlaySegment seg;
         seg.windowId = QStringLiteral("tray_prog|%1|%2").arg(p.service, p.path);
-        seg.appKey = QStringLiteral("tray_prog_%1").arg(p.id);
+        QString cleanKey = QStringLiteral("tray_prog_") + p.service + QLatin1Char('_') + p.id;
+        cleanKey.replace(QLatin1Char('/'), QLatin1Char('_')).replace(QLatin1Char(':'), QLatin1Char('_')).replace(QLatin1Char('.'), QLatin1Char('_'));
+        seg.appKey = cleanKey;
         seg.resourceClass = p.id;
         seg.desktopFileName = QStringLiteral("tray_prog|") + QStringLiteral("%1|%2").arg(p.service, p.path);
         seg.caption = p.title;
@@ -3208,7 +3212,9 @@ void CircleOverlay::partitionTray(QList<OverlaySegment> &outRing1, QList<Overlay
             const auto &p = progs[i];
             OverlaySegment seg;
             seg.windowId = QStringLiteral("tray_prog|%1|%2").arg(p.service, p.path);
-            seg.appKey = QStringLiteral("tray_prog_%1").arg(p.id);
+            QString cleanKey = QStringLiteral("tray_prog_") + p.service + QLatin1Char('_') + p.id;
+            cleanKey.replace(QLatin1Char('/'), QLatin1Char('_')).replace(QLatin1Char(':'), QLatin1Char('_')).replace(QLatin1Char('.'), QLatin1Char('_'));
+            seg.appKey = cleanKey;
             seg.resourceClass = p.id;
             seg.desktopFileName = QStringLiteral("tray_prog|") + QStringLiteral("%1|%2").arg(p.service, p.path);
             seg.caption = p.title;
@@ -3362,7 +3368,7 @@ void CircleOverlay::populateRecentAppsSegments(bool &outHasRing2, bool &outHasRi
                 for (const auto &prog : m_cachedTrayPrograms) {
                     if (QStringLiteral("%1|%2").arg(prog.service, prog.path) == progKey ||
                         QStringLiteral("%1:%2").arg(prog.service, prog.path) == progKey) {
-                        QString cleanKey = QStringLiteral("tray_prog_") + prog.id;
+                        QString cleanKey = QStringLiteral("tray_prog_") + prog.service + QLatin1Char('_') + prog.id;
                         cleanKey.replace(QLatin1Char('/'), QLatin1Char('_')).replace(QLatin1Char(':'), QLatin1Char('_'));
                         QString revKey = QStringLiteral("%1_v%2").arg(cleanKey, QString::number(m_trayIconRevision));
                         iconPath = tmpDir + QStringLiteral("/") + revKey + QStringLiteral(".png");
