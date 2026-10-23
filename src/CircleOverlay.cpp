@@ -337,9 +337,22 @@ QString CircleOverlay::findDesktopFile(const QString &name)
 QString CircleOverlay::iconNameFromDesktopFile(const QString &path)
 {
     if (path.isEmpty()) return {};
-    QSettings desktop(path, QSettings::IniFormat);
-    desktop.beginGroup(QStringLiteral("Desktop Entry"));
-    return desktop.value(QStringLiteral("Icon")).toString();
+    QFile f(path);
+    if (!f.open(QIODevice::ReadOnly | QIODevice::Text)) return {};
+    bool inDesktopEntry = false;
+    while (!f.atEnd()) {
+        QByteArray line = f.readLine().trimmed();
+        if (line.isEmpty() || line.startsWith('#')) continue;
+        if (line.startsWith('[')) {
+            inDesktopEntry = (line == "[Desktop Entry]");
+            continue;
+        }
+        if (!inDesktopEntry) continue;
+        if (line.startsWith("Icon=")) {
+            return QString::fromUtf8(line.mid(5)).trimmed();
+        }
+    }
+    return {};
 }
 
 QIcon CircleOverlay::resolveIcon(const QString &name)
@@ -2250,7 +2263,7 @@ void CircleOverlay::populateSegments(const QList<WindowInfo> &windows, bool &out
                                 QFile::remove(tmpDir + QStringLiteral("/") + oldRevKey);
                             }
                             QPixmap pix = prog.icon.pixmap(iconSize(), iconSize());
-                            pix.save(iconPath, "PNG");
+                            pix.save(iconPath, "PNG", 0);
                         }
                         break;
                     }
@@ -2259,15 +2272,22 @@ void CircleOverlay::populateSegments(const QList<WindowInfo> &windows, bool &out
                 QString key = seg.appKey;
                 iconPath = m_iconPathCache.value(key);
                 if (iconPath.isEmpty() || !QFile::exists(iconPath)) {
-                    QIcon icon = resolveWindowIcon(seg.desktopFileName, seg.resourceClass);
                     QString cleanKey = key;
                     cleanKey.replace(QLatin1Char('/'), QLatin1Char('_')).replace(QLatin1Char(':'), QLatin1Char('_'));
-                    iconPath = tmpDir + QStringLiteral("/") + cleanKey + QStringLiteral(".png");
-                    if (!QFile::exists(iconPath)) {
-                        QPixmap pix = icon.pixmap(iconSize(), iconSize());
-                        pix.save(iconPath, "PNG");
+                    QString candidatePath = tmpDir + QStringLiteral("/") + cleanKey + QStringLiteral(".png");
+                    if (QFile::exists(candidatePath)) {
+                        iconPath = candidatePath;
+                    } else {
+                        QIcon icon = resolveWindowIcon(seg.desktopFileName, seg.resourceClass);
+                        if (!icon.isNull()) {
+                            QPixmap pix = icon.pixmap(iconSize(), iconSize());
+                            pix.save(candidatePath, "PNG", 0);
+                            iconPath = candidatePath;
+                        }
                     }
-                    m_iconPathCache.insert(key, iconPath);
+                    if (!iconPath.isEmpty()) {
+                        m_iconPathCache.insert(key, iconPath);
+                    }
                 }
             }
 
@@ -3379,7 +3399,7 @@ void CircleOverlay::populateRecentAppsSegments(bool &outHasRing2, bool &outHasRi
                                 QFile::remove(tmpDir + QStringLiteral("/") + oldRevKey);
                             }
                             QPixmap pix = prog.icon.pixmap(iconSize(), iconSize());
-                            pix.save(iconPath, "PNG");
+                            pix.save(iconPath, "PNG", 0);
                         }
                         break;
                     }
@@ -3388,15 +3408,22 @@ void CircleOverlay::populateRecentAppsSegments(bool &outHasRing2, bool &outHasRi
                 QString key = seg.appKey;
                 iconPath = m_iconPathCache.value(key);
                 if (iconPath.isEmpty() || !QFile::exists(iconPath)) {
-                    QIcon icon = resolveWindowIcon(seg.desktopFileName, seg.resourceClass);
                     QString cleanKey = key;
                     cleanKey.replace(QLatin1Char('/'), QLatin1Char('_')).replace(QLatin1Char(':'), QLatin1Char('_'));
-                    iconPath = tmpDir + QStringLiteral("/") + cleanKey + QStringLiteral(".png");
-                    if (!QFile::exists(iconPath)) {
-                        QPixmap pix = icon.pixmap(iconSize(), iconSize());
-                        pix.save(iconPath, "PNG");
+                    QString candidatePath = tmpDir + QStringLiteral("/") + cleanKey + QStringLiteral(".png");
+                    if (QFile::exists(candidatePath)) {
+                        iconPath = candidatePath;
+                    } else {
+                        QIcon icon = resolveWindowIcon(seg.desktopFileName, seg.resourceClass);
+                        if (!icon.isNull()) {
+                            QPixmap pix = icon.pixmap(iconSize(), iconSize());
+                            pix.save(candidatePath, "PNG", 0);
+                            iconPath = candidatePath;
+                        }
                     }
-                    m_iconPathCache.insert(key, iconPath);
+                    if (!iconPath.isEmpty()) {
+                        m_iconPathCache.insert(key, iconPath);
+                    }
                 }
             }
 
@@ -3487,23 +3514,26 @@ void CircleOverlay::populateRecentFilesSegments(bool &outHasRing2, bool &outHasR
                 QString key = seg.appKey;
                 iconPath = m_iconPathCache.value(key);
                 if (iconPath.isEmpty() || !QFile::exists(iconPath)) {
-                QString filePath = key.startsWith(QLatin1String("file:")) ? key.mid(5) : key;
-                QMimeDatabase mimeDb;
-                QMimeType mimeType = mimeDb.mimeTypeForFile(filePath);
-                QIcon icon = QIcon::fromTheme(mimeType.iconName());
-                if (icon.isNull()) icon = QIcon::fromTheme(mimeType.genericIconName());
-                if (icon.isNull()) icon = QIcon::fromTheme(QStringLiteral("text-x-generic"));
+                    QString cleanKey = key;
+                    cleanKey.replace(QLatin1Char('/'), QLatin1Char('_')).replace(QLatin1Char(':'), QLatin1Char('_')).replace(QLatin1Char('.'), QLatin1Char('_'));
+                    QString candidatePath = tmpDir + QStringLiteral("/") + cleanKey + QStringLiteral(".png");
+                    if (QFile::exists(candidatePath)) {
+                        iconPath = candidatePath;
+                    } else {
+                        QString filePath = key.startsWith(QLatin1String("file:")) ? key.mid(5) : key;
+                        QMimeDatabase mimeDb;
+                        QMimeType mimeType = mimeDb.mimeTypeForFile(filePath);
+                        QIcon icon = QIcon::fromTheme(mimeType.iconName());
+                        if (icon.isNull()) icon = QIcon::fromTheme(mimeType.genericIconName());
+                        if (icon.isNull()) icon = QIcon::fromTheme(QStringLiteral("text-x-generic"));
 
-                QString cleanKey = key;
-                cleanKey.replace(QLatin1Char('/'), QLatin1Char('_')).replace(QLatin1Char(':'), QLatin1Char('_')).replace(QLatin1Char('.'), QLatin1Char('_'));
-                iconPath = tmpDir + QStringLiteral("/") + cleanKey + QStringLiteral(".png");
-                if (!QFile::exists(iconPath)) {
-                    QPixmap pix = icon.pixmap(ICON_SIZE, ICON_SIZE);
-                    pix.save(iconPath, "PNG");
+                        QPixmap pix = icon.pixmap(ICON_SIZE, ICON_SIZE);
+                        pix.save(candidatePath, "PNG", 0);
+                        iconPath = candidatePath;
+                    }
+                    m_iconPathCache.insert(key, iconPath);
                 }
-                m_iconPathCache.insert(key, iconPath);
             }
-        }
 
         QVariantMap m;
             m[QStringLiteral("isTextSegment")] = seg.isTextSegment;
@@ -3610,7 +3640,6 @@ void CircleOverlay::showAt(const QPoint &cursorPos, const QList<WindowInfo> &win
     bool hasRing2 = false;
     bool hasRing3 = false;
     if (m_mode == OverlayMode::Windows) {
-        m_cachedRecentApps.clear();
         populateSegments(windows, hasRing2, hasRing3);
     } else if (m_mode == OverlayMode::RecentApps) {
         m_cachedRecentApps = m_appManager.loadRecentApps(SettingsManager::instance().maxRecentApps(), openAppIdentifiers());

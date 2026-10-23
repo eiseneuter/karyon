@@ -938,6 +938,9 @@ void InputMonitor::workerLoop()
     // Der Cursor steht beim Öffnen 20px ÜBER dem Hubzentrum -> (0, -20)
     int aimX = 0;
     int aimY = -20;
+    int lastEmittedAimX = 999999;
+    int lastEmittedAimY = 999999;
+    auto lastCursorMovedEmitTime = std::chrono::steady_clock::now();
     bool aimDirty = false;
     double subpixelX = 0.0;
     double subpixelY = 0.0;
@@ -1039,6 +1042,9 @@ void InputMonitor::workerLoop()
                 subpixelY = 0.0;
                 aimX = deltaX;
                 aimY = -20 + deltaY;
+                lastEmittedAimX = aimX;
+                lastEmittedAimY = aimY;
+                lastCursorMovedEmitTime = std::chrono::steady_clock::now();
                 emit holdTriggered(deltaX, deltaY);
                 emit cursorMoved(aimX, aimY);
             } else if (!isLmbDrag && dragDistance >= 14.0f && elapsed > GESTURE_TIME_WINDOW_MS) {
@@ -1263,6 +1269,8 @@ void InputMonitor::workerLoop()
                 m_syncAimRequested.store(false, std::memory_order_relaxed);
                 aimX = m_syncAimX.load(std::memory_order_relaxed);
                 aimY = m_syncAimY.load(std::memory_order_relaxed);
+                lastEmittedAimX = aimX;
+                lastEmittedAimY = aimY;
             }
 
             int32_t passthruRelX = 0;
@@ -1333,7 +1341,19 @@ void InputMonitor::workerLoop()
                 }
                 trigRelX = 0;
                 trigRelY = 0;
-                emit cursorMoved(aimX, aimY);
+
+                if (aimX != lastEmittedAimX || aimY != lastEmittedAimY) {
+                    auto now = std::chrono::steady_clock::now();
+                    auto elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(now - lastCursorMovedEmitTime).count();
+                    int dX = std::abs(aimX - lastEmittedAimX);
+                    int dY = std::abs(aimY - lastEmittedAimY);
+                    if (elapsedMs >= 8 || (dX + dY) >= 4) {
+                        lastEmittedAimX = aimX;
+                        lastEmittedAimY = aimY;
+                        lastCursorMovedEmitTime = now;
+                        emit cursorMoved(aimX, aimY);
+                    }
+                }
             };
 
             size_t count = bytes / sizeof(struct input_event);
@@ -1371,6 +1391,11 @@ void InputMonitor::workerLoop()
                     if (state == State::Triggered) {
                         if (isTrigger) {
                             if (ev.value == 0) { // Trigger losgelassen -> Segment auswählen!
+                                if (aimX != lastEmittedAimX || aimY != lastEmittedAimY) {
+                                    lastEmittedAimX = aimX;
+                                    lastEmittedAimY = aimY;
+                                    emit cursorMoved(aimX, aimY);
+                                }
                                 state = State::Idle;
                                 pendingGestureDir = -1;
                                 subpixelX = 0.0;

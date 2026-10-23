@@ -94,38 +94,62 @@ void buildDesktopIndex(DesktopIndex &idx)
             norm.remove(QLatin1Char('_')).remove(QLatin1Char('-')).remove(QLatin1Char(' '));
             idx.keyToPath.insert(norm, path);
 
-            QSettings ini(path, QSettings::IniFormat);
-            ini.beginGroup(QStringLiteral("Desktop Entry"));
-            QString wmClass = ini.value(QStringLiteral("StartupWMClass")).toString().trimmed();
-            if (!wmClass.isEmpty()) {
-                idx.keyToPath.insert(wmClass.toLower(), path);
-                QString wmNorm = wmClass.toLower().remove(QLatin1Char('_')).remove(QLatin1Char('-')).remove(QLatin1Char(' '));
-                idx.keyToPath.insert(wmNorm, path);
-            }
-            QString nameVal = ini.value(QStringLiteral("Name")).toString().trimmed();
-            if (!nameVal.isEmpty()) {
-                idx.keyToPath.insert(nameVal.toLower(), path);
-            }
-            QString execVal = ini.value(QStringLiteral("Exec")).toString().trimmed();
-            if (!execVal.isEmpty()) {
-                static const QRegularExpression rungameRe(QStringLiteral("steam://rungameid/(\\d+)"), QRegularExpression::CaseInsensitiveOption);
-                auto mRun = rungameRe.match(execVal);
-                if (mRun.hasMatch()) {
-                    QString sId = mRun.captured(1);
-                    idx.keyToPath.insert(QStringLiteral("steam_app_") + sId, path);
-                    idx.keyToPath.insert(QStringLiteral("steam_app_") + sId + QStringLiteral(".desktop"), path);
-                    idx.keyToPath.insert(sId, path);
+            QFile f(path);
+            if (f.open(QIODevice::ReadOnly | QIODevice::Text)) {
+                bool inDesktopEntry = false;
+                QString wmClass;
+                QString nameVal;
+                QString execVal;
+                while (!f.atEnd()) {
+                    QByteArray rawLine = f.readLine();
+                    QByteArray line = rawLine.trimmed();
+                    if (line.isEmpty() || line.startsWith('#')) continue;
+                    if (line.startsWith('[')) {
+                        inDesktopEntry = (line == "[Desktop Entry]");
+                        continue;
+                    }
+                    if (!inDesktopEntry) continue;
+
+                    if (wmClass.isEmpty() && line.startsWith("StartupWMClass=")) {
+                        wmClass = QString::fromUtf8(line.mid(15)).trimmed();
+                    } else if (nameVal.isEmpty() && line.startsWith("Name=")) {
+                        nameVal = QString::fromUtf8(line.mid(5)).trimmed();
+                    } else if (execVal.isEmpty() && line.startsWith("Exec=")) {
+                        execVal = QString::fromUtf8(line.mid(5)).trimmed();
+                    }
+                    if (!wmClass.isEmpty() && !nameVal.isEmpty() && !execVal.isEmpty()) {
+                        break;
+                    }
                 }
 
-                QString bin = execVal.section(QLatin1Char(' '), 0, 0);
-                int slash = bin.lastIndexOf(QLatin1Char('/'));
-                if (slash >= 0) bin = bin.mid(slash + 1);
-                if (!bin.isEmpty()) {
-                    idx.keyToPath.insert(bin.toLower(), path);
-                    if (bin.endsWith(QLatin1String(".AppImage"), Qt::CaseInsensitive) ||
-                        bin.endsWith(QLatin1String(".appimage"), Qt::CaseInsensitive)) {
-                        QString binNoExt = bin.left(bin.length() - 9);
-                        idx.keyToPath.insert(binNoExt.toLower(), path);
+                if (!wmClass.isEmpty()) {
+                    idx.keyToPath.insert(wmClass.toLower(), path);
+                    QString wmNorm = wmClass.toLower().remove(QLatin1Char('_')).remove(QLatin1Char('-')).remove(QLatin1Char(' '));
+                    idx.keyToPath.insert(wmNorm, path);
+                }
+                if (!nameVal.isEmpty()) {
+                    idx.keyToPath.insert(nameVal.toLower(), path);
+                }
+                if (!execVal.isEmpty()) {
+                    static const QRegularExpression rungameRe(QStringLiteral("steam://rungameid/(\\d+)"), QRegularExpression::CaseInsensitiveOption);
+                    auto mRun = rungameRe.match(execVal);
+                    if (mRun.hasMatch()) {
+                        QString sId = mRun.captured(1);
+                        idx.keyToPath.insert(QStringLiteral("steam_app_") + sId, path);
+                        idx.keyToPath.insert(QStringLiteral("steam_app_") + sId + QStringLiteral(".desktop"), path);
+                        idx.keyToPath.insert(sId, path);
+                    }
+
+                    QString bin = execVal.section(QLatin1Char(' '), 0, 0);
+                    int slash = bin.lastIndexOf(QLatin1Char('/'));
+                    if (slash >= 0) bin = bin.mid(slash + 1);
+                    if (!bin.isEmpty()) {
+                        idx.keyToPath.insert(bin.toLower(), path);
+                        if (bin.endsWith(QLatin1String(".AppImage"), Qt::CaseInsensitive) ||
+                            bin.endsWith(QLatin1String(".appimage"), Qt::CaseInsensitive)) {
+                            QString binNoExt = bin.left(bin.length() - 9);
+                            idx.keyToPath.insert(binNoExt.toLower(), path);
+                        }
                     }
                 }
             }
@@ -1239,8 +1263,22 @@ bool AppManager::isBlacklistedRecentApp(const AppEntry &entry, int pid, const QS
     return false;
 }
 
+struct RawRecentAppsCache {
+    QList<AppEntry> entries;
+    qint64 timestampMs = 0;
+};
+static RawRecentAppsCache s_rawRecentApps;
+
+struct RawFavoritesCache {
+    QList<AppEntry> entries;
+    qint64 timestampMs = 0;
+};
+static RawFavoritesCache s_rawFavorites;
+
 void AppManager::recordAppUsage(const QString &desktopFileName, const QString &resourceClass, int pid, const QString &caption)
 {
+    s_rawRecentApps.timestampMs = 0;
+    s_rawFavorites.timestampMs = 0;
     if (resourceClass == QLatin1String("karyon") || 
         resourceClass.contains(QLatin1String("plasmawindowed")) ||
         resourceClass == QLatin1String("plasmashell") ||
@@ -1376,9 +1414,14 @@ static QString cleanExecKey(const QString &exec)
     return trimmed.trimmed().toLower();
 }
 
-QList<AppEntry> AppManager::loadRecentApps(int maxCount, const QSet<QString> &excludeAppKeys)
+static QList<AppEntry> getRawRecentApps()
 {
-    QList<AppEntry> result;
+    qint64 now = QDateTime::currentMSecsSinceEpoch();
+    if (!s_rawRecentApps.entries.isEmpty() && (now - s_rawRecentApps.timestampMs) < 15000) {
+        return s_rawRecentApps.entries;
+    }
+
+    QList<AppEntry> rawList;
     QSet<QString> seenIds;
     QSet<QString> seenNames;
     QSet<QString> seenExecs;
@@ -1453,6 +1496,166 @@ QList<AppEntry> AppManager::loadRecentApps(int maxCount, const QSet<QString> &ex
         }
     };
 
+    // 1. First, load from our tracked recent_apps.json
+    QString jsonPath = AppManager::recentAppsFilePath();
+    QFile jf(jsonPath);
+    bool jsonNeedsCleanup = false;
+    QJsonArray cleanedArr;
+
+    if (jf.open(QIODevice::ReadOnly)) {
+        QJsonDocument doc = QJsonDocument::fromJson(jf.readAll());
+        if (doc.isArray()) {
+            QJsonArray arr = doc.array();
+            for (const auto &val : arr) {
+                QJsonObject obj = val.toObject();
+                AppEntry entry;
+                entry.id = obj[QStringLiteral("id")].toString();
+                entry.name = obj[QStringLiteral("name")].toString();
+                entry.icon = obj[QStringLiteral("icon")].toString();
+                entry.exec = obj[QStringLiteral("exec")].toString();
+                entry.comment = obj[QStringLiteral("comment")].toString();
+                entry.desktopFile = obj[QStringLiteral("desktopFile")].toString();
+
+                if (AppManager::isBlacklistedRecentApp(entry)) {
+                    jsonNeedsCleanup = true;
+                    continue;
+                }
+
+                QString sId = extractSteamId(entry);
+                if (!sId.isEmpty()) {
+                    AppEntry canonical = AppManager::resolveSteamGame(sId, entry.name);
+                    if (!canonical.name.isEmpty()) entry.name = canonical.name;
+                    if (!canonical.icon.isEmpty()) entry.icon = canonical.icon;
+                    if (!canonical.desktopFile.isEmpty() && entry.desktopFile.isEmpty()) {
+                        entry.desktopFile = canonical.desktopFile;
+                    }
+                }
+
+                if (isDuplicate(entry, sId)) {
+                    jsonNeedsCleanup = true;
+                    continue;
+                }
+
+                cleanedArr.append(obj);
+
+                if (entry.id.isEmpty() || entry.exec.trimmed().isEmpty()) continue;
+
+                // Validate that app still exists on system
+                if (!entry.desktopFile.isEmpty() && !QFile::exists(entry.desktopFile)) {
+                    if (sId.isEmpty() && !entry.id.startsWith(QLatin1String("steam_app_"))) {
+                        KService::Ptr s = KService::serviceByDesktopName(entry.id);
+                        if (!s || !s->isValid()) continue;
+                    }
+                }
+
+                markSeen(entry, sId);
+                rawList.append(entry);
+                if (rawList.size() >= 50) break;
+            }
+        }
+        jf.close();
+    }
+
+    if (jsonNeedsCleanup) {
+        QSaveFile sf(jsonPath);
+        if (sf.open(QIODevice::WriteOnly)) {
+            QJsonDocument doc(cleanedArr);
+            sf.write(doc.toJson(QJsonDocument::Compact));
+            sf.commit();
+        }
+    }
+
+    // 2. Supplement from kactivitymanagerd if needed
+    if (rawList.size() < 50) {
+        QString dbPath = QDir::homePath() + QStringLiteral("/.local/share/kactivitymanagerd/resources/database");
+        sqlite3 *db = nullptr;
+        if (sqlite3_open_v2(dbPath.toUtf8().constData(), &db, SQLITE_OPEN_READONLY, nullptr) == SQLITE_OK) {
+            const char *sql = "SELECT replace(targettedResource, 'applications:', ''), max(lastUpdate) as lu "
+                              "FROM ResourceScoreCache "
+                              "WHERE targettedResource LIKE 'applications:%' "
+                              "GROUP BY targettedResource "
+                              "ORDER BY lu DESC LIMIT 100;";
+
+            sqlite3_stmt *stmt = nullptr;
+            if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
+                while (sqlite3_step(stmt) == SQLITE_ROW && rawList.size() < 50) {
+                    const char *desktopFile = (const char *)sqlite3_column_text(stmt, 0);
+                    if (!desktopFile) continue;
+                    QString df = QString::fromUtf8(desktopFile);
+
+                    // Filter irrelevant steam dummies or helpers
+                    if (df == QLatin1String("steam_app_0.desktop") || df == QLatin1String("steam_app_0")) {
+                        continue;
+                    }
+
+                    QString sid;
+                    if (AppManager::isSteamApp(df, QString(), &sid) || df.startsWith(QLatin1String("steam_app_"))) {
+                        if (sid.isEmpty()) {
+                            sid = df.mid(10);
+                            if (sid.endsWith(QLatin1String(".desktop"))) sid.chop(8);
+                        }
+                        AppEntry steamEntry = AppManager::resolveSteamGame(sid);
+                        if (!steamEntry.id.isEmpty()) {
+                            if (isDuplicate(steamEntry, sid)) continue;
+                            markSeen(steamEntry, sid);
+                            seenIds.insert(df.toLower());
+                            rawList.append(steamEntry);
+                            continue;
+                        }
+                    }
+
+                    KService::Ptr s = KService::serviceByDesktopName(df);
+                    if (!s && df.endsWith(QLatin1String(".desktop"))) {
+                        QString stripped = df;
+                        stripped.chop(8);
+                        s = KService::serviceByDesktopName(stripped);
+                    }
+                    if (!s || !s->isValid() || s->noDisplay() || s->exec().trimmed().isEmpty()) continue;
+
+                    QString nameLow = s->name().toLower();
+                    if (nameLow == QLatin1String("steam game 0")) {
+                        continue;
+                    }
+
+                    AppEntry entry;
+                    entry.id = s->desktopEntryName();
+                    entry.name = s->name();
+                    entry.icon = s->icon();
+                    entry.exec = s->exec();
+                    entry.comment = s->comment();
+                    entry.desktopFile = s->entryPath();
+
+                    QString entrySteamId = extractSteamId(entry);
+                    if (!entrySteamId.isEmpty()) {
+                        AppEntry steamEntry = AppManager::resolveSteamGame(entrySteamId, entry.name);
+                        if (!steamEntry.id.isEmpty()) {
+                            entry = steamEntry;
+                        }
+                    }
+
+                    if (isDuplicate(entry, entrySteamId)) continue;
+                    if (AppManager::isBlacklistedRecentApp(entry)) continue;
+
+                    markSeen(entry, entrySteamId);
+                    seenIds.insert(df.toLower());
+                    rawList.append(entry);
+                }
+                sqlite3_finalize(stmt);
+            }
+            sqlite3_close(db);
+        }
+    }
+
+    s_rawRecentApps.entries = rawList;
+    s_rawRecentApps.timestampMs = now;
+    return rawList;
+}
+
+QList<AppEntry> AppManager::loadRecentApps(int maxCount, const QSet<QString> &excludeAppKeys)
+{
+    QList<AppEntry> raw = getRawRecentApps();
+    QList<AppEntry> result;
+
     auto matchesExclude = [&](const QString &key) {
         if (key.isEmpty()) return false;
         QString k = key.toLower().trimmed();
@@ -1500,158 +1703,10 @@ QList<AppEntry> AppManager::loadRecentApps(int maxCount, const QSet<QString> &ex
         return false;
     };
 
-    // 1. First, load from our tracked recent_apps.json
-    QString jsonPath = recentAppsFilePath();
-    QFile jf(jsonPath);
-    bool jsonNeedsCleanup = false;
-    QJsonArray cleanedArr;
-
-    if (jf.open(QIODevice::ReadOnly)) {
-        QJsonDocument doc = QJsonDocument::fromJson(jf.readAll());
-        if (doc.isArray()) {
-            QJsonArray arr = doc.array();
-            for (const auto &val : arr) {
-                QJsonObject obj = val.toObject();
-                AppEntry entry;
-                entry.id = obj[QStringLiteral("id")].toString();
-                entry.name = obj[QStringLiteral("name")].toString();
-                entry.icon = obj[QStringLiteral("icon")].toString();
-                entry.exec = obj[QStringLiteral("exec")].toString();
-                entry.comment = obj[QStringLiteral("comment")].toString();
-                entry.desktopFile = obj[QStringLiteral("desktopFile")].toString();
-
-                if (isBlacklistedRecentApp(entry)) {
-                    jsonNeedsCleanup = true;
-                    continue;
-                }
-
-                QString sId = extractSteamId(entry);
-                if (!sId.isEmpty()) {
-                    AppEntry canonical = resolveSteamGame(sId, entry.name);
-                    if (!canonical.name.isEmpty()) entry.name = canonical.name;
-                    if (!canonical.icon.isEmpty()) entry.icon = canonical.icon;
-                    if (!canonical.desktopFile.isEmpty() && entry.desktopFile.isEmpty()) {
-                        entry.desktopFile = canonical.desktopFile;
-                    }
-                }
-
-                if (isDuplicate(entry, sId)) {
-                    jsonNeedsCleanup = true;
-                    continue;
-                }
-
-                cleanedArr.append(obj);
-
-                if (result.size() >= maxCount) continue;
-                if (entry.id.isEmpty() || entry.exec.trimmed().isEmpty()) continue;
-
-                // Validate that app still exists on system
-                if (!entry.desktopFile.isEmpty() && !QFile::exists(entry.desktopFile)) {
-                    if (sId.isEmpty() && !entry.id.startsWith(QLatin1String("steam_app_"))) {
-                        KService::Ptr s = KService::serviceByDesktopName(entry.id);
-                        if (!s || !s->isValid()) continue;
-                    }
-                }
-
-                if (isExcluded(entry)) continue;
-
-                markSeen(entry, sId);
-                result.append(entry);
-            }
-        }
-        jf.close();
-    }
-
-    if (jsonNeedsCleanup) {
-        QSaveFile sf(jsonPath);
-        if (sf.open(QIODevice::WriteOnly)) {
-            QJsonDocument doc(cleanedArr);
-            sf.write(doc.toJson(QJsonDocument::Compact));
-            sf.commit();
-        }
-    }
-
-    // 2. If result.size() < maxCount, supplement from kactivitymanagerd
-    if (result.size() < maxCount) {
-        QString dbPath = QDir::homePath() + QStringLiteral("/.local/share/kactivitymanagerd/resources/database");
-        sqlite3 *db = nullptr;
-        if (sqlite3_open_v2(dbPath.toUtf8().constData(), &db, SQLITE_OPEN_READONLY, nullptr) == SQLITE_OK) {
-            const char *sql = "SELECT replace(targettedResource, 'applications:', ''), max(lastUpdate) as lu "
-                              "FROM ResourceScoreCache "
-                              "WHERE targettedResource LIKE 'applications:%' "
-                              "GROUP BY targettedResource "
-                              "ORDER BY lu DESC LIMIT 100;";
-
-            sqlite3_stmt *stmt = nullptr;
-            if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
-                while (sqlite3_step(stmt) == SQLITE_ROW && result.size() < maxCount) {
-                    const char *desktopFile = (const char *)sqlite3_column_text(stmt, 0);
-                    if (!desktopFile) continue;
-                    QString df = QString::fromUtf8(desktopFile);
-
-                    // Filter irrelevant steam dummies or helpers
-                    if (df == QLatin1String("steam_app_0.desktop") || df == QLatin1String("steam_app_0")) {
-                        continue;
-                    }
-
-                    QString sid;
-                    if (isSteamApp(df, QString(), &sid) || df.startsWith(QLatin1String("steam_app_"))) {
-                        if (sid.isEmpty()) {
-                            sid = df.mid(10);
-                            if (sid.endsWith(QLatin1String(".desktop"))) sid.chop(8);
-                        }
-                        AppEntry steamEntry = resolveSteamGame(sid);
-                        if (!steamEntry.id.isEmpty()) {
-                            if (isDuplicate(steamEntry, sid)) continue;
-                            if (isExcluded(steamEntry)) continue;
-                            markSeen(steamEntry, sid);
-                            seenIds.insert(df.toLower());
-                            result.append(steamEntry);
-                            continue;
-                        }
-                    }
-
-                    KService::Ptr s = KService::serviceByDesktopName(df);
-                    if (!s && df.endsWith(QLatin1String(".desktop"))) {
-                        QString stripped = df;
-                        stripped.chop(8);
-                        s = KService::serviceByDesktopName(stripped);
-                    }
-                    if (!s || !s->isValid() || s->noDisplay() || s->exec().trimmed().isEmpty()) continue;
-
-                    QString nameLow = s->name().toLower();
-                    if (nameLow == QLatin1String("steam game 0")) {
-                        continue;
-                    }
-
-                    AppEntry entry;
-                    entry.id = s->desktopEntryName();
-                    entry.name = s->name();
-                    entry.icon = s->icon();
-                    entry.exec = s->exec();
-                    entry.comment = s->comment();
-                    entry.desktopFile = s->entryPath();
-
-                    QString entrySteamId = extractSteamId(entry);
-                    if (!entrySteamId.isEmpty()) {
-                        AppEntry steamEntry = resolveSteamGame(entrySteamId, entry.name);
-                        if (!steamEntry.id.isEmpty()) {
-                            entry = steamEntry;
-                        }
-                    }
-
-                    if (isDuplicate(entry, entrySteamId)) continue;
-                    if (isBlacklistedRecentApp(entry)) continue;
-                    if (isExcluded(entry)) continue;
-
-                    markSeen(entry, entrySteamId);
-                    seenIds.insert(df.toLower());
-                    result.append(entry);
-                }
-                sqlite3_finalize(stmt);
-            }
-            sqlite3_close(db);
-        }
+    for (const auto &entry : raw) {
+        if (result.size() >= maxCount) break;
+        if (isExcluded(entry)) continue;
+        result.append(entry);
     }
 
     return result;
@@ -1700,6 +1755,11 @@ QList<CategoryEntry> AppManager::loadCategories()
 
 QList<AppEntry> AppManager::loadFavorites()
 {
+    qint64 now = QDateTime::currentMSecsSinceEpoch();
+    if (!s_rawFavorites.entries.isEmpty() && (now - s_rawFavorites.timestampMs) < 15000) {
+        return s_rawFavorites.entries;
+    }
+
     QList<AppEntry> result;
     QSet<QString> seen;
     QStringList orderedKeys;
@@ -1798,6 +1858,8 @@ QList<AppEntry> AppManager::loadFavorites()
         }
     }
 
+    s_rawFavorites.entries = result;
+    s_rawFavorites.timestampMs = now;
     return result;
 }
 
