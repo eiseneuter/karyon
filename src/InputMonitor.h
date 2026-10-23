@@ -96,6 +96,7 @@ private:
         std::string path;
         bool grabbed = false;
         std::string name;
+        std::chrono::steady_clock::time_point lastGrabAttempt{};
     };
 
     std::atomic<bool> m_running{false};

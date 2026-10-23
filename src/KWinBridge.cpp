@@ -86,13 +86,13 @@ for (var i = 0; i < wins.length; i++) {
 
 var lastCurX = -1, lastCurY = -1;
 var curTimer = new QTimer(workspace);
-curTimer.interval = 15;
+curTimer.interval = 40;
 curTimer.timeout.connect(function() {
     var c = workspace.cursorPos;
     if (c) {
         var rx = Math.round(c.x);
         var ry = Math.round(c.y);
-        if (rx !== lastCurX || ry !== lastCurY) {
+        if (Math.abs(rx - lastCurX) >= 2 || Math.abs(ry - lastCurY) >= 2) {
             lastCurX = rx;
             lastCurY = ry;
             callDBus("%1", "%2", "%3", "reportCursorPos", rx, ry);

@@ -193,8 +193,23 @@ bool hasPressedKeysOrButtons(int fd)
     if (ioctl(fd, EVIOCGKEY(sizeof(keyBits)), keyBits) < 0) {
         return false;
     }
-    for (size_t i = 0; i < sizeof(keyBits) / sizeof(keyBits[0]); ++i) {
-        if (keyBits[i] != 0) {
+    auto testBit = [](const unsigned long *arr, int bit) {
+        return (arr[bit / (sizeof(long) * 8)] & (1UL << (bit % (sizeof(long) * 8)))) != 0;
+    };
+    // Physische Maustasten prüfen (BTN_LEFT bis BTN_TASK / vor BTN_JOYSTICK)
+    for (int b = BTN_MISC; b < BTN_JOYSTICK; ++b) {
+        if (testBit(keyBits, b)) {
+            return true;
+        }
+    }
+    // Gängige Tasten/Modifier prüfen, falls Hybrid-/Kombigerät
+    static const int modKeys[] = {
+        KEY_LEFTCTRL, KEY_RIGHTCTRL, KEY_LEFTSHIFT, KEY_RIGHTSHIFT,
+        KEY_LEFTALT, KEY_RIGHTALT, KEY_LEFTMETA, KEY_RIGHTMETA,
+        KEY_SPACE, KEY_ENTER
+    };
+    for (int k : modKeys) {
+        if (testBit(keyBits, k)) {
             return true;
         }
     }
@@ -423,6 +438,15 @@ void InputMonitor::tryGrabPendingDevices()
 {
     if (m_uinputFd < 0) return;
 
+    bool anyUngrabbed = false;
+    for (const auto &dev : m_devices) {
+        if (!dev.grabbed && dev.fd >= 0) {
+            anyUngrabbed = true;
+            break;
+        }
+    }
+    if (!anyUngrabbed) return;
+
     // Nach dem Erstellen der virtuellen uinput-Geräte kurz (250ms) warten, damit udev und
     // KWin/libinput die virtuellen Geräte vollständig geöffnet haben, bevor die physische
     // Maus per EVIOCGRAB übernommen wird.
@@ -435,6 +459,12 @@ void InputMonitor::tryGrabPendingDevices()
     bool newlyGrabbed = false;
     for (auto &dev : m_devices) {
         if (dev.grabbed || dev.fd < 0) continue;
+
+        auto sinceAttempt = std::chrono::duration_cast<std::chrono::milliseconds>(now - dev.lastGrabAttempt).count();
+        if (sinceAttempt < 500) {
+            continue;
+        }
+        dev.lastGrabAttempt = now;
 
         // NIEMALS EVIOCGRAB ausführen, solange eine Maustaste oder Taste physisch gedrückt ist!
         // Sonst hat libinput/KWin das Press-Event noch auf dem physischen Gerät registriert,
@@ -982,7 +1012,14 @@ void InputMonitor::workerLoop()
 
         tryGrabPendingDevices();
 
-        int pollTimeout = (state == State::Pending) ? 5 : 25;
+        int pollTimeout = 250;
+        if (state == State::Pending) {
+            pollTimeout = 5;
+        } else if (pendingHotplugRetries > 0) {
+            pollTimeout = 150;
+        } else if (m_devices.empty()) {
+            pollTimeout = 1000;
+        }
         int ret = poll(pfds.data(), pfds.size(), pollTimeout);
 
         auto now = std::chrono::steady_clock::now();

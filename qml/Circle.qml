@@ -83,7 +83,7 @@ Item {
     Timer {
         id: clockTimer
         interval: 1000
-        running: true
+        running: root.visible
         repeat: true
         triggeredOnStart: true
         onTriggered: root.updateClockAndDate()
@@ -581,6 +581,7 @@ Item {
     Connections {
         target: (typeof overlayController !== "undefined") ? overlayController : null
         function onOverlayShown() {
+            root.updateClockAndDate();
             overlayMouseArea.initialPointerX = -1;
             overlayMouseArea.initialPointerY = -1;
         }
