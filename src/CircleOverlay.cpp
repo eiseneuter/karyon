@@ -67,6 +67,7 @@ CircleOverlay::CircleOverlay(QObject *parent)
         m_cachedRecentApps.clear();
         m_cachedFavorites.clear();
         m_cachedRecentFiles.clear();
+        m_cachedCategories.clear();
 
         bool winEn = SettingsManager::instance().categoryWindowsEnabled();
         bool appsEn = SettingsManager::instance().categoryAppsEnabled();
@@ -3613,11 +3614,27 @@ void CircleOverlay::showAt(const QPoint &cursorPos, const QList<WindowInfo> &win
         populateSegments(windows, hasRing2, hasRing3);
     } else if (m_mode == OverlayMode::RecentApps) {
         m_cachedRecentApps = m_appManager.loadRecentApps(SettingsManager::instance().maxRecentApps(), openAppIdentifiers());
+        m_cachedFavorites = m_appManager.loadFavorites();
         if (m_cachedCategories.isEmpty()) {
             m_cachedCategories = m_appManager.loadCategories();
-        }
-        if (m_cachedFavorites.isEmpty()) {
-            m_cachedFavorites = m_appManager.loadFavorites();
+        } else {
+            bool favCatFound = false;
+            for (auto &cat : m_cachedCategories) {
+                if (cat.id == QLatin1String("__FAVORITES__")) {
+                    cat.apps = m_cachedFavorites;
+                    favCatFound = true;
+                    break;
+                }
+            }
+            if (!favCatFound && !m_cachedFavorites.isEmpty()) {
+                CategoryEntry fav;
+                fav.id = QStringLiteral("__FAVORITES__");
+                fav.name = QStringLiteral("Favorites");
+                fav.icon = QStringLiteral("favorites");
+                fav.apps = m_cachedFavorites;
+                int centerIdx = m_cachedCategories.size() / 2;
+                m_cachedCategories.insert(centerIdx, fav);
+            }
         }
         populateRecentAppsSegments(hasRing2, hasRing3);
     } else if (m_mode == OverlayMode::RecentFiles) {

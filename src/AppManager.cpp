@@ -17,6 +17,7 @@
 #include <KServiceGroup>
 #include <KService>
 #include <sqlite3.h>
+#include <QUrl>
 
 bool AppManager::isAppImage(const QString &path)
 {
@@ -1701,49 +1702,101 @@ QList<AppEntry> AppManager::loadFavorites()
 {
     QList<AppEntry> result;
     QSet<QString> seen;
+    QStringList orderedKeys;
 
-    QString dbPath = QDir::homePath() + QStringLiteral("/.local/share/kactivitymanagerd/resources/database");
-    sqlite3 *db = nullptr;
-    if (sqlite3_open_v2(dbPath.toUtf8().constData(), &db, SQLITE_OPEN_READONLY, nullptr) != SQLITE_OK) {
-        return result;
+    // 1. Zuerst kactivitymanagerd-statsrc auslesen (enthält die exakte, vom Nutzer festgelegte Reihenfolge!)
+    QString statsPath = QDir::homePath() + QStringLiteral("/.config/kactivitymanagerd-statsrc");
+    if (QFile::exists(statsPath)) {
+        QSettings stats(statsPath, QSettings::IniFormat);
+        QStringList bestOrdering;
+        for (const auto &group : stats.childGroups()) {
+            if (group.contains(QLatin1String("favorite"), Qt::CaseInsensitive)) {
+                stats.beginGroup(group);
+                QString orderingStr = stats.value(QStringLiteral("ordering")).toString();
+                stats.endGroup();
+                if (!orderingStr.isEmpty()) {
+                    QStringList items = orderingStr.split(QLatin1Char(','), Qt::SkipEmptyParts);
+                    if (items.size() > bestOrdering.size() || (bestOrdering.isEmpty() && !items.isEmpty())) {
+                        bestOrdering = items;
+                    }
+                }
+            }
+        }
+        for (const auto &item : bestOrdering) {
+            QString clean = item.trimmed();
+            if (clean.startsWith(QLatin1String("applications:"))) {
+                clean = clean.mid(13);
+            } else if (clean.startsWith(QLatin1String("file://"))) {
+                clean = QUrl(clean).toLocalFile();
+            }
+            if (!clean.isEmpty() && !seen.contains(clean)) {
+                seen.insert(clean);
+                orderedKeys.append(clean);
+            }
+        }
     }
 
-    // KDE Plasma Kickoff Favorites: initiatingAgent enthält 'kickoff.favorites'
-    const char *sql = "SELECT DISTINCT replace(targettedResource, 'applications:', '') "
-                      "FROM ResourceLink "
-                      "WHERE initiatingAgent LIKE '%kickoff.favorites%' "
-                      "AND targettedResource LIKE 'applications:%';";
+    // 2. Ergänzend kactivitymanagerd SQLite-Datenbank abfragen (deckt Plasma 6, Plasma 5 und alle Launcher ab)
+    QString dbPath = QDir::homePath() + QStringLiteral("/.local/share/kactivitymanagerd/resources/database");
+    sqlite3 *db = nullptr;
+    if (sqlite3_open_v2(dbPath.toUtf8().constData(), &db, SQLITE_OPEN_READONLY, nullptr) == SQLITE_OK) {
+        // Plasma 6 verwendet 'org.kde.plasma.favorites.applications'
+        // Plasma 5 verwendete 'org.kde.plasma.kickoff.favorites...'
+        const char *sql = "SELECT DISTINCT targettedResource "
+                          "FROM ResourceLink "
+                          "WHERE (initiatingAgent LIKE '%favorite%' OR initiatingAgent LIKE '%kickoff%') "
+                          "  AND (targettedResource LIKE 'applications:%' OR targettedResource LIKE '%.desktop%');";
 
-    sqlite3_stmt *stmt = nullptr;
-    if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
-        while (sqlite3_step(stmt) == SQLITE_ROW) {
-            const char *desktopFile = (const char *)sqlite3_column_text(stmt, 0);
-            if (!desktopFile) continue;
-            QString df = QString::fromUtf8(desktopFile);
-            if (seen.contains(df)) continue;
-
-            KService::Ptr s = KService::serviceByDesktopName(df);
-            if (!s && df.endsWith(QLatin1String(".desktop"))) {
-                QString stripped = df;
-                stripped.chop(8);
-                s = KService::serviceByDesktopName(stripped);
+        sqlite3_stmt *stmt = nullptr;
+        if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
+            while (sqlite3_step(stmt) == SQLITE_ROW) {
+                const char *resText = (const char *)sqlite3_column_text(stmt, 0);
+                if (!resText) continue;
+                QString res = QString::fromUtf8(resText).trimmed();
+                if (res.startsWith(QLatin1String("applications:"))) {
+                    res = res.mid(13);
+                } else if (res.startsWith(QLatin1String("file://"))) {
+                    res = QUrl(res).toLocalFile();
+                }
+                if (!res.isEmpty() && !seen.contains(res)) {
+                    seen.insert(res);
+                    orderedKeys.append(res);
+                }
             }
-            if (!s || !s->isValid() || s->noDisplay() || s->exec().trimmed().isEmpty()) continue;
+            sqlite3_finalize(stmt);
+        }
+        sqlite3_close(db);
+    }
 
-            seen.insert(df);
+    // 3. Desktop-Dateien / Services auflösen
+    for (const auto &df : orderedKeys) {
+        KService::Ptr s = KService::serviceByDesktopName(df);
+        if (!s && df.endsWith(QLatin1String(".desktop"))) {
+            QString stripped = df;
+            stripped.chop(8);
+            s = KService::serviceByDesktopName(stripped);
+        }
+        if (!s) {
+            s = KService::serviceByStorageId(df);
+        }
 
-            AppEntry entry;
+        AppEntry entry;
+        if (s && s->isValid() && !s->noDisplay() && !s->exec().trimmed().isEmpty()) {
             entry.id = s->desktopEntryName();
             entry.name = s->name();
             entry.icon = s->icon();
             entry.exec = s->exec();
             entry.comment = s->comment();
             entry.desktopFile = s->entryPath();
+        } else {
+            // Fallback auf findApp (unterstützt Flatpaks, AppImages, direkte Pfade)
+            entry = findApp(df, df);
+        }
+
+        if (!entry.id.isEmpty() && !entry.name.isEmpty() && !entry.exec.trimmed().isEmpty()) {
             result.append(entry);
         }
-        sqlite3_finalize(stmt);
     }
-    sqlite3_close(db);
 
     return result;
 }
