@@ -90,6 +90,7 @@ Item {
     }
 
     property int systemVolume: (typeof volumeLevel !== "undefined") ? volumeLevel : 50
+    property int systemMaxVolume: (typeof maxVolumeLevel !== "undefined") ? maxVolumeLevel : 100
     property bool systemMuted: (typeof isMuted !== "undefined") ? isMuted : false
 
     property int selectedRing: -1    // 1 für Ring 1, 2 für Ring 2, 3 für Ring 3, -1 für keine Auswahl
@@ -760,11 +761,13 @@ Item {
             visible: root.showVolumeControl
 
             property int vol: root.systemVolume
+            property int maxVol: root.systemMaxVolume
             property bool muted: root.systemMuted
             property bool isHovered: root.isCursorInVolumeArea
             property int vStep: root.currentVolumeStep
 
             onVolChanged: requestPaint()
+            onMaxVolChanged: requestPaint()
             onMutedChanged: requestPaint()
             onIsHoveredChanged: requestPaint()
             onVStepChanged: requestPaint()
@@ -787,14 +790,15 @@ Item {
                 var chordY = cy + (r / 3.0) + 7.0;
 
                 // Dezenter Grundton für den Lautstärkebereich
-                ctx.fillStyle = "rgba(255, 255, 255, 0.015)";
+                ctx.fillStyle = isHovered ? "rgba(255, 255, 255, 0.035)" : "rgba(255, 255, 255, 0.015)";
                 ctx.fillRect(0, chordY, width, height - chordY);
 
-                // 3. Dynamische Anzahl vertikaler Balken entsprechend des Volume Steps (1-zu-1 Repräsentation)
+                // 3. Dynamische Anzahl vertikaler Balken entsprechend des Volume Steps und maxVol
                 var hs = r / 75.0;
-                var volPct = Math.max(0.0, Math.min(1.0, vol / 100.0));
+                var effectiveMax = Math.max(100, maxVol);
                 var curStep = Math.max(1, Math.min(20, root.currentVolumeStep));
-                var numBars = Math.round(100.0 / curStep);
+                var numBars = Math.round(effectiveMax / curStep);
+                var bar100 = Math.round(100.0 / curStep);
                 var totalW = 126.0 * hs;
                 var slotW = totalW / numBars;
                 var gap = (numBars > 50) ? (0.4 * hs) : ((numBars > 25) ? (1.0 * hs) : (Math.max(1.5 * hs, slotW * 0.25)));
@@ -802,9 +806,13 @@ Item {
                 var startX = cx - totalW / 2.0;
 
                 var isLight = (typeof karyonTheme !== "undefined") && karyonTheme.isLight;
-                var activeBars = Math.round(volPct * numBars);
+                var activeBars = Math.round((Math.max(0, Math.min(effectiveMax, vol)) / effectiveMax) * numBars);
+
                 var activeCol = muted ? "rgba(255, 71, 87, 0.40)" : (isLight ? "rgba(24, 28, 36, 0.35)" : "rgba(255, 255, 255, 0.28)");
                 var inactiveCol = isLight ? "rgba(24, 28, 36, 0.08)" : "rgba(255, 255, 255, 0.05)";
+                // Akzentuierte Übersteuerungs-/Amplified-Farbe für Bereiche über 100% (Warmes Bernstein/Orange)
+                var activeOverdriveCol = muted ? "rgba(255, 71, 87, 0.40)" : (isLight ? "rgba(230, 126, 34, 0.70)" : "rgba(255, 159, 67, 0.65)");
+                var inactiveOverdriveCol = isLight ? "rgba(230, 126, 34, 0.14)" : "rgba(255, 159, 67, 0.10)";
 
                 for (var i = 0; i < numBars; i++) {
                     var bx = startX + i * slotW;
@@ -817,8 +825,20 @@ Item {
                     var barH = maxBottomY - topY;
                     if (barH <= 1.0) continue;
 
-                    ctx.fillStyle = (i < activeBars) ? activeCol : inactiveCol;
+                    var isOverdrive = (i >= bar100);
+                    if (i < activeBars) {
+                        ctx.fillStyle = isOverdrive ? activeOverdriveCol : activeCol;
+                    } else {
+                        ctx.fillStyle = isOverdrive ? inactiveOverdriveCol : inactiveCol;
+                    }
                     ctx.fillRect(bx, topY, barW, barH);
+                }
+
+                // Subtile 100%-Markierung, falls der Balken über 100% hinausgeht
+                if (effectiveMax > 100 && bar100 < numBars) {
+                    var tickX = startX + bar100 * slotW - (gap / 2.0);
+                    ctx.fillStyle = isLight ? "rgba(24, 28, 36, 0.30)" : "rgba(255, 255, 255, 0.30)";
+                    ctx.fillRect(tickX - 0.5 * hs, chordY, 1.0 * hs, 3.5 * hs);
                 }
 
                 // 4. Zentrales Lautsprecher-Badge im unteren Bereich
@@ -832,44 +852,56 @@ Item {
                 ctx.fillStyle = (typeof karyonTheme !== "undefined") ? karyonTheme.baseBg : "#21252b";
                 ctx.fill();
 
-                // Lautsprechersymbol exakt zentriert im Badge
-                var spkColor = muted ? "#ff4757" : (isLight ? "#181c24" : "#ffffff");
-                ctx.fillStyle = spkColor;
-                ctx.strokeStyle = spkColor;
-                ctx.lineWidth = 1.4 * hs;
-                ctx.lineCap = "round";
-                ctx.lineJoin = "round";
+                var isOver = (vol > 100);
+                var spkColor = muted ? "#ff4757" : (isOver ? (isLight ? "#d35400" : "#ff9f43") : (isLight ? "#181c24" : "#ffffff"));
 
-                // Geometrische Zentrierung
-                var sx = spkCx - 2.0 * hs;
-                var sy = spkCy;
-
-                // Lautsprecher-Konus
-                ctx.beginPath();
-                ctx.moveTo(sx - 5.5 * hs, sy - 3.0 * hs);
-                ctx.lineTo(sx - 2.0 * hs, sy - 3.0 * hs);
-                ctx.lineTo(sx + 2.5 * hs, sy - 6.5 * hs);
-                ctx.lineTo(sx + 2.5 * hs, sy + 6.5 * hs);
-                ctx.lineTo(sx - 2.0 * hs, sy + 3.0 * hs);
-                ctx.lineTo(sx - 5.5 * hs, sy + 3.0 * hs);
-                ctx.closePath();
-                ctx.fill();
-
-                if (muted) {
-                    // Diagonale Durchstreichung
-                    ctx.beginPath();
-                    ctx.moveTo(spkCx - 7.5 * hs, spkCy - 6.5 * hs);
-                    ctx.lineTo(spkCx + 7.5 * hs, spkCy + 6.5 * hs);
-                    ctx.stroke();
+                if (isHovered && !muted) {
+                    // Prozentanzeige beim Hovern / Scrollen im Badge (in Datumsgrau, zentriert und ohne '%')
+                    var dateGray = (typeof karyonTheme !== "undefined" && karyonTheme.textMuted) ? karyonTheme.textMuted : "#9faec0";
+                    ctx.font = Math.round(11 * hs) + "px 'Noto Sans', sans-serif";
+                    ctx.textAlign = "center";
+                    ctx.textBaseline = "middle";
+                    ctx.fillStyle = dateGray;
+                    ctx.fillText(vol, spkCx, spkCy);
                 } else {
-                    // Dezente Schallwellen
-                    ctx.beginPath();
-                    ctx.arc(sx + 1.5 * hs, sy, 4.5 * hs, -Math.PI / 3.0, Math.PI / 3.0, false);
-                    ctx.stroke();
+                    // Lautsprechersymbol exakt zentriert im Badge
+                    ctx.fillStyle = spkColor;
+                    ctx.strokeStyle = spkColor;
+                    ctx.lineWidth = 1.4 * hs;
+                    ctx.lineCap = "round";
+                    ctx.lineJoin = "round";
 
+                    // Geometrische Zentrierung
+                    var sx = spkCx - 2.0 * hs;
+                    var sy = spkCy;
+
+                    // Lautsprecher-Konus
                     ctx.beginPath();
-                    ctx.arc(sx + 1.5 * hs, sy, 8.0 * hs, -Math.PI / 3.5, Math.PI / 3.5, false);
-                    ctx.stroke();
+                    ctx.moveTo(sx - 5.5 * hs, sy - 3.0 * hs);
+                    ctx.lineTo(sx - 2.0 * hs, sy - 3.0 * hs);
+                    ctx.lineTo(sx + 2.5 * hs, sy - 6.5 * hs);
+                    ctx.lineTo(sx + 2.5 * hs, sy + 6.5 * hs);
+                    ctx.lineTo(sx - 2.0 * hs, sy + 3.0 * hs);
+                    ctx.lineTo(sx - 5.5 * hs, sy + 3.0 * hs);
+                    ctx.closePath();
+                    ctx.fill();
+
+                    if (muted) {
+                        // Diagonale Durchstreichung
+                        ctx.beginPath();
+                        ctx.moveTo(spkCx - 7.5 * hs, spkCy - 6.5 * hs);
+                        ctx.lineTo(spkCx + 7.5 * hs, spkCy + 6.5 * hs);
+                        ctx.stroke();
+                    } else {
+                        // Dezente Schallwellen
+                        ctx.beginPath();
+                        ctx.arc(sx + 1.5 * hs, sy, 4.5 * hs, -Math.PI / 3.0, Math.PI / 3.0, false);
+                        ctx.stroke();
+
+                        ctx.beginPath();
+                        ctx.arc(sx + 1.5 * hs, sy, 8.0 * hs, -Math.PI / 3.5, Math.PI / 3.5, false);
+                        ctx.stroke();
+                    }
                 }
 
                 ctx.restore();

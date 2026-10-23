@@ -140,6 +140,7 @@ void CircleOverlay::prewarm()
     m_view->rootContext()->setContextProperty(QStringLiteral("hasRing2"), false);
     m_view->rootContext()->setContextProperty(QStringLiteral("hasRing3"), false);
     m_view->rootContext()->setContextProperty(QStringLiteral("volumeLevel"), m_volumeManager.volume());
+    m_view->rootContext()->setContextProperty(QStringLiteral("maxVolumeLevel"), m_volumeManager.maxVolume());
     m_view->rootContext()->setContextProperty(QStringLiteral("isMuted"), m_volumeManager.isMuted());
     m_view->rootContext()->setContextProperty(QStringLiteral("categoryMode"), QStringLiteral("windows"));
     m_view->rootContext()->setContextProperty(QStringLiteral("showClock"), SettingsManager::instance().showClock());
@@ -3595,7 +3596,7 @@ void CircleOverlay::showAt(const QPoint &cursorPos, const QList<WindowInfo> &win
 
     m_volumeManager.refresh();
     m_mediaManager.refresh(windows);
-    updateVolumeState(m_volumeManager.volume(), m_volumeManager.isMuted());
+    updateVolumeState(m_volumeManager.volume(), m_volumeManager.isMuted(), m_volumeManager.maxVolume());
 
     updateScaleProperties();
 
@@ -4288,10 +4289,11 @@ void CircleOverlay::toggleMute()
     m_volumeManager.toggleMute();
 }
 
-void CircleOverlay::updateVolumeState(int vol, bool muted)
+void CircleOverlay::updateVolumeState(int vol, bool muted, int maxVol)
 {
     if (m_view && m_view->rootObject()) {
         m_view->rootObject()->setProperty("systemVolume", vol);
+        m_view->rootObject()->setProperty("systemMaxVolume", maxVol);
         m_view->rootObject()->setProperty("systemMuted", muted);
     }
 }

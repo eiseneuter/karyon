@@ -138,7 +138,7 @@ public:
     bool volumeScrolledThisSession() const { return m_volumeScrolledThisSession; }
     void stepVolume(int stepPercent);
     void toggleMute();
-    void updateVolumeState(int vol, bool muted);
+    void updateVolumeState(int vol, bool muted, int maxVol = 100);
 
     void mediaPlayPause() { m_mediaManager.playPause(); }
     void mediaNext() { m_mediaManager.next(); }
