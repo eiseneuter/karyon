@@ -14,6 +14,7 @@ class SettingsController : public QObject
     Q_PROPERTY(QString triggerDisplayName READ triggerDisplayName NOTIFY triggerChanged)
     Q_PROPERTY(bool isRecordingTrigger READ isRecordingTrigger WRITE setIsRecordingTrigger NOTIFY isRecordingTriggerChanged)
     Q_PROPERTY(bool gameMode READ gameMode WRITE setGameMode NOTIFY gameModeChanged)
+    Q_PROPERTY(bool performanceMode READ performanceMode WRITE setPerformanceMode NOTIFY performanceModeChanged)
     Q_PROPERTY(double overlayMouseSpeed READ overlayMouseSpeed WRITE setOverlayMouseSpeed NOTIFY overlayMouseSpeedChanged)
     Q_PROPERTY(double overlayScale READ overlayScale WRITE setOverlayScale NOTIFY overlayScaleChanged)
     Q_PROPERTY(double overlayTransparency READ overlayTransparency WRITE setOverlayTransparency NOTIFY overlayTransparencyChanged)
@@ -72,6 +73,9 @@ public:
 
     bool gameMode() const;
     void setGameMode(bool enabled);
+
+    bool performanceMode() const;
+    void setPerformanceMode(bool enabled);
 
     double overlayMouseSpeed() const;
     void setOverlayMouseSpeed(double speed);
@@ -217,6 +221,7 @@ signals:
     void triggerCaptured(const QString &type, int button, const QString &keySeq, const QString &displayName);
     void settingsVisibilityChanged(bool visible);
     void gameModeChanged();
+    void performanceModeChanged();
     void overlayMouseSpeedChanged();
     void overlayScaleChanged();
     void overlayTransparencyChanged();

@@ -18,6 +18,14 @@ Item {
     property bool hasRing2Active: (typeof hasRing2 !== "undefined") ? hasRing2 : false
     property bool hasRing3Active: (typeof hasRing3 !== "undefined") ? hasRing3 : false
     property string categoryMode: (typeof categoryMode !== "undefined") ? categoryMode : "windows"
+    property bool isPerformanceMode: (typeof performanceMode !== "undefined") ? performanceMode : false
+
+    onIsPerformanceModeChanged: {
+        ringCanvas.requestPaint();
+        if (ringTopEdgeCanvas.visible) {
+            ringTopEdgeCanvas.requestPaint();
+        }
+    }
 
     property string systemLocaleName: (typeof detectedLocaleName !== "undefined" && detectedLocaleName !== "") ? detectedLocaleName : ""
     property int dateFormatIdx: (typeof dateFormatIndex !== "undefined") ? dateFormatIndex : 0
@@ -297,7 +305,45 @@ Item {
         updateSelection();
     }
 
+    property real lastAimTimestamp: 0
+    property real pendingAimX: 0
+    property real pendingAimY: 0
+    property bool hasPendingAim: false
+
+    Timer {
+        id: aimThrottleTimer
+        interval: root.isPerformanceMode ? 33 : 16
+        repeat: false
+        onTriggered: {
+            if (root.hasPendingAim) {
+                root.hasPendingAim = false;
+                root.lastAimTimestamp = Date.now();
+                root.applyAimOffset(root.pendingAimX, root.pendingAimY);
+            }
+        }
+    }
+
     function setAimOffset(ox, oy) {
+        var now = Date.now();
+        var minInterval = root.isPerformanceMode ? 33 : 16;
+        if (now - lastAimTimestamp >= minInterval) {
+            aimThrottleTimer.stop();
+            hasPendingAim = false;
+            lastAimTimestamp = now;
+            applyAimOffset(ox, oy);
+        } else {
+            pendingAimX = ox;
+            pendingAimY = oy;
+            hasPendingAim = true;
+            if (!aimThrottleTimer.running) {
+                var remaining = Math.max(1, minInterval - (now - lastAimTimestamp));
+                aimThrottleTimer.interval = remaining;
+                aimThrottleTimer.start();
+            }
+        }
+    }
+
+    function applyAimOffset(ox, oy) {
         aimOffsetX = ox;
         aimOffsetY = oy;
         updateSelection();
@@ -588,6 +634,8 @@ Item {
         function onOverlayHidden() {
             overlayMouseArea.initialPointerX = -1;
             overlayMouseArea.initialPointerY = -1;
+            aimThrottleTimer.stop();
+            root.hasPendingAim = false;
         }
     }
 
@@ -914,6 +962,7 @@ Item {
     Canvas {
         id: ringCanvas
         anchors.fill: parent
+        antialiasing: !root.isPerformanceMode
 
         property var segmentData1: segmentList1
         property var segmentData2: segmentList2
@@ -1096,12 +1145,14 @@ Item {
                         ctx.lineWidth = 1;
                         ctx.stroke();
 
-                        // 4. Normale Top-Linie (2.5px am Außenrand) beibehalten
-                        ctx.beginPath();
-                        ctx.arc(cx, cy, outerR - 1, a1, a2, false);
-                        ctx.strokeStyle = (typeof karyonTheme !== "undefined") ? karyonTheme.identWindows : "#2ed573";
-                        ctx.lineWidth = 2.5;
-                        ctx.stroke();
+                        // 4. Normale Top-Linie (2.5px am Außenrand) beibehalten (im Performance-Modus übernimmt ringTopEdgeCanvas das AA-Zeichnen)
+                        if (!root.isPerformanceMode) {
+                            ctx.beginPath();
+                            ctx.arc(cx, cy, outerR - 1, a1, a2, false);
+                            ctx.strokeStyle = (typeof karyonTheme !== "undefined") ? karyonTheme.identWindows : "#2ed573";
+                            ctx.lineWidth = 2.5;
+                            ctx.stroke();
+                        }
 
                         // 5. Drilldown indicator (if any)
                         if (seg.hasDrilldown) {
@@ -1162,11 +1213,13 @@ Item {
                             }
 
                             // Top Edge 2.5px line at outerR - 1 covering outer boundary up to outerR
-                            ctx.beginPath();
-                            ctx.arc(cx, cy, outerR - 1, a1, a2, false);
-                            ctx.strokeStyle = topColor;
-                            ctx.lineWidth = 2.5;
-                            ctx.stroke();
+                            if (!root.isPerformanceMode) {
+                                ctx.beginPath();
+                                ctx.arc(cx, cy, outerR - 1, a1, a2, false);
+                                ctx.strokeStyle = topColor;
+                                ctx.lineWidth = 2.5;
+                                ctx.stroke();
+                            }
                         } else {
                             // Full border with borderCol for segments without topColor (e.g. Show Desktop)
                             ctx.strokeStyle = borderCol;
@@ -1232,6 +1285,93 @@ Item {
                 var r3Bg = (typeof karyonTheme !== "undefined") ? karyonTheme.ring3Bg : "#1b1e23";
                 var r3Border = (typeof karyonTheme !== "undefined") ? karyonTheme.ring3Border : "#121417";
                 drawRingSegments(3, segmentData3, innerR3, outerR3, r3Bg, r3Border);
+            }
+        }
+    }
+
+    // Antialiased Top-Edge Canvas im Performance-Modus (zeichnet NUR die 2.5px Oberkanten mit AA)
+    Canvas {
+        id: ringTopEdgeCanvas
+        anchors.fill: parent
+        visible: root.isPerformanceMode
+        antialiasing: true
+
+        property var segmentData1: segmentList1
+        property var segmentData2: segmentList2
+        property var segmentData3: segmentList3
+        property bool ring2Active: hasRing2Active
+        property bool ring3Active: hasRing3Active
+
+        onSegmentData1Changed: requestPaint()
+        onSegmentData2Changed: requestPaint()
+        onSegmentData3Changed: requestPaint()
+        onRing2ActiveChanged: requestPaint()
+        onRing3ActiveChanged: requestPaint()
+        onVisibleChanged: if (visible) requestPaint()
+
+        Connections {
+            target: (typeof karyonTheme !== "undefined") ? karyonTheme : null
+            function onThemeChanged() {
+                if (ringTopEdgeCanvas.visible) {
+                    ringTopEdgeCanvas.requestPaint();
+                }
+            }
+        }
+
+        onPaint: {
+            var ctx = getContext("2d");
+            ctx.reset();
+
+            var cx = width / 2;
+            var cy = height / 2;
+            var innerR1 = circleRadius + ringGap;
+            var outerR1 = innerR1 + ringDepth;
+
+            function drawEdges(segList, outerR) {
+                var numSegs = (segList && segList.length) ? segList.length : 0;
+                for (var i = 0; i < numSegs; i++) {
+                    var seg = segList[i];
+                    if (!seg) continue;
+                    var topColor = "";
+                    var hasProgress = (seg.isRealWindow || seg.segmentType === "window") &&
+                                      (typeof seg.progressPercent === "number") &&
+                                      (seg.progressPercent >= 0 && seg.progressPercent <= 100);
+                    if (hasProgress || seg.segmentType === "window") {
+                        topColor = (typeof karyonTheme !== "undefined") ? karyonTheme.identWindows : "#2ed573";
+                    } else if (seg.segmentType === "file") {
+                        topColor = (typeof karyonTheme !== "undefined") ? karyonTheme.identFiles : "#ff9f43";
+                    } else if (seg.segmentType === "app") {
+                        topColor = (typeof karyonTheme !== "undefined") ? karyonTheme.identApps : "#37d0ff";
+                    }
+                    if (topColor !== "") {
+                        var a1 = seg.angle - seg.span / 2;
+                        var a2 = seg.angle + seg.span / 2;
+                        ctx.beginPath();
+                        ctx.arc(cx, cy, outerR - 1, a1, a2, false);
+                        ctx.strokeStyle = topColor;
+                        ctx.lineWidth = 2.5;
+                        ctx.stroke();
+                    }
+                }
+            }
+
+            // Ring 1
+            drawEdges(segmentData1, outerR1);
+
+            // Ring 2
+            if (ring2Active && segmentData2 && segmentData2.length > 0) {
+                var innerR2 = outerR1 + ring2Gap;
+                var outerR2 = innerR2 + ring2Depth;
+                drawEdges(segmentData2, outerR2);
+            }
+
+            // Ring 3
+            if (ring3Active && segmentData3 && segmentData3.length > 0) {
+                var innerR2_3 = outerR1 + ring2Gap;
+                var outerR2_3 = innerR2_3 + ring2Depth;
+                var innerR3 = outerR2_3 + ring3Gap;
+                var outerR3 = innerR3 + ring3Depth;
+                drawEdges(segmentData3, outerR3);
             }
         }
     }

@@ -54,6 +54,7 @@ SettingsController::SettingsController(QObject *parent)
         emit triggerHoldMsChanged();
         emit triggerChanged();
         emit gameModeChanged();
+        emit performanceModeChanged();
         emit overlayMouseSpeedChanged();
         emit overlayScaleChanged();
         emit overlayTransparencyChanged();
@@ -227,6 +228,16 @@ bool SettingsController::gameMode() const
 void SettingsController::setGameMode(bool enabled)
 {
     SettingsManager::instance().setGameModeEnabled(enabled);
+}
+
+bool SettingsController::performanceMode() const
+{
+    return SettingsManager::instance().performanceMode();
+}
+
+void SettingsController::setPerformanceMode(bool enabled)
+{
+    SettingsManager::instance().setPerformanceMode(enabled);
 }
 
 double SettingsController::overlayMouseSpeed() const

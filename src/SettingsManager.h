@@ -28,6 +28,9 @@ public:
     bool gameModeEnabled() const;
     void setGameModeEnabled(bool enabled);
 
+    bool performanceMode() const;
+    void setPerformanceMode(bool enabled);
+
     double overlayMouseSpeed() const;
     void setOverlayMouseSpeed(double speed);
 
@@ -145,6 +148,7 @@ public:
 signals:
     void settingsChanged();
     void gameModeChanged(bool enabled);
+    void performanceModeChanged(bool enabled);
 
 private:
     explicit SettingsManager(QObject *parent = nullptr);
@@ -157,6 +161,7 @@ private:
     QString m_triggerKeySeq;
     QString m_triggerDisplayName = QStringLiteral("Right Click");
     bool m_gameModeEnabled = true;
+    bool m_performanceMode = false;
     double m_overlayMouseSpeed = -0.5;
     double m_overlayScale = 0.9;
     double m_overlayTransparency = 4.0;

@@ -153,6 +153,7 @@ void CircleOverlay::prewarm()
     m_view->rootContext()->setContextProperty(QStringLiteral("detectedLocaleName"), QLocale().name());
     m_view->rootContext()->setContextProperty(QStringLiteral("overlayController"), this);
     m_view->rootContext()->setContextProperty(QStringLiteral("karyonTheme"), &ThemeManager::instance());
+    m_view->rootContext()->setContextProperty(QStringLiteral("performanceMode"), SettingsManager::instance().performanceMode());
 
     m_view->setSource(QUrl(QStringLiteral("qrc:/qt/qml/karyon/qml/Circle.qml")));
     m_view->create();
@@ -296,6 +297,7 @@ void CircleOverlay::updateScaleProperties()
     ctx->setContextProperty(QStringLiteral("dateSeparator"), SettingsManager::instance().dateSeparator());
     ctx->setContextProperty(QStringLiteral("timeFormatIndex"), SettingsManager::instance().timeFormatIndex());
     ctx->setContextProperty(QStringLiteral("detectedLocaleName"), QLocale().name());
+    ctx->setContextProperty(QStringLiteral("performanceMode"), SettingsManager::instance().performanceMode());
 
     if (m_view->rootObject()) {
         m_view->rootObject()->setProperty("overlayScale", s);
@@ -308,6 +310,7 @@ void CircleOverlay::updateScaleProperties()
         m_view->rootObject()->setProperty("dateSep", SettingsManager::instance().dateSeparator());
         m_view->rootObject()->setProperty("timeFormatIdx", SettingsManager::instance().timeFormatIndex());
         m_view->rootObject()->setProperty("overlayTransparencyVal", SettingsManager::instance().overlayTransparency());
+        m_view->rootObject()->setProperty("isPerformanceMode", SettingsManager::instance().performanceMode());
     }
 }
 

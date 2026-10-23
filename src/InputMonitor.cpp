@@ -1018,6 +1018,8 @@ void InputMonitor::workerLoop()
         int pollTimeout = 250;
         if (state == State::Pending) {
             pollTimeout = 5;
+        } else if (state == State::Triggered) {
+            pollTimeout = m_performanceMode.load() ? 33 : 16;
         } else if (pendingHotplugRetries > 0) {
             pollTimeout = 150;
         } else if (m_devices.empty()) {
@@ -1027,6 +1029,17 @@ void InputMonitor::workerLoop()
 
         auto now = std::chrono::steady_clock::now();
         int currentTriggerBtn = m_triggerButton.load();
+
+        if (state == State::Triggered && (aimX != lastEmittedAimX || aimY != lastEmittedAimY)) {
+            auto elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(now - lastCursorMovedEmitTime).count();
+            int minIntervalMs = m_performanceMode.load() ? 33 : 16;
+            if (elapsedMs >= minIntervalMs) {
+                lastEmittedAimX = aimX;
+                lastEmittedAimY = aimY;
+                lastCursorMovedEmitTime = now;
+                emit cursorMoved(aimX, aimY);
+            }
+        }
 
         if (state == State::Pending) {
             auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - pressTime).count();
@@ -1345,9 +1358,8 @@ void InputMonitor::workerLoop()
                 if (aimX != lastEmittedAimX || aimY != lastEmittedAimY) {
                     auto now = std::chrono::steady_clock::now();
                     auto elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(now - lastCursorMovedEmitTime).count();
-                    int dX = std::abs(aimX - lastEmittedAimX);
-                    int dY = std::abs(aimY - lastEmittedAimY);
-                    if (elapsedMs >= 8 || (dX + dY) >= 4) {
+                    int minIntervalMs = m_performanceMode.load() ? 33 : 16;
+                    if (elapsedMs >= minIntervalMs) {
                         lastEmittedAimX = aimX;
                         lastEmittedAimY = aimY;
                         lastCursorMovedEmitTime = now;

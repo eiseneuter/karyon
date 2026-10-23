@@ -1269,7 +1269,7 @@ Item {
                     }
                 }
 
-                // Game Mode Checkbox
+                // Game Mode & Performance Mode Checkboxen
                 Item {
                     width: parent.width
                     height: 20
@@ -1281,6 +1281,16 @@ Item {
                         tooltip: "Bypasses overlay and gestures in games"
                         onToggled: function(val) {
                             settingsController.gameMode = val;
+                        }
+                    }
+
+                    KaryonCheckBox {
+                        x: 100
+                        text: "Performance Mode"
+                        checked: settingsController.performanceMode
+                        tooltip: "Caps overlay to 30 FPS and antialiases only top edges for lower CPU usage"
+                        onToggled: function(val) {
+                            settingsController.performanceMode = val;
                         }
                     }
                 }

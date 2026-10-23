@@ -47,6 +47,8 @@ public:
 
     void requestReleaseButtons() { m_releaseButtonsRequested.store(true); }
     void syncAim(int offsetX, int offsetY);
+    void setPerformanceMode(bool perf) { m_performanceMode.store(perf); }
+    bool performanceMode() const { return m_performanceMode.load(); }
 
     // Gesture detection constants
     static constexpr double GESTURE_MIN_DISPLACEMENT = 60.0;
@@ -113,6 +115,7 @@ private:
     bool m_triggerInitialized{false};
     std::atomic<bool> m_inhibited{false};
     std::atomic<bool> m_isRecordingTrigger{false};
+    std::atomic<bool> m_performanceMode{false};
     std::atomic<bool> m_syncAimRequested{false};
     std::atomic<int> m_syncAimX{0};
     std::atomic<int> m_syncAimY{-20};

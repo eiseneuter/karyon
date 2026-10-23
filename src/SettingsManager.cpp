@@ -35,6 +35,7 @@ void SettingsManager::load()
     }
 
     m_gameModeEnabled = m_settings.value(QStringLiteral("game_mode_enabled"), true).toBool();
+    m_performanceMode = m_settings.value(QStringLiteral("performance_mode"), false).toBool();
 
     m_overlayMouseSpeed = m_settings.value(QStringLiteral("overlay_mouse_speed"), -0.5).toDouble();
     m_overlayMouseSpeed = std::clamp(m_overlayMouseSpeed, -1.0, 1.0);
@@ -112,6 +113,7 @@ void SettingsManager::save()
     m_settings.setValue(QStringLiteral("trigger_key_seq"), m_triggerKeySeq);
     m_settings.setValue(QStringLiteral("trigger_display_name"), m_triggerDisplayName);
     m_settings.setValue(QStringLiteral("game_mode_enabled"), m_gameModeEnabled);
+    m_settings.setValue(QStringLiteral("performance_mode"), m_performanceMode);
     m_settings.setValue(QStringLiteral("overlay_mouse_speed"), m_overlayMouseSpeed);
     m_settings.setValue(QStringLiteral("overlay_scale"), m_overlayScale);
     m_settings.setValue(QStringLiteral("overlay_transparency"), m_overlayTransparency);
@@ -241,6 +243,21 @@ void SettingsManager::setGameModeEnabled(bool enabled)
         save();
         emit settingsChanged();
         emit gameModeChanged(enabled);
+    }
+}
+
+bool SettingsManager::performanceMode() const
+{
+    return m_performanceMode;
+}
+
+void SettingsManager::setPerformanceMode(bool enabled)
+{
+    if (m_performanceMode != enabled) {
+        m_performanceMode = enabled;
+        save();
+        emit settingsChanged();
+        emit performanceModeChanged(enabled);
     }
 }
 
@@ -794,6 +811,7 @@ void SettingsManager::resetDefaults()
     m_triggerKeySeq.clear();
     m_triggerDisplayName = QStringLiteral("Right Click");
     m_gameModeEnabled = true;
+    m_performanceMode = false;
     m_overlayMouseSpeed = -0.5;
     m_overlayScale = 1.0;
     m_overlayTransparency = 4.0;

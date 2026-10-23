@@ -446,6 +446,7 @@ int main(int argc, char *argv[])
     monitor.setHoldTriggerMs(SettingsManager::instance().triggerHoldMs());
     monitor.setOverlayMouseSpeed(SettingsManager::instance().overlayMouseSpeed());
     monitor.setGameModeEnabled(SettingsManager::instance().gameModeEnabled());
+    monitor.setPerformanceMode(SettingsManager::instance().performanceMode());
     monitor.setGameModeActive(kwinBridge.isActiveWindowGame());
     monitor.setTrigger(
         SettingsManager::instance().triggerType(),
@@ -457,6 +458,7 @@ int main(int argc, char *argv[])
         monitor.setHoldTriggerMs(SettingsManager::instance().triggerHoldMs());
         monitor.setOverlayMouseSpeed(SettingsManager::instance().overlayMouseSpeed());
         monitor.setGameModeEnabled(SettingsManager::instance().gameModeEnabled());
+        monitor.setPerformanceMode(SettingsManager::instance().performanceMode());
         monitor.setTrigger(
             SettingsManager::instance().triggerType(),
             SettingsManager::instance().triggerButton(),
