@@ -275,7 +275,7 @@ Item {
                 }
             }
         }
-        if (selectedRing === -1 && !isCursorInVolumeArea) {
+        if (selectedRing === -1) {
             selectedRing = 1;
             selectedIndex = (s1 && s1.length > 0) ? Math.floor((s1.length - 1) / 2) : 0;
         }
@@ -321,79 +321,168 @@ Item {
         var foundRing = -1;
         var foundIndex = -1;
 
-        // EINHEITLICHE HOVER-/HIGHLIGHT-REGEL (gilt identisch für ALLE Modi und Kategorien):
-        // 1. Pro Ring wird ermittelt, welches Segment die Cursor-Richtung "besitzt".
-        //    Die schmalen Trennfugen (segGap) zwischen benachbarten Segmenten gehören dabei
-        //    zum nächstgelegenen Segment DESSELBEN Rings. Dadurch fällt der Fokus beim
-        //    Überstreichen einer Fuge NIE kurz auf ein darunterliegendes Segment zurück
-        //    (verhindert u.a. ungewolltes Umschalten der Tray-App-Optionen).
-        // 2. Gewählt wird der äußerste Ring, der in Cursor-Richtung ein Segment besitzt,
-        //    sobald der Cursor dessen Innenradius erreicht hat (auch außerhalb des Overlays).
-        //    Ein innerer Ring wird nur gewählt, wenn der Cursor physisch in dessen Band liegt.
-        //    Ring 1 ist ab der Totzone im Hub anwählbar (Hub ist keine freie Fläche).
-        // 3. In radialen Zwischenräumen ohne gültigen Treffer bleibt der Fokus unverändert.
+        // EINHEITLICHE ZIELSTRAHL-REGEL:
+        // Ein unsichtbarer Zielstrahl erstreckt sich vom Hub-Zentrum durch den Cursor über den gesamten Bildschirm.
+        // 1. Entlang des Zielstrahls (Winkel) werden direkte Treffer auf allen aktiven Ringen geprüft (Winkelspanne + Fuge).
+        // 2. Gibt es direkte Treffer: Unter allen im Strahl liegenden Segmenten wird dasjenige gewählt,
+        //    das dem Cursor radial am nächsten ist:
+        //    - Befindet sich der Cursor physisch in einem Ring: dieses Segment (radialer Abstand 0).
+        //    - Befindet sich der Cursor außerhalb der Ringe: das äußerste vorhandene Segment im Zielstrahl
+        //      (bei 3 Ringen Ring 3; wo Ring 3 aufhört, aber Ring 2 noch Segmente hat, Ring 2; usw.).
+        //    - Befindet sich der Cursor im Hub: Ring 1 (dem Hub am nächsten), bzw. Ring 2 falls Ring 1 leer ist.
+        // 3. Gibt es im Zielstrahl keinen direkten Treffer (z.B. seitlicher oder unterer freier Raum):
+        //    Der Zielstrahl erfasst auf den aktiven Ringen das im Winkel nächstgelegene Segment
+        //    (stetige Projektion an den Bogenrändern – strikt KEIN Peilungsverlust beim Durchqueren oder Verlassen/Eintreten!).
+        // 4. Liegt der Cursor innerhalb einer winzigen 3px-Zone um das exakte Zentrum (0, 0):
+        //    Die bestehende Auswahl bleibt stabil erhalten, um Subpixel-Jitter am mathematischen Pol zu vermeiden.
         var gapPx = (typeof segGap !== "undefined") ? segGap : 4;
-        var deadR = (typeof deadzoneRadius !== "undefined") ? deadzoneRadius : 20;
+        var deadR = (typeof deadzoneRadius !== "undefined") ? Math.min(deadzoneRadius, 3.0) : 3.0;
 
-        function ringHit(list, count, ringInnerR, skipMedia) {
-            if (count <= 0) return -1;
-            // Halbe Fugenbreite (am Innenradius gemessen = größter Fugenwinkel) + Rundungsreserve
-            var tol = (gapPx / Math.max(1, ringInnerR)) / 2.0 + 0.002;
-            var best = -1;
-            var bestExcess = 1e9;
-            for (var n = 0; n < count; n++) {
-                var s = list[n];
-                if (!s) continue;
-                if (skipMedia && volumeScrolledThisSession && (s.segmentType === "media" || (s.windowId && s.windowId.indexOf("__MEDIA_") === 0))) {
-                    continue;
+        if (dist >= deadR) {
+            function findDirectHit(list, count, ringInnerR, skipMedia) {
+                if (count <= 0) return -1;
+                // Halbe Fugenbreite (inkl. 8px Cluster-Fuge auf Außenringen) + Rundungsreserve
+                var tol = Math.max((gapPx / Math.max(1, ringInnerR)) / 2.0 + 0.005,
+                                   (8.0 * (typeof overlayScale !== "undefined" ? overlayScale : 1.0) / Math.max(1, ringInnerR)) / 2.0 + 0.005);
+                var best = -1;
+                var bestExcess = 1e9;
+                for (var n = 0; n < count; n++) {
+                    var s = list[n];
+                    if (!s) continue;
+                    if (skipMedia && volumeScrolledThisSession && (s.segmentType === "media" || (s.windowId && s.windowId.indexOf("__MEDIA_") === 0))) {
+                        continue;
+                    }
+                    var d = angle - s.angle;
+                    while (d > Math.PI) d -= 2 * Math.PI;
+                    while (d < -Math.PI) d += 2 * Math.PI;
+                    var excess = Math.abs(d) - (s.span / 2.0);
+                    if (excess <= tol && excess < bestExcess) {
+                        bestExcess = excess;
+                        best = n;
+                    }
                 }
-                var d = angle - s.angle;
-                while (d > Math.PI) d -= 2 * Math.PI;
-                while (d < -Math.PI) d += 2 * Math.PI;
-                var excess = Math.abs(d) - (s.span / 2.0);
-                if (excess <= tol && excess < bestExcess) {
-                    bestExcess = excess;
-                    best = n;
+                return best;
+            }
+
+            var numSegs3 = (hasRing3Active && segmentList3 && segmentList3.length) ? segmentList3.length : 0;
+            var numSegs2 = (hasRing2Active && segmentList2 && segmentList2.length) ? segmentList2.length : 0;
+            var numSegs1 = (segmentList1 && segmentList1.length) ? segmentList1.length : 0;
+
+            var hit3 = findDirectHit(segmentList3, numSegs3, innerR3, false);
+            var hit2 = findDirectHit(segmentList2, numSegs2, innerR2, false);
+            var hit1 = findDirectHit(segmentList1, numSegs1, innerR1, true);
+
+            var directCandidates = [];
+            if (hit3 >= 0) directCandidates.push({ ring: 3, hit: hit3, inner: innerR3, outer: outerR3 });
+            if (hit2 >= 0) directCandidates.push({ ring: 2, hit: hit2, inner: innerR2, outer: outerR2 });
+            if (hit1 >= 0) directCandidates.push({ ring: 1, hit: hit1, inner: innerR1, outer: outerR1 });
+
+            if (directCandidates.length > 0) {
+                var bestRing = -1;
+                var bestIndex = -1;
+                var minRDist = 1e9;
+
+                for (var q = 0; q < directCandidates.length; q++) {
+                    var cand = directCandidates[q];
+                    var rDist = 0;
+                    if (dist < cand.inner) {
+                        rDist = cand.inner - dist;
+                    } else if (dist > cand.outer) {
+                        rDist = dist - cand.outer;
+                    } else {
+                        rDist = 0;
+                    }
+
+                    if (rDist < minRDist) {
+                        minRDist = rDist;
+                        bestRing = cand.ring;
+                        bestIndex = cand.hit;
+                    }
+                }
+
+                if (bestRing !== -1) {
+                    foundRing = bestRing;
+                    foundIndex = bestIndex;
+                }
+            } else {
+                // Freier Raum ohne direkten Treffer: Zielstrahl erfasst das im Winkel nächstgelegene Segment
+                function findClosestSegment(list, count, skipMedia) {
+                    if (count <= 0) return { index: -1, angleDiff: 1e9 };
+                    var bestIdx = -1;
+                    var minDiff = 1e9;
+                    for (var n = 0; n < count; n++) {
+                        var s = list[n];
+                        if (!s) continue;
+                        if (skipMedia && volumeScrolledThisSession && (s.segmentType === "media" || (s.windowId && s.windowId.indexOf("__MEDIA_") === 0))) {
+                            continue;
+                        }
+                        var d = angle - s.angle;
+                        while (d > Math.PI) d -= 2 * Math.PI;
+                        while (d < -Math.PI) d += 2 * Math.PI;
+                        var diff = Math.abs(d);
+                        if (diff < minDiff) {
+                            minDiff = diff;
+                            bestIdx = n;
+                        }
+                    }
+                    return { index: bestIdx, angleDiff: minDiff };
+                }
+
+                var c3 = findClosestSegment(segmentList3, numSegs3, false);
+                var c2 = findClosestSegment(segmentList2, numSegs2, false);
+                var c1 = findClosestSegment(segmentList1, numSegs1, true);
+
+                var fallbackCandidates = [];
+                if (c3.index >= 0) fallbackCandidates.push({ ring: 3, hit: c3.index, angleDiff: c3.angleDiff, inner: innerR3, outer: outerR3 });
+                if (c2.index >= 0) fallbackCandidates.push({ ring: 2, hit: c2.index, angleDiff: c2.angleDiff, inner: innerR2, outer: outerR2 });
+                if (c1.index >= 0) fallbackCandidates.push({ ring: 1, hit: c1.index, angleDiff: c1.angleDiff, inner: innerR1, outer: outerR1 });
+
+                if (fallbackCandidates.length > 0) {
+                    var globalMinAngleDiff = 1e9;
+                    for (var i = 0; i < fallbackCandidates.length; i++) {
+                        if (fallbackCandidates[i].angleDiff < globalMinAngleDiff) {
+                            globalMinAngleDiff = fallbackCandidates[i].angleDiff;
+                        }
+                    }
+
+                    var bestFallbackRing = -1;
+                    var bestFallbackIndex = -1;
+                    var minFallbackRDist = 1e9;
+
+                    for (var j = 0; j < fallbackCandidates.length; j++) {
+                        var fc = fallbackCandidates[j];
+                        if (fc.angleDiff <= globalMinAngleDiff + 0.20) {
+                            var fbRDist = 0;
+                            if (dist < fc.inner) {
+                                fbRDist = fc.inner - dist;
+                            } else if (dist > fc.outer) {
+                                fbRDist = dist - fc.outer;
+                            } else {
+                                fbRDist = 0;
+                            }
+
+                            if (fbRDist < minFallbackRDist) {
+                                minFallbackRDist = fbRDist;
+                                bestFallbackRing = fc.ring;
+                                bestFallbackIndex = fc.hit;
+                            }
+                        }
+                    }
+
+                    if (bestFallbackRing !== -1) {
+                        foundRing = bestFallbackRing;
+                        foundIndex = bestFallbackIndex;
+                    }
                 }
             }
-            return best;
         }
 
-        var numSegs3 = (hasRing3Active && segmentList3 && segmentList3.length) ? segmentList3.length : 0;
-        var numSegs2 = (hasRing2Active && segmentList2 && segmentList2.length) ? segmentList2.length : 0;
-        var numSegs1 = (segmentList1 && segmentList1.length) ? segmentList1.length : 0;
-
-        var ringCandidates = [
-            { ring: 3, hit: ringHit(segmentList3, numSegs3, innerR3, false), inner: innerR3, outer: outerR3 },
-            { ring: 2, hit: ringHit(segmentList2, numSegs2, innerR2, false), inner: innerR2, outer: outerR2 },
-            { ring: 1, hit: ringHit(segmentList1, numSegs1, innerR1, true),  inner: deadR,   outer: outerR1 }
-        ];
-
-        var outermostSeen = false;
-        for (var q = 0; q < ringCandidates.length; q++) {
-            var cand = ringCandidates[q];
-            if (cand.hit < 0) continue;
-            var isOutermost = !outermostSeen;
-            outermostSeen = true;
-            if (dist >= cand.inner && (isOutermost || dist <= cand.outer)) {
-                foundRing = cand.ring;
-                foundIndex = cand.hit;
-                break;
-            }
-        }
-
-        // SEHR WICHTIG: Befindet sich unter dem Mauszeiger KEIN Segment,
-        // bleibt der Fokus (Highlight) unverändert!
+        // Befindet sich unter dem Zielstrahl ein gültiger Treffer, Auswahl aktualisieren.
+        // Andernfalls (freier Raum oder Totzone) bleibt der Fokus unverändert!
         if (foundRing !== -1) {
             if (selectedRing !== foundRing || selectedIndex !== foundIndex) {
                 selectedRing = foundRing;
                 selectedIndex = foundIndex;
-                ringCanvas.requestPaint();
-            }
-        } else if (isCursorInVolumeArea) {
-            if (selectedRing !== -1 || selectedIndex !== -1) {
-                selectedRing = -1;
-                selectedIndex = -1;
                 ringCanvas.requestPaint();
             }
         }

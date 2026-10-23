@@ -1222,6 +1222,12 @@ void InputMonitor::workerLoop()
                 }
             }
 
+            if (m_syncAimRequested.load(std::memory_order_acquire)) {
+                m_syncAimRequested.store(false, std::memory_order_relaxed);
+                aimX = m_syncAimX.load(std::memory_order_relaxed);
+                aimY = m_syncAimY.load(std::memory_order_relaxed);
+            }
+
             int32_t passthruRelX = 0;
             int32_t passthruRelY = 0;
             bool hasPassthruRel = false;
@@ -1558,7 +1564,7 @@ void InputMonitor::workerLoop()
                                 if (ev.code == REL_X) { aimX += effDelta; aimDirty = true; trigBatchDirty = true; }
                                 else if (ev.code == REL_Y) { aimY += effDelta; aimDirty = true; trigBatchDirty = true; }
 
-                                const double maxAimDist = 550.0;
+                                const double maxAimDist = 4000.0;
                                 double curDist = std::hypot(aimX, aimY);
                                 if (curDist > maxAimDist) {
                                     aimX = static_cast<int>(std::round(aimX * maxAimDist / curDist));
@@ -1697,4 +1703,11 @@ void InputMonitor::onPrepareForSleep(bool sleeping)
         requestRescan();
         emit resumedFromSleep();
     }
+}
+
+void InputMonitor::syncAim(int offsetX, int offsetY)
+{
+    m_syncAimX.store(offsetX, std::memory_order_relaxed);
+    m_syncAimY.store(offsetY, std::memory_order_relaxed);
+    m_syncAimRequested.store(true, std::memory_order_release);
 }

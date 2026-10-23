@@ -3684,6 +3684,7 @@ void CircleOverlay::showAt(const QPoint &cursorPos, const QList<WindowInfo> &win
 
     emit overlayShown();
 
+    m_monitor = monitor;
     m_isPinHovered = false;
     m_isCounterBadgeHovered = false;
     m_isGameActive = isGame;
@@ -3733,14 +3734,17 @@ void CircleOverlay::updateAim(int offsetX, int offsetY)
 
 void CircleOverlay::onHardwareCursorMoved(int aimX, int aimY, const QPoint &kwinCurPos)
 {
+    Q_UNUSED(kwinCurPos);
+
     // 1. Wenn QML in dieser Overlay-Sitzung bereits Compositor-Events empfangen hat (Desktop-Betrieb):
     if (m_qmlPointerEverMoved) {
-        // Desktop-Aiming läuft flackerfrei über QML MouseArea.
-        // Falls der Cursor über den Fensterrand hinaus bewegt wird, globales Aiming nachführen:
-        if (!kwinCurPos.isNull() && (kwinCurPos.x() != 0 || kwinCurPos.y() != 0)) {
-            if (!containsCursor(kwinCurPos)) {
-                updateAim(kwinCurPos.x() - centerX(), kwinCurPos.y() - centerY());
-            }
+        // Desktop-Aiming läuft flackerfrei über QML MouseArea, solange der Cursor im Fenster liegt.
+        // Verlässt der Cursor das Overlay-Fenster, führt InputMonitor das globale Aiming
+        // über den gesamten Bildschirm nahtlos weiter:
+        int halfW = m_view ? (m_view->width() / 2) : 300;
+        int halfH = m_view ? (m_view->height() / 2) : halfW;
+        if (std::abs(aimX) >= halfW || std::abs(aimY) >= halfH) {
+            updateAim(aimX, aimY);
         }
         return;
     }
@@ -3775,6 +3779,9 @@ void CircleOverlay::handleAimChanged(int offsetX, int offsetY, bool isDrilldown,
 {
     m_lastAimX = offsetX;
     m_lastAimY = offsetY;
+    if (m_monitor) {
+        m_monitor->syncAim(offsetX, offsetY);
+    }
     m_isPinHovered = isPinHovered;
     m_isVolumeHovered = isVolumeHovered;
     m_isCounterBadgeHovered = isCounterBadgeHovered;
@@ -4237,6 +4244,7 @@ void CircleOverlay::hideOverlay()
     m_isGameActive = false;
     m_qmlPointerEverMoved = false;
     m_hardwareMoveCountWithoutQml = 0;
+    m_monitor = nullptr;
     if (m_fallbackCursorActive) {
         m_fallbackCursorActive = false;
         emit fallbackCursorActiveChanged(false);

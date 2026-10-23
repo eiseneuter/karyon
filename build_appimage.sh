@@ -201,4 +201,21 @@ else
 fi
 
 chmod +x "$OUTPUT_APPIMAGE"
+
+# Generiere begleitende .zsync-Datei für Delta-Updates (Gear Lever, AppImageUpdate)
+ZSYNC_BIN=""
+if command -v zsyncmake >/dev/null 2>&1; then
+    ZSYNC_BIN="zsyncmake"
+elif [ -f "/opt/appimagetool/usr/bin/zsyncmake" ]; then
+    ZSYNC_BIN="/opt/appimagetool/usr/bin/zsyncmake"
+fi
+
+if [ -n "$ZSYNC_BIN" ]; then
+    echo "Generating .zsync file for delta updates (Gear Lever / AppImageUpdate)..."
+    (cd "$DIST_DIR" && "$ZSYNC_BIN" -u "$(basename "$OUTPUT_APPIMAGE")" -o "$(basename "$OUTPUT_APPIMAGE").zsync" "$(basename "$OUTPUT_APPIMAGE")")
+    echo "=== Success! .zsync created at: $OUTPUT_APPIMAGE.zsync ==="
+else
+    echo "Warning: zsyncmake not found. Skipping .zsync generation."
+fi
+
 echo "=== Success! AppImage created at: $OUTPUT_APPIMAGE ==="

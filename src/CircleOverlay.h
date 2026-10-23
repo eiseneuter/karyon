@@ -66,7 +66,7 @@ class CircleOverlay : public QObject
 public:
     static constexpr int HUB_RADIUS = 75;           // Durchmesser 150 px
     static constexpr int HUB_DIAMETER = HUB_RADIUS * 2;
-    static constexpr int DEADZONE_RADIUS = 10;      // Durchmesser 20 px Totzone
+    static constexpr int DEADZONE_RADIUS = 3;       // Minimale 3px Totzone um mathematischen Mittelpunkt
     static constexpr int CURSOR_OFFSET_Y = 20;      // Cursor 20px über Zentrum
     static constexpr int RING_GAP = 4;              // Abstand Hub -> Ring 1
     static constexpr int RING_DEPTH = 76;           // Erhöhte Tiefe/Höhe der Segmente (+20px)
@@ -243,6 +243,7 @@ private:
     bool m_qmlPointerEverMoved = false;
     int m_hardwareMoveCountWithoutQml = 0;
     std::chrono::steady_clock::time_point m_overlayShownTime{};
+    InputMonitor *m_monitor = nullptr;
 
     OverlayMode m_mode = OverlayMode::Windows;
     RecentAppsStage m_recentStage = RecentAppsStage::Recents;

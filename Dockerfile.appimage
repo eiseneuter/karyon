@@ -51,7 +51,8 @@ RUN mkdir -p /opt/appimagetool \
     && cd /tmp && /tmp/appimagetool --appimage-extract \
     && mv /tmp/squashfs-root/* /opt/appimagetool/ \
     && rm -rf /tmp/appimagetool /tmp/squashfs-root \
-    && ln -s /opt/appimagetool/AppRun /usr/local/bin/appimagetool
+    && ln -s /opt/appimagetool/AppRun /usr/local/bin/appimagetool \
+    && ln -s /opt/appimagetool/usr/bin/zsyncmake /usr/local/bin/zsyncmake
 
 # Download uruntime for standalone FUSE-optional execution on target machines
 RUN mkdir -p /opt/uruntime \
