@@ -312,7 +312,7 @@ Item {
 
     Timer {
         id: aimThrottleTimer
-        interval: root.isPerformanceMode ? 33 : 16
+        interval: root.isPerformanceMode ? 33 : 11
         repeat: false
         onTriggered: {
             if (root.hasPendingAim) {
@@ -325,7 +325,7 @@ Item {
 
     function setAimOffset(ox, oy) {
         var now = Date.now();
-        var minInterval = root.isPerformanceMode ? 33 : 16;
+        var minInterval = root.isPerformanceMode ? 33 : 11;
         if (now - lastAimTimestamp >= minInterval) {
             aimThrottleTimer.stop();
             hasPendingAim = false;
