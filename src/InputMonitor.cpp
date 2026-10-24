@@ -958,7 +958,6 @@ void InputMonitor::workerLoop()
     bool aimDirty = false;
     double subpixelX = 0.0;
     double subpixelY = 0.0;
-    int wheelHiResAccum = 0;
 
     m_inotifyFd = inotify_init1(IN_NONBLOCK | IN_CLOEXEC);
     if (m_inotifyFd >= 0) {
@@ -1064,7 +1063,6 @@ void InputMonitor::workerLoop()
                     emit gestureFinished();
                 }
                 state = State::Triggered;
-                wheelHiResAccum = 0;
                 subpixelX = 0.0;
                 subpixelY = 0.0;
                 aimX = deltaX;
@@ -1660,19 +1658,13 @@ void InputMonitor::workerLoop()
                                 }
                                 continue;
                             } else if (ev.code == REL_WHEEL || ev.code == REL_WHEEL_HI_RES) {
-                                int sign = m_naturalScroll.load() ? -1 : 1;
+                                // Nur REL_WHEEL verarbeiten: Der Linux-Kernel emuliert REL_WHEEL verlässlich auch für Hi-Res-Mäuse.
+                                // Werden beide ausgewertet, feuern zwei Events pro Klick/Raste und überspringen Kategorien (z.B. Apps direkt zu Files).
                                 if (ev.code == REL_WHEEL) {
+                                    int sign = m_naturalScroll.load() ? -1 : 1;
                                     emit wheelScrolled(sign * ev.value);
-                                    wheelHiResAccum = 0;
-                                } else if (ev.code == REL_WHEEL_HI_RES) {
-                                    wheelHiResAccum += sign * ev.value;
-                                    if (std::abs(wheelHiResAccum) >= 120) {
-                                        int steps = wheelHiResAccum / 120;
-                                        wheelHiResAccum -= steps * 120;
-                                        emit wheelScrolled(steps);
-                                    }
                                 }
-                                continue; // Wheel verschlucken
+                                continue; // Wheel im Overlay verschlucken (nicht an das System weiterleiten)
                             }
                         } else if (ev.type == EV_SYN && aimDirty) {
                             continue; // Am Ende des Read-Batches gebündelt emittieren
