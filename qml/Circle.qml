@@ -1402,8 +1402,8 @@ Item {
 
             Image {
                 id: segIcon1
-                visible: !modelData.isTextSegment && !!modelData.iconSource
-                source: modelData.iconSource || ""
+                visible: (modelData && !modelData.isTextSegment && !!modelData.iconSource)
+                source: (modelData && modelData.iconSource) ? modelData.iconSource : ""
                 width: iconSize
                 height: iconSize
                 smooth: true
@@ -1412,8 +1412,8 @@ Item {
 
             Text {
                 id: segText1
-                visible: !!modelData.isTextSegment
-                text: modelData.label || ""
+                visible: (modelData && !!modelData.isTextSegment)
+                text: (modelData && modelData.label) ? modelData.label : ""
                 color: (selectedRing === 1 && selectedIndex === index)
                     ? ((typeof karyonTheme !== "undefined") ? karyonTheme.identApps : "#37d0ff")
                     : ((typeof karyonTheme !== "undefined") ? karyonTheme.textPrimary : "#e8eef6")
@@ -1467,8 +1467,8 @@ Item {
 
             Image {
                 id: segIcon2
-                visible: !modelData.isTextSegment && !!modelData.iconSource
-                source: modelData.iconSource || ""
+                visible: (modelData && !modelData.isTextSegment && !!modelData.iconSource)
+                source: (modelData && modelData.iconSource) ? modelData.iconSource : ""
                 width: iconSize
                 height: iconSize
                 smooth: true
@@ -1477,8 +1477,8 @@ Item {
 
             Text {
                 id: segText2
-                visible: !!modelData.isTextSegment
-                text: modelData.label || ""
+                visible: (modelData && !!modelData.isTextSegment)
+                text: (modelData && modelData.label) ? modelData.label : ""
                 color: (selectedRing === 2 && selectedIndex === index)
                     ? ((typeof karyonTheme !== "undefined") ? karyonTheme.identApps : "#37d0ff")
                     : ((typeof karyonTheme !== "undefined") ? karyonTheme.textPrimary : "#e8eef6")
@@ -1508,7 +1508,7 @@ Item {
 
         Image {
             id: segIcon3
-            source: modelData.iconSource || ""
+            source: (modelData && modelData.iconSource) ? modelData.iconSource : ""
             width: iconSize
             height: iconSize
             smooth: true

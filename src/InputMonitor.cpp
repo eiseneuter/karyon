@@ -295,8 +295,21 @@ bool InputMonitor::start()
     setupUInput();
     scanDevices();
 
-    if (m_devices.empty()) {
-        std::cerr << "[InputMonitor] No mouse input devices found yet under /dev/input/event*. Waiting for hotplug...\n";
+    // KDE Natural Scrolling Voreinstellung sofort aus ~/.config/kcminputrc vorinitialisieren
+    QString kcmPath = QDir::homePath() + QStringLiteral("/.config/kcminputrc");
+    if (QFile::exists(kcmPath)) {
+        QSettings kcm(kcmPath, QSettings::IniFormat);
+        for (const QString &group : kcm.childGroups()) {
+            if (!group.startsWith(QStringLiteral("Libinput/")) && !group.startsWith(QStringLiteral("Libinput]["))) continue;
+            if (group.contains(QStringLiteral("Touchpad"), Qt::CaseInsensitive)) continue;
+            if (group.contains(QStringLiteral("karyon-virtual"), Qt::CaseInsensitive)) continue;
+            kcm.beginGroup(group);
+            if (kcm.contains(QStringLiteral("NaturalScroll"))) {
+                m_naturalScroll.store(kcm.value(QStringLiteral("NaturalScroll")).toBool());
+            }
+            kcm.endGroup();
+            break;
+        }
     }
 
     m_running.store(true);
@@ -692,6 +705,7 @@ void InputMonitor::syncKWinMouseSettings()
     }
     setVirtualProp(QStringLiteral("leftHanded"), leftHanded);
     setVirtualProp(QStringLiteral("naturalScroll"), natScroll);
+    m_naturalScroll.store(natScroll);
     setVirtualProp(QStringLiteral("scrollFactor"), scrollFac);
 
     // In ~/.config/kcminputrc persistieren, damit KDE System Settings die virtuelle Maus synchron hält
@@ -1646,11 +1660,12 @@ void InputMonitor::workerLoop()
                                 }
                                 continue;
                             } else if (ev.code == REL_WHEEL || ev.code == REL_WHEEL_HI_RES) {
+                                int sign = m_naturalScroll.load() ? -1 : 1;
                                 if (ev.code == REL_WHEEL) {
-                                    emit wheelScrolled(ev.value);
+                                    emit wheelScrolled(sign * ev.value);
                                     wheelHiResAccum = 0;
                                 } else if (ev.code == REL_WHEEL_HI_RES) {
-                                    wheelHiResAccum += ev.value;
+                                    wheelHiResAccum += sign * ev.value;
                                     if (std::abs(wheelHiResAccum) >= 120) {
                                         int steps = wheelHiResAccum / 120;
                                         wheelHiResAccum -= steps * 120;

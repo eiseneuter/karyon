@@ -49,6 +49,7 @@ public:
     void syncAim(int offsetX, int offsetY);
     void setPerformanceMode(bool perf) { m_performanceMode.store(perf); }
     bool performanceMode() const { return m_performanceMode.load(); }
+    bool naturalScroll() const { return m_naturalScroll.load(); }
 
     // Gesture detection constants
     static constexpr double GESTURE_MIN_DISPLACEMENT = 60.0;
@@ -116,6 +117,7 @@ private:
     std::atomic<bool> m_inhibited{false};
     std::atomic<bool> m_isRecordingTrigger{false};
     std::atomic<bool> m_performanceMode{false};
+    std::atomic<bool> m_naturalScroll{false};
     std::atomic<bool> m_syncAimRequested{false};
     std::atomic<int> m_syncAimX{0};
     std::atomic<int> m_syncAimY{-20};

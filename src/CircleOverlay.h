@@ -247,6 +247,7 @@ private:
 
     OverlayMode m_mode = OverlayMode::Windows;
     RecentAppsStage m_recentStage = RecentAppsStage::Recents;
+    bool m_isRefreshing = false;
     AppManager m_appManager;
     TrayManager m_trayManager;
     RecentFilesManager m_recentFilesManager;

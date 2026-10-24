@@ -362,6 +362,13 @@ QIcon CircleOverlay::resolveIcon(const QString &name)
 {
     if (name.isEmpty()) return {};
 
+    static thread_local int s_resolveDepth = 0;
+    if (s_resolveDepth > 6) return {};
+    struct DepthGuard {
+        DepthGuard() { s_resolveDepth++; }
+        ~DepthGuard() { s_resolveDepth--; }
+    } depthGuard;
+
     // 1. Direkter Dateipfad (nur echte Bilddateien oder .desktop)
     if (QFile::exists(name)) {
         static const QStringList imgExts = {
@@ -2361,7 +2368,9 @@ void CircleOverlay::partitionRecentApps(QList<OverlaySegment> &outRing1,
     outRing3.clear();
 
     int maxApps = SettingsManager::instance().maxRecentApps();
-    m_cachedRecentApps = m_appManager.loadRecentApps(maxApps, openAppIdentifiers());
+    if (m_cachedRecentApps.isEmpty()) {
+        m_cachedRecentApps = m_appManager.loadRecentApps(maxApps, openAppIdentifiers());
+    }
     if (m_cachedRecentApps.size() > maxApps) {
         m_cachedRecentApps = m_cachedRecentApps.mid(0, maxApps);
     }
@@ -3596,6 +3605,9 @@ void CircleOverlay::populateRecentFilesSegments(bool &outHasRing2, bool &outHasR
 
 void CircleOverlay::refreshCurrentMode()
 {
+    if (m_isRefreshing) return;
+    m_isRefreshing = true;
+
     bool hasRing2 = false;
     bool hasRing3 = false;
     if (m_mode == OverlayMode::Windows) {
@@ -3609,6 +3621,8 @@ void CircleOverlay::refreshCurrentMode()
     if (m_view && m_view->rootObject()) {
         QMetaObject::invokeMethod(m_view->rootObject(), "requestPaintCanvas");
     }
+
+    m_isRefreshing = false;
 }
 
 void CircleOverlay::showAt(const QPoint &cursorPos, const QList<WindowInfo> &windows, InputMonitor *monitor, bool isGame)
@@ -3833,6 +3847,12 @@ void CircleOverlay::reportQmlPointerMoved()
 
 void CircleOverlay::handleAimChanged(int offsetX, int offsetY, bool isDrilldown, const QString &curId, int selRing, int selIdx, bool isPinHovered, bool isVolumeHovered, bool isCounterBadgeHovered)
 {
+    if (m_isRefreshing) return;
+
+    static bool s_inAimChanged = false;
+    if (s_inAimChanged) return;
+    s_inAimChanged = true;
+
     m_lastAimX = offsetX;
     m_lastAimY = offsetY;
     if (m_monitor) {
@@ -3843,6 +3863,12 @@ void CircleOverlay::handleAimChanged(int offsetX, int offsetY, bool isDrilldown,
     m_isCounterBadgeHovered = isCounterBadgeHovered;
     m_selectedRing = selRing;
     m_selectedIndex = selIdx;
+
+    double aimDist = std::hypot(offsetX, offsetY);
+    // Hysterese für die Rückkehr in den Recents-Zustand:
+    // Der Cursor muss bewusst bis deutlich in den Hub hinein zurückkehren (dist < hubRadius - 15),
+    // um jedes Oszillieren / Flimmern an der 75px-Grenze auszuschließen.
+    bool returnedFirmlyToHub = (aimDist < (hubRadius() - 15.0));
 
     if (m_mode == OverlayMode::RecentApps) {
         if (m_recentStage == RecentAppsStage::Recents) {
@@ -3867,8 +3893,14 @@ void CircleOverlay::handleAimChanged(int offsetX, int offsetY, bool isDrilldown,
                 refreshCurrentMode();
             }
         } else if (m_recentStage == RecentAppsStage::Favorites) {
-            if (isCursorInHub()) {
+            if (returnedFirmlyToHub) {
                 m_recentStage = RecentAppsStage::Recents;
+                refreshCurrentMode();
+            } else if (isDrilldown && curId == QLatin1String("__APP_MENU__")) {
+                m_recentStage = RecentAppsStage::Categories;
+                m_categoryPage = 0;
+                int p0Count = (m_cachedCategories.size() <= 13) ? m_cachedCategories.size() : 12;
+                m_activeCategoryIndex = p0Count / 2;
                 refreshCurrentMode();
             } else if (isDrilldown && curId == QLatin1String("__TRAY__")) {
                 m_recentStage = RecentAppsStage::Tray;
@@ -3882,7 +3914,7 @@ void CircleOverlay::handleAimChanged(int offsetX, int offsetY, bool isDrilldown,
                 refreshCurrentMode();
             }
         } else if (m_recentStage == RecentAppsStage::Categories) {
-            if (isCursorInHub()) {
+            if (returnedFirmlyToHub) {
                 m_recentStage = RecentAppsStage::Recents;
                 m_categoryPage = 0;
                 m_activeCategoryIndex = -1;
@@ -3900,6 +3932,19 @@ void CircleOverlay::handleAimChanged(int offsetX, int offsetY, bool isDrilldown,
                         int countOnNewPage = (rem <= 13) ? rem : 12;
                         m_activeCategoryIndex = newStart + countOnNewPage / 2;
                         refreshCurrentMode();
+                    } else if (isDrilldown && curId == QLatin1String("__FAVORITES__")) {
+                        m_recentStage = RecentAppsStage::Favorites;
+                        refreshCurrentMode();
+                    } else if (isDrilldown && curId == QLatin1String("__TRAY__")) {
+                        m_recentStage = RecentAppsStage::Tray;
+                        m_cachedTrayPrograms = m_trayManager.runningPrograms();
+                        m_trayMoreHovered = false;
+                        m_activeTrayProgramKey.clear();
+                        m_cachedMenuActions.clear();
+                        refreshCurrentMode();
+                    } else if (isDrilldown && curId == QLatin1String("__SESSION__")) {
+                        m_recentStage = RecentAppsStage::Session;
+                        refreshCurrentMode();
                     } else if (curId.startsWith(QLatin1String("cat:"))) {
                         int catIdx = curId.mid(4).toInt();
                         if (catIdx >= 0 && catIdx < m_cachedCategories.size() && catIdx != m_activeCategoryIndex) {
@@ -3910,7 +3955,7 @@ void CircleOverlay::handleAimChanged(int offsetX, int offsetY, bool isDrilldown,
                 }
             }
         } else if (m_recentStage == RecentAppsStage::Tray) {
-            if (isCursorInHub()) {
+            if (returnedFirmlyToHub) {
                 m_recentStage = RecentAppsStage::Recents;
                 m_trayMoreHovered = false;
                 m_activeTrayProgramKey.clear();
@@ -3963,7 +4008,7 @@ void CircleOverlay::handleAimChanged(int offsetX, int offsetY, bool isDrilldown,
                 // anderen Drilldown berührt oder in den Hub zurückkehrt.
             }
         } else if (m_recentStage == RecentAppsStage::Session) {
-            if (isCursorInHub()) {
+            if (returnedFirmlyToHub) {
                 m_recentStage = RecentAppsStage::Recents;
                 refreshCurrentMode();
             } else if (isDrilldown && curId == QLatin1String("__APP_MENU__")) {
@@ -3985,6 +4030,8 @@ void CircleOverlay::handleAimChanged(int offsetX, int offsetY, bool isDrilldown,
             }
         }
     }
+
+    s_inAimChanged = false;
 }
 
 void CircleOverlay::togglePinForCurrentSelection()
@@ -4246,8 +4293,27 @@ void CircleOverlay::handleHubWheel(int delta)
 
     if (m_mode == OverlayMode::RecentApps) {
         m_cachedRecentApps = m_appManager.loadRecentApps(SettingsManager::instance().maxRecentApps(), openAppIdentifiers());
+        m_cachedFavorites = m_appManager.loadFavorites();
         if (m_cachedCategories.isEmpty()) {
             m_cachedCategories = m_appManager.loadCategories();
+        } else {
+            bool favCatFound = false;
+            for (auto &cat : m_cachedCategories) {
+                if (cat.id == QLatin1String("__FAVORITES__")) {
+                    cat.apps = m_cachedFavorites;
+                    favCatFound = true;
+                    break;
+                }
+            }
+            if (!favCatFound && !m_cachedFavorites.isEmpty()) {
+                CategoryEntry fav;
+                fav.id = QStringLiteral("__FAVORITES__");
+                fav.name = QStringLiteral("Favorites");
+                fav.icon = QStringLiteral("favorites");
+                fav.apps = m_cachedFavorites;
+                int centerIdx = m_cachedCategories.size() / 2;
+                m_cachedCategories.insert(centerIdx, fav);
+            }
         }
     } else if (m_mode == OverlayMode::RecentFiles) {
         m_cachedRecentFiles = m_recentFilesManager.loadRecentFiles(SettingsManager::instance().maxRecentFiles());

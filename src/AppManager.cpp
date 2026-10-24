@@ -1756,7 +1756,7 @@ QList<CategoryEntry> AppManager::loadCategories()
 QList<AppEntry> AppManager::loadFavorites()
 {
     qint64 now = QDateTime::currentMSecsSinceEpoch();
-    if (!s_rawFavorites.entries.isEmpty() && (now - s_rawFavorites.timestampMs) < 15000) {
+    if (s_rawFavorites.timestampMs > 0 && (now - s_rawFavorites.timestampMs) < 15000) {
         return s_rawFavorites.entries;
     }
 
@@ -1800,6 +1800,7 @@ QList<AppEntry> AppManager::loadFavorites()
     QString dbPath = QDir::homePath() + QStringLiteral("/.local/share/kactivitymanagerd/resources/database");
     sqlite3 *db = nullptr;
     if (sqlite3_open_v2(dbPath.toUtf8().constData(), &db, SQLITE_OPEN_READONLY, nullptr) == SQLITE_OK) {
+        sqlite3_busy_timeout(db, 200);
         // Plasma 6 verwendet 'org.kde.plasma.favorites.applications'
         // Plasma 5 verwendete 'org.kde.plasma.kickoff.favorites...'
         const char *sql = "SELECT DISTINCT targettedResource "
@@ -1825,6 +1826,8 @@ QList<AppEntry> AppManager::loadFavorites()
             }
             sqlite3_finalize(stmt);
         }
+        sqlite3_close(db);
+    } else if (db) {
         sqlite3_close(db);
     }
 
