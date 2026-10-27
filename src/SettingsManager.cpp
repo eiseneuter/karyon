@@ -613,6 +613,16 @@ void SettingsManager::setCustomBaseColorHex(const QString &hex)
     }
 }
 
+QString SettingsManager::detectedLocaleName() const
+{
+    return m_detectedLocaleName.isEmpty() ? QStringLiteral("en_US") : m_detectedLocaleName;
+}
+
+void SettingsManager::setDetectedLocaleName(const QString &localeName)
+{
+    m_detectedLocaleName = localeName;
+}
+
 QString SettingsManager::gestureLeft() const { return m_gestureLeft; }
 void SettingsManager::setGestureLeft(const QString &action)
 {

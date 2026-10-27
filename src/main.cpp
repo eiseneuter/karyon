@@ -21,6 +21,7 @@
 #include <csignal>
 #include <unistd.h>
 #include <iostream>
+#include "DebugLogger.h"
 #include "CircleOverlay.h"
 #include "InputMonitor.h"
 #include "KWinBridge.h"
@@ -260,8 +261,9 @@ GpuBackend probeHardwareGraphics()
 
 int main(int argc, char *argv[])
 {
+    DebugLogger::init();
+    KLOG("Main", "Starting Karyon C++ Test Build (PID: %d)", getpid());
     setupStderrFilter();
-    qInstallMessageHandler(quietMessageHandler);
 
     std::setlocale(LC_ALL, "");
 
@@ -291,20 +293,26 @@ int main(int argc, char *argv[])
         klang = QString::fromLocal8Bit(qgetenv("LANGUAGE")).section(QLatin1Char(':'), 0, 0);
     }
 
-    QLocale resolvedLocale = QLocale::system();
+    QString detectedLocaleStr = QStringLiteral("en_US");
     if (!klang.isEmpty() && klang.compare(QStringLiteral("C"), Qt::CaseInsensitive) != 0
         && !klang.startsWith(QStringLiteral("C."), Qt::CaseInsensitive)) {
-        std::setlocale(LC_ALL, klang.toUtf8().constData());
-        std::setlocale(LC_TIME, klang.toUtf8().constData());
         QString cleanLang = klang.section(QLatin1Char('.'), 0, 0).section(QLatin1Char('@'), 0, 0).trimmed();
         if (!cleanLang.isEmpty()) {
             QLocale candidate(cleanLang);
             if (candidate.language() != QLocale::C) {
-                resolvedLocale = candidate;
+                detectedLocaleStr = candidate.name();
             }
         }
     }
-    QLocale::setDefault(resolvedLocale);
+    SettingsManager::instance().setDetectedLocaleName(detectedLocaleStr);
+
+    // Enforce English UI so all Qt dialogs (e.g. QColorDialog), buttons, and tooltips
+    // remain strictly in English regardless of host system language.
+    qputenv("LC_ALL", "C.UTF-8");
+    qputenv("LANG", "C.UTF-8");
+    qputenv("LANGUAGE", "en_US:en");
+    std::setlocale(LC_ALL, "C.UTF-8");
+    QLocale::setDefault(QLocale(QLocale::English, QLocale::UnitedStates));
 
     // Enforce QT_QPA_PLATFORM=xcb for direct X11/XWayland Override-Redirect (Rule 1)
     // Synchronous cursor positioning and frameless overlay window placement under cursor
@@ -352,8 +360,8 @@ int main(int argc, char *argv[])
     QSurfaceFormat::setDefaultFormat(defaultFormat);
 
     QApplication app(argc, argv);
-    // Re-apply default QLocale after QApplication constructor (which calls setlocale internally)
-    QLocale::setDefault(resolvedLocale);
+    // Re-apply default English QLocale after QApplication constructor (which calls setlocale internally)
+    QLocale::setDefault(QLocale(QLocale::English, QLocale::UnitedStates));
     app.setApplicationName(QStringLiteral("Karyon"));
     app.setApplicationDisplayName(QStringLiteral("Karyon"));
     app.setDesktopFileName(QStringLiteral("karyon"));
@@ -723,6 +731,7 @@ int main(int argc, char *argv[])
             }
         }
 
+        KLOG("Main", "holdTriggered -> showAt(%d, %d), %d windows", pos.x(), pos.y(), kwinBridge.lastWindows().size());
         overlay.showAt(pos, kwinBridge.lastWindows(), &monitor, kwinBridge.isActiveWindowGame());
     }, Qt::QueuedConnection);
 
@@ -741,9 +750,11 @@ int main(int argc, char *argv[])
 
     // Synchronisation des Overlay-Zustands mit der KWinBridge (schützt MRU vor Hintergrund-Fokuswechseln)
     QObject::connect(&overlay, &CircleOverlay::overlayShown, &kwinBridge, [&kwinBridge]() {
+        KLOG("Main", "overlayShown signal");
         kwinBridge.setOverlayOpen(true);
     });
     QObject::connect(&overlay, &CircleOverlay::overlayHidden, &kwinBridge, [&kwinBridge]() {
+        KLOG("Main", "overlayHidden signal");
         kwinBridge.setOverlayOpen(false);
     });
     // Synchronisation des Show-Desktop-Zustands
@@ -751,6 +762,7 @@ int main(int argc, char *argv[])
 
     // Abbruch-Aktion (z.B. Linksklick bei RMB-Trigger, RMT bei Custom-Trigger, ESC) -> Schließt Overlay sofort ohne Aktion
     QObject::connect(&monitor, &InputMonitor::holdCancelled, &overlay, [&overlay, &monitor]() {
+        KLOG("Main", "holdCancelled signal");
         overlay.hideOverlay();
         monitor.requestReleaseButtons();
     }, Qt::QueuedConnection);
@@ -820,6 +832,7 @@ int main(int argc, char *argv[])
 
     // Live-Update des Overlays, wenn sich Fenster ändern (z.B. geschlossenes Fenster verschwindet sofort)
     QObject::connect(&kwinBridge, &KWinBridge::windowsUpdated, &overlay, [&overlay, &kwinBridge]() {
+        KLOG("Main", "windowsUpdated signal: isVisible=%d count=%d", overlay.isVisible(), kwinBridge.lastWindows().size());
         if (overlay.isVisible()) {
             overlay.refresh(kwinBridge.lastWindows());
         }
@@ -827,6 +840,8 @@ int main(int argc, char *argv[])
 
     // Loslassen der rechten Maustaste -> Gewähltes Fenster aktivieren, App starten, Datei öffnen, Tray ausführen, Desktop toggeln, Medien steuern und Overlay schließen
     QObject::connect(&monitor, &InputMonitor::holdReleased, &overlay, [&overlay, &kwinBridge, &sessionDialog]() {
+        KLOG("Main", "holdReleased signal: selectedWinId='%s' pinHovered=%d counterHovered=%d",
+             qPrintable(overlay.selectedWindowId()), overlay.isPinHovered(), overlay.isCounterBadgeHovered());
         if (overlay.isPinHovered()) {
             overlay.togglePinForCurrentSelection();
             overlay.hideOverlay();

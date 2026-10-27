@@ -1,4 +1,5 @@
 #include "InputMonitor.h"
+#include "DebugLogger.h"
 #include "GestureManager.h"
 
 #include <linux/input.h>
@@ -171,18 +172,18 @@ QString keyboardKeyNameFromEvdev(int code)
     case KEY_ESC: return QStringLiteral("Esc");
     case KEY_TAB: return QStringLiteral("Tab");
     case KEY_BACKSPACE: return QStringLiteral("Backspace");
-    case KEY_DELETE: return QStringLiteral("Entf");
-    case KEY_INSERT: return QStringLiteral("Einfg");
-    case KEY_HOME: return QStringLiteral("Pos1");
-    case KEY_END: return QStringLiteral("Ende");
-    case KEY_PAGEUP: return QStringLiteral("BildAuf");
-    case KEY_PAGEDOWN: return QStringLiteral("BildAb");
-    case KEY_LEFT: return QStringLiteral("Links");
-    case KEY_RIGHT: return QStringLiteral("Rechts");
-    case KEY_UP: return QStringLiteral("Hoch");
-    case KEY_DOWN: return QStringLiteral("Runter");
+    case KEY_DELETE: return QStringLiteral("Delete");
+    case KEY_INSERT: return QStringLiteral("Insert");
+    case KEY_HOME: return QStringLiteral("Home");
+    case KEY_END: return QStringLiteral("End");
+    case KEY_PAGEUP: return QStringLiteral("Page Up");
+    case KEY_PAGEDOWN: return QStringLiteral("Page Down");
+    case KEY_LEFT: return QStringLiteral("Left");
+    case KEY_RIGHT: return QStringLiteral("Right");
+    case KEY_UP: return QStringLiteral("Up");
+    case KEY_DOWN: return QStringLiteral("Down");
     case KEY_CAPSLOCK: return QStringLiteral("Caps Lock");
-    case KEY_PRINT: return QStringLiteral("Druck");
+    case KEY_PRINT: return QStringLiteral("Print");
     default: return QString();
     }
 }
@@ -708,19 +709,8 @@ void InputMonitor::syncKWinMouseSettings()
     m_naturalScroll.store(natScroll);
     setVirtualProp(QStringLiteral("scrollFactor"), scrollFac);
 
-    // In ~/.config/kcminputrc persistieren, damit KDE System Settings die virtuelle Maus synchron hält
-    if (QFile::exists(kcmPath)) {
-        QSettings kcm(kcmPath, QSettings::IniFormat);
-        QString vGroup = QStringLiteral("Libinput][4660][22136][karyon-virtual mouse");
-        kcm.beginGroup(vGroup);
-        kcm.setValue(QStringLiteral("PointerAccelerationProfile"), flat ? 1 : 2);
-        kcm.setValue(QStringLiteral("PointerAcceleration"), QString::number(accel, 'f', 3));
-        kcm.setValue(QStringLiteral("ScrollFactor"), QString::number(scrollFac, 'f', 3));
-        kcm.setValue(QStringLiteral("NaturalScroll"), natScroll);
-        kcm.setValue(QStringLiteral("LeftHanded"), leftHanded);
-        kcm.endGroup();
-        kcm.sync();
-    }
+    // Do NOT write to ~/.config/kcminputrc! The virtual mouse is ephemeral at runtime,
+    // and QSettings corrupts KConfig section formatting, resetting all user devices on reboot.
 
     std::cout << "[InputMonitor] Synced mouse settings from \""
               << bestDevName.toStdString()
@@ -1063,6 +1053,7 @@ void InputMonitor::workerLoop()
                     emit gestureFinished();
                 }
                 state = State::Triggered;
+                KLOG("Input", "State transition: Pending -> Triggered (holdTriggered after %lld ms)", elapsed);
                 subpixelX = 0.0;
                 subpixelY = 0.0;
                 aimX = deltaX;
@@ -1209,7 +1200,7 @@ void InputMonitor::workerLoop()
                                 QStringList parts;
                                 std::vector<int> kseq;
                                 if (activeKeys[KEY_LEFTCTRL] || activeKeys[KEY_RIGHTCTRL]) {
-                                    parts << QStringLiteral("Strg");
+                                    parts << QStringLiteral("Ctrl");
                                     kseq.push_back(KEY_LEFTCTRL);
                                 }
                                 if (activeKeys[KEY_LEFTALT] || activeKeys[KEY_RIGHTALT]) {
@@ -1421,6 +1412,7 @@ void InputMonitor::workerLoop()
                                     emit cursorMoved(aimX, aimY);
                                 }
                                 state = State::Idle;
+                                KLOG("Input", "State transition: Triggered -> Idle (trigger released)");
                                 pendingGestureDir = -1;
                                 subpixelX = 0.0;
                                 subpixelY = 0.0;
@@ -1430,6 +1422,7 @@ void InputMonitor::workerLoop()
                             continue;
                         } else if (isAction) {
                             if (ev.value == 1) { // Mittelklick-Aktion (Fenster schließen / Mute)
+                                KLOG("Input", "Action button clicked in Triggered state");
                                 emit middleClicked();
                             }
                             continue;
@@ -1438,6 +1431,7 @@ void InputMonitor::workerLoop()
                             // Bricht das Overlay sauber ab, OHNE Klicks an Hintergrundfenster weiterzuleiten!
                             if (ev.value == 1) {
                                 state = State::Cancelled;
+                                KLOG("Input", "State transition: Triggered -> Cancelled (other button %d clicked)", ev.code);
                                 pendingGestureDir = -1;
                                 if (trailActive) {
                                     trailActive = false;
@@ -1551,6 +1545,7 @@ void InputMonitor::workerLoop()
                                 gestureFired = false;
                                 pendingGestureDir = -1;
                                 state = State::Pending;
+                                KLOG("Input", "State transition: Idle -> Pending (trigger pressed, code=%d)", ev.code);
                                 emit rightPressed();
                                 emit triggerPressed();
                                 continue;

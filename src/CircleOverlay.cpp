@@ -1,4 +1,5 @@
 #include "CircleOverlay.h"
+#include "DebugLogger.h"
 #include "InputMonitor.h"
 #include "KWinBridge.h"
 #include "SettingsManager.h"
@@ -40,11 +41,13 @@ CircleOverlay::CircleOverlay(QObject *parent)
 
     connect(&m_volumeManager, &VolumeManager::volumeChanged, this, &CircleOverlay::updateVolumeState);
     connect(&m_mediaManager, &MediaManager::mediaChanged, this, [this]() {
+        KLOG("Media", "mediaChanged signal received (isVisible=%d)", isVisible());
         if (isVisible()) {
             refreshCurrentMode();
         }
     });
     connect(&m_trayManager, &TrayManager::trayIconsChanged, this, [this]() {
+        KLOG("Tray", "trayIconsChanged signal received (isVisible=%d)", isVisible());
         m_trayIconRevision++;
         m_cachedTrayPrograms = m_trayManager.runningPrograms();
         if (isVisible()) {
@@ -55,7 +58,10 @@ CircleOverlay::CircleOverlay(QObject *parent)
     m_progressThrottleTimer.setSingleShot(true);
     m_progressThrottleTimer.setInterval(100);
     connect(&m_progressThrottleTimer, &QTimer::timeout, this, &CircleOverlay::updateSegmentProgress);
-    connect(&m_jobProgressManager, &JobProgressManager::progressUpdated, this, &CircleOverlay::onProgressUpdated);
+    connect(&m_jobProgressManager, &JobProgressManager::progressUpdated, this, [this]() {
+        KLOG("Progress", "progressUpdated signal (isVisible=%d)", isVisible());
+        this->onProgressUpdated();
+    });
     connect(&SettingsManager::instance(), &SettingsManager::settingsChanged, this, [this]() {
         m_showDesktopEnabled = SettingsManager::instance().showDesktop();
         m_showTrayEnabled = SettingsManager::instance().showTray();
@@ -150,7 +156,7 @@ void CircleOverlay::prewarm()
     m_view->rootContext()->setContextProperty(QStringLiteral("dateFormatIndex"), SettingsManager::instance().dateFormatIndex());
     m_view->rootContext()->setContextProperty(QStringLiteral("dateSeparator"), SettingsManager::instance().dateSeparator());
     m_view->rootContext()->setContextProperty(QStringLiteral("timeFormatIndex"), SettingsManager::instance().timeFormatIndex());
-    m_view->rootContext()->setContextProperty(QStringLiteral("detectedLocaleName"), QLocale().name());
+    m_view->rootContext()->setContextProperty(QStringLiteral("detectedLocaleName"), SettingsManager::instance().detectedLocaleName());
     m_view->rootContext()->setContextProperty(QStringLiteral("overlayController"), this);
     m_view->rootContext()->setContextProperty(QStringLiteral("karyonTheme"), &ThemeManager::instance());
     m_view->rootContext()->setContextProperty(QStringLiteral("performanceMode"), SettingsManager::instance().performanceMode());
@@ -296,7 +302,7 @@ void CircleOverlay::updateScaleProperties()
     ctx->setContextProperty(QStringLiteral("dateFormatIndex"), SettingsManager::instance().dateFormatIndex());
     ctx->setContextProperty(QStringLiteral("dateSeparator"), SettingsManager::instance().dateSeparator());
     ctx->setContextProperty(QStringLiteral("timeFormatIndex"), SettingsManager::instance().timeFormatIndex());
-    ctx->setContextProperty(QStringLiteral("detectedLocaleName"), QLocale().name());
+    ctx->setContextProperty(QStringLiteral("detectedLocaleName"), SettingsManager::instance().detectedLocaleName());
     ctx->setContextProperty(QStringLiteral("performanceMode"), SettingsManager::instance().performanceMode());
 
     if (m_view->rootObject()) {
@@ -2215,6 +2221,9 @@ void CircleOverlay::populateSegments(const QList<WindowInfo> &windows, bool &out
     outHasRing2 = !ring2Segs.isEmpty();
     outHasRing3 = !ring3Segs.isEmpty();
 
+    KLOG("Overlay", "populateSegments() windows=%d -> ring1=%d ring2=%d ring3=%d centerIdx=%d",
+         windows.size(), ring1Segs.size(), ring2Segs.size(), ring3Segs.size(), centerIndex);
+
     QString tmpDir = QDir::tempPath() + QStringLiteral("/karyon_icons");
     QDir().mkpath(tmpDir);
 
@@ -3383,6 +3392,9 @@ void CircleOverlay::populateRecentAppsSegments(bool &outHasRing2, bool &outHasRi
     outHasRing2 = !ring2Segs.isEmpty();
     outHasRing3 = !ring3Segs.isEmpty();
 
+    KLOG("Overlay", "populateRecentAppsSegments() stage=%d -> ring1=%d ring2=%d ring3=%d centerIdx=%d",
+         (int)m_recentStage, ring1Segs.size(), ring2Segs.size(), ring3Segs.size(), centerIndex);
+
     QString tmpDir = QDir::tempPath() + QStringLiteral("/karyon_icons");
     QDir().mkpath(tmpDir);
 
@@ -3511,6 +3523,9 @@ void CircleOverlay::populateRecentFilesSegments(bool &outHasRing2, bool &outHasR
     outHasRing2 = !ring2Segs.isEmpty();
     outHasRing3 = !ring3Segs.isEmpty();
 
+    KLOG("Overlay", "populateRecentFilesSegments() -> ring1=%d ring2=%d ring3=%d",
+         ring1Segs.size(), ring2Segs.size(), ring3Segs.size());
+
     QString tmpDir = QDir::tempPath() + QStringLiteral("/karyon_icons");
     QDir().mkpath(tmpDir);
 
@@ -3607,6 +3622,7 @@ void CircleOverlay::refreshCurrentMode()
 {
     if (m_isRefreshing) return;
     m_isRefreshing = true;
+    KLOG("Overlay", "refreshCurrentMode() enter: mode=%d stage=%d", (int)m_mode, (int)m_recentStage);
 
     bool hasRing2 = false;
     bool hasRing3 = false;
@@ -3622,11 +3638,14 @@ void CircleOverlay::refreshCurrentMode()
         QMetaObject::invokeMethod(m_view->rootObject(), "requestPaintCanvas");
     }
 
+    KLOG("Overlay", "refreshCurrentMode() exit: ring1=%d ring2=%d ring3=%d", m_currentRing1.size(), m_currentRing2.size(), m_currentRing3.size());
     m_isRefreshing = false;
 }
 
 void CircleOverlay::showAt(const QPoint &cursorPos, const QList<WindowInfo> &windows, InputMonitor *monitor, bool isGame)
 {
+    KLOG("Overlay", "showAt() pos=(%d, %d) windows=%d isGame=%d mode=%d",
+         cursorPos.x(), cursorPos.y(), windows.size(), isGame, (int)initialOverlayMode());
     m_cachedWindows = windows;
     if (m_cachedTrayPrograms.isEmpty()) {
         m_cachedTrayPrograms = m_trayManager.runningPrograms();
@@ -3863,6 +3882,19 @@ void CircleOverlay::handleAimChanged(int offsetX, int offsetY, bool isDrilldown,
     m_isCounterBadgeHovered = isCounterBadgeHovered;
     m_selectedRing = selRing;
     m_selectedIndex = selIdx;
+
+    static int s_lastLogRing = -999;
+    static int s_lastLogIdx = -999;
+    static QString s_lastLogId;
+    static bool s_lastLogDrilldown = false;
+    if (selRing != s_lastLogRing || selIdx != s_lastLogIdx || curId != s_lastLogId || isDrilldown != s_lastLogDrilldown) {
+        s_lastLogRing = selRing;
+        s_lastLogIdx = selIdx;
+        s_lastLogId = curId;
+        s_lastLogDrilldown = isDrilldown;
+        KLOG("Aim", "Aim selection: ring=%d idx=%d id='%s' drilldown=%d dist=%.1f (x=%d, y=%d) mode=%d stage=%d",
+             selRing, selIdx, qPrintable(curId), isDrilldown, std::hypot(offsetX, offsetY), offsetX, offsetY, (int)m_mode, (int)m_recentStage);
+    }
 
     double aimDist = std::hypot(offsetX, offsetY);
     // Hysterese für die Rückkehr in den Recents-Zustand:
@@ -4360,6 +4392,7 @@ bool CircleOverlay::containsCursor(const QPoint &globalPos) const
 
 void CircleOverlay::hideOverlay()
 {
+    KLOG("Overlay", "hideOverlay() called (wasVisible=%d)", isVisible());
     m_volumeScrolledThisSession = false;
     m_isPinHovered = false;
     m_isCounterBadgeHovered = false;

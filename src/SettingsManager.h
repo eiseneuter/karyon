@@ -100,6 +100,9 @@ public:
     QString customBaseColorHex() const;
     void setCustomBaseColorHex(const QString &hex);
 
+    QString detectedLocaleName() const;
+    void setDetectedLocaleName(const QString &localeName);
+
     bool gesturesEnabled() const;
     void setGesturesEnabled(bool enabled);
 
@@ -185,6 +188,7 @@ private:
     int m_timeFormatIndex = 0;
     int m_colorSchemeIndex = 0;
     QString m_customBaseColorHex = QStringLiteral("#22262d");
+    QString m_detectedLocaleName = QStringLiteral("en_US");
 
     bool m_gesturesEnabled = true;
     bool m_showGestureTrail = true;

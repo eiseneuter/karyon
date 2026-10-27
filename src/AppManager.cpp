@@ -1,4 +1,5 @@
 #include "AppManager.h"
+#include "DebugLogger.h"
 #include "ProcessUtils.h"
 
 #include <QDir>

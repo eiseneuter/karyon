@@ -20,8 +20,13 @@ if(Qt6_VERSION VERSION_GREATER_EQUAL "6.8.0")
     qt_policy(SET QTP0004 NEW)
 endif()
 
+add_compile_options(-g -rdynamic)
+set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -rdynamic")
+
 qt_add_executable(karyon
     src/main.cpp
+    src/DebugLogger.h
+    src/DebugLogger.cpp
     src/CircleOverlay.h
     src/CircleOverlay.cpp
     src/InputMonitor.h

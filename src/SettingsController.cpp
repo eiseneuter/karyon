@@ -452,7 +452,7 @@ void SettingsController::setTimeFormatIndex(int index)
 
 QString SettingsController::detectedLocaleName() const
 {
-    return QLocale().name();
+    return SettingsManager::instance().detectedLocaleName();
 }
 
 int SettingsController::colorSchemeIndex() const
@@ -483,8 +483,14 @@ void SettingsController::selectColorScheme(int index)
 void SettingsController::openColorDialog()
 {
     QColor current = ThemeManager::instance().baseBg();
-    QColor chosen = QColorDialog::getColor(current, nullptr, QStringLiteral("Karyon - Select Base Color"),
-                                          QColorDialog::DontUseNativeDialog);
+    QColorDialog dlg(current, nullptr);
+    dlg.setWindowTitle(QStringLiteral("Karyon - Select Base Color"));
+    dlg.setOption(QColorDialog::DontUseNativeDialog, true);
+    dlg.setLocale(QLocale(QLocale::English, QLocale::UnitedStates));
+    if (dlg.exec() != QDialog::Accepted) {
+        return;
+    }
+    QColor chosen = dlg.currentColor();
     if (!chosen.isValid()) {
         return;
     }
@@ -660,7 +666,7 @@ void SettingsController::selectCustomApp(const QString &direction)
     if (dir < 0) return;
 
     KOpenWithDialog dlg;
-    dlg.setWindowTitle(QStringLiteral("Wählen Sie eine Anwendung für die Geste"));
+    dlg.setWindowTitle(QStringLiteral("Select Application for Gesture"));
     if (dlg.exec() == QDialog::Accepted) {
         KService::Ptr service = dlg.service();
         if (service) {
@@ -762,7 +768,7 @@ QVariantMap SettingsController::processKeyEvent(int key, int modifiers, const QS
     bool meta = (modifiers & Qt::MetaModifier);
 
     if (ctrl) {
-        parts << QStringLiteral("Strg");
+        parts << QStringLiteral("Ctrl");
         keys.push_back(KEY_LEFTCTRL);
     }
     if (alt) {
@@ -823,18 +829,18 @@ QVariantMap SettingsController::processKeyEvent(int key, int modifiers, const QS
         case Qt::Key_Escape:    keyName = QStringLiteral("Esc"); linuxKey = KEY_ESC; break;
         case Qt::Key_Tab:       keyName = QStringLiteral("Tab"); linuxKey = KEY_TAB; break;
         case Qt::Key_Backspace: keyName = QStringLiteral("Backspace"); linuxKey = KEY_BACKSPACE; break;
-        case Qt::Key_Space:     keyName = QStringLiteral("Leertaste"); linuxKey = KEY_SPACE; break;
-        case Qt::Key_Delete:    keyName = QStringLiteral("Entf"); linuxKey = KEY_DELETE; break;
-        case Qt::Key_Insert:    keyName = QStringLiteral("Einfg"); linuxKey = KEY_INSERT; break;
-        case Qt::Key_Home:      keyName = QStringLiteral("Pos1"); linuxKey = KEY_HOME; break;
-        case Qt::Key_End:       keyName = QStringLiteral("Ende"); linuxKey = KEY_END; break;
-        case Qt::Key_PageUp:    keyName = QStringLiteral("BildAuf"); linuxKey = KEY_PAGEUP; break;
-        case Qt::Key_PageDown:  keyName = QStringLiteral("BildAb"); linuxKey = KEY_PAGEDOWN; break;
-        case Qt::Key_Left:      keyName = QStringLiteral("Links"); linuxKey = KEY_LEFT; break;
-        case Qt::Key_Right:     keyName = QStringLiteral("Rechts"); linuxKey = KEY_RIGHT; break;
-        case Qt::Key_Up:        keyName = QStringLiteral("Hoch"); linuxKey = KEY_UP; break;
-        case Qt::Key_Down:      keyName = QStringLiteral("Runter"); linuxKey = KEY_DOWN; break;
-        case Qt::Key_Print:     keyName = QStringLiteral("Druck"); linuxKey = KEY_PRINT; break;
+        case Qt::Key_Space:     keyName = QStringLiteral("Space"); linuxKey = KEY_SPACE; break;
+        case Qt::Key_Delete:    keyName = QStringLiteral("Delete"); linuxKey = KEY_DELETE; break;
+        case Qt::Key_Insert:    keyName = QStringLiteral("Insert"); linuxKey = KEY_INSERT; break;
+        case Qt::Key_Home:      keyName = QStringLiteral("Home"); linuxKey = KEY_HOME; break;
+        case Qt::Key_End:       keyName = QStringLiteral("End"); linuxKey = KEY_END; break;
+        case Qt::Key_PageUp:    keyName = QStringLiteral("Page Up"); linuxKey = KEY_PAGEUP; break;
+        case Qt::Key_PageDown:  keyName = QStringLiteral("Page Down"); linuxKey = KEY_PAGEDOWN; break;
+        case Qt::Key_Left:      keyName = QStringLiteral("Left"); linuxKey = KEY_LEFT; break;
+        case Qt::Key_Right:     keyName = QStringLiteral("Right"); linuxKey = KEY_RIGHT; break;
+        case Qt::Key_Up:        keyName = QStringLiteral("Up"); linuxKey = KEY_UP; break;
+        case Qt::Key_Down:      keyName = QStringLiteral("Down"); linuxKey = KEY_DOWN; break;
+        case Qt::Key_Print:     keyName = QStringLiteral("Print"); linuxKey = KEY_PRINT; break;
         case Qt::Key_Minus:     keyName = QStringLiteral("-"); linuxKey = KEY_MINUS; break;
         case Qt::Key_Plus:      keyName = QStringLiteral("+"); linuxKey = KEY_EQUAL; break;
         case Qt::Key_Equal:     keyName = QStringLiteral("="); linuxKey = KEY_EQUAL; break;

@@ -1,4 +1,5 @@
 #include "KWinBridge.h"
+#include "DebugLogger.h"
 #include "AppManager.h"
 #include "GameModeDetector.h"
 
@@ -243,6 +244,8 @@ void KWinBridge::onWindowActivated(const QString &id, const QString &rc, const Q
         return;
     }
 
+    KLOG("KWin", "Window activated: id=%s", qPrintable(id));
+
     // Streng chronologisches MRU-Update im regulären Betrieb
     m_mruOrder.removeAll(id);
     m_mruOrder.prepend(id);
@@ -253,6 +256,8 @@ void KWinBridge::onWindowActivated(const QString &id, const QString &rc, const Q
 void KWinBridge::onWindowAdded(const QString &id, const QString &rc, const QString &df, const QString &cap, bool min, int pid)
 {
     if (id.isEmpty() || rc == QLatin1String("karyon")) return;
+
+    KLOG("KWin", "Window added: id=%s caption='%s' df='%s' pid=%d", qPrintable(id), qPrintable(cap), qPrintable(df), pid);
 
     AppManager::recordAppUsage(df, rc, pid, cap);
 
@@ -272,6 +277,7 @@ void KWinBridge::onWindowAdded(const QString &id, const QString &rc, const QStri
 
 void KWinBridge::onWindowRemoved(const QString &id)
 {
+    KLOG("KWin", "Window removed: id=%s", qPrintable(id));
     bool changed = false;
     if (m_knownWindows.contains(id)) {
         m_knownWindows.remove(id);

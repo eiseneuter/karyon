@@ -1,4 +1,5 @@
 #include "RecentFilesManager.h"
+#include "DebugLogger.h"
 #include "ProcessUtils.h"
 
 #include <QFile>
@@ -39,6 +40,7 @@ QList<RecentFileItem> RecentFilesManager::loadRecentFiles(int maxCount)
     if (result.size() > maxCount) {
         result = result.mid(0, maxCount);
     }
+    KLOG("FileMgr", "loadRecentFiles(%d) returned %d files", maxCount, result.size());
     return result;
 }
 
