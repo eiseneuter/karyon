@@ -8,6 +8,8 @@
 #include <string>
 #include <chrono>
 
+class QFileSystemWatcher;
+
 class InputMonitor : public QObject
 {
     Q_OBJECT
@@ -100,6 +102,9 @@ private:
         bool grabbed = false;
         std::string name;
         std::chrono::steady_clock::time_point lastGrabAttempt{};
+        uint16_t vendor = 0;
+        uint16_t product = 0;
+        uint16_t bustype = 0;
     };
 
     std::atomic<bool> m_running{false};
@@ -131,4 +136,5 @@ private:
     int m_uinputAbsFd = -1;
     int m_uinputKbdFd = -1;
     int m_inotifyFd = -1;
+    QFileSystemWatcher *m_kcmWatcher = nullptr;
 };

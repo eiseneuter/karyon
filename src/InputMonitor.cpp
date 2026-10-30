@@ -25,10 +25,155 @@
 #include <QSettings>
 #include <QFile>
 #include <QDir>
+#include <QFileSystemWatcher>
+#include <QTimer>
+#include <QTextStream>
+#include <optional>
 
 namespace fs = std::filesystem;
 
 namespace {
+
+struct KdeMouseSettings {
+    double pointerAcceleration = 0.0;
+    int pointerAccelerationProfile = 2; // 1 = Flat, 2 = Adaptive
+    bool naturalScroll = false;
+    double scrollFactor = 1.0;
+    bool leftHanded = false;
+
+    bool hasAcceleration = false;
+    bool hasProfile = false;
+    bool hasNaturalScroll = false;
+    bool hasScrollFactor = false;
+    bool hasLeftHanded = false;
+};
+
+KdeMouseSettings parseKcmInputRc(uint16_t targetVendor, uint16_t targetProduct, const QString &targetName)
+{
+    KdeMouseSettings result;
+    QString kcmPath = QDir::homePath() + QStringLiteral("/.config/kcminputrc");
+    QFile file(kcmPath);
+    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        return result;
+    }
+
+    struct SectionSettings {
+        std::optional<double> accel;
+        std::optional<int> profile;
+        std::optional<bool> naturalScroll;
+        std::optional<double> scrollFactor;
+        std::optional<bool> leftHanded;
+    };
+
+    SectionSettings globalSec;       // [Libinput] oder [Mouse]
+    SectionSettings defaultsSec;     // [Libinput][Defaults][Pointer]
+    SectionSettings exactDeviceSec;  // [Libinput][vendor][product][name]
+    SectionSettings anyDeviceSec;    // Beliebige andere konfigurierte Pointer
+
+    QString currentSection;
+    QTextStream in(&file);
+    while (!in.atEnd()) {
+        QString line = in.readLine().trimmed();
+        if (line.isEmpty() || line.startsWith(QLatin1Char('#')) || line.startsWith(QLatin1Char(';'))) {
+            continue;
+        }
+        if (line.startsWith(QLatin1Char('[')) && line.endsWith(QLatin1Char(']'))) {
+            currentSection = line;
+            continue;
+        }
+
+        int eqIdx = line.indexOf(QLatin1Char('='));
+        if (eqIdx <= 0) continue;
+
+        QString key = line.left(eqIdx).trimmed();
+        QString val = line.mid(eqIdx + 1).trimmed();
+
+        auto parseSectionKey = [&](SectionSettings &sec) {
+            if (key.compare(QStringLiteral("PointerAcceleration"), Qt::CaseInsensitive) == 0) {
+                bool ok = false;
+                double d = val.toDouble(&ok);
+                if (ok) sec.accel = d;
+            } else if (key.compare(QStringLiteral("PointerAccelerationProfile"), Qt::CaseInsensitive) == 0) {
+                bool ok = false;
+                int p = val.toInt(&ok);
+                if (ok) sec.profile = p;
+            } else if (key.compare(QStringLiteral("NaturalScroll"), Qt::CaseInsensitive) == 0) {
+                sec.naturalScroll = (val.compare(QStringLiteral("true"), Qt::CaseInsensitive) == 0 || val == QStringLiteral("1"));
+            } else if (key.compare(QStringLiteral("ScrollFactor"), Qt::CaseInsensitive) == 0) {
+                bool ok = false;
+                double sf = val.toDouble(&ok);
+                if (ok) sec.scrollFactor = sf;
+            } else if (key.compare(QStringLiteral("LeftHanded"), Qt::CaseInsensitive) == 0) {
+                sec.leftHanded = (val.compare(QStringLiteral("true"), Qt::CaseInsensitive) == 0 || val == QStringLiteral("1"));
+            }
+        };
+
+        if (currentSection == QStringLiteral("[Libinput]") || currentSection == QStringLiteral("[Mouse]")) {
+            parseSectionKey(globalSec);
+        } else if (currentSection == QStringLiteral("[Libinput][Defaults][Pointer]")) {
+            parseSectionKey(defaultsSec);
+        } else if (currentSection.startsWith(QStringLiteral("[Libinput]["))) {
+            if (currentSection.contains(QStringLiteral("karyon-virtual"), Qt::CaseInsensitive) ||
+                currentSection.contains(QStringLiteral("touchpad"), Qt::CaseInsensitive)) {
+                continue;
+            }
+
+            QString stripped = currentSection.mid(1, currentSection.length() - 2);
+            QStringList parts = stripped.split(QStringLiteral("]["));
+            if (parts.size() >= 4) {
+                bool okV = false, okP = false;
+                uint16_t v = parts[1].toUShort(&okV);
+                uint16_t p = parts[2].toUShort(&okP);
+                QString n = parts.mid(3).join(QStringLiteral("]["));
+
+                bool match = false;
+                if (targetVendor != 0 && targetProduct != 0 && okV && okP && v == targetVendor && p == targetProduct) {
+                    match = true;
+                } else if (!targetName.isEmpty() && n.contains(targetName, Qt::CaseInsensitive)) {
+                    match = true;
+                }
+
+                if (match) {
+                    parseSectionKey(exactDeviceSec);
+                } else {
+                    parseSectionKey(anyDeviceSec);
+                }
+            } else {
+                parseSectionKey(anyDeviceSec);
+            }
+        }
+    }
+
+    auto applySec = [&](const SectionSettings &sec) {
+        if (!result.hasAcceleration && sec.accel.has_value()) {
+            result.pointerAcceleration = *sec.accel;
+            result.hasAcceleration = true;
+        }
+        if (!result.hasProfile && sec.profile.has_value()) {
+            result.pointerAccelerationProfile = *sec.profile;
+            result.hasProfile = true;
+        }
+        if (!result.hasNaturalScroll && sec.naturalScroll.has_value()) {
+            result.naturalScroll = *sec.naturalScroll;
+            result.hasNaturalScroll = true;
+        }
+        if (!result.hasScrollFactor && sec.scrollFactor.has_value()) {
+            result.scrollFactor = *sec.scrollFactor;
+            result.hasScrollFactor = true;
+        }
+        if (!result.hasLeftHanded && sec.leftHanded.has_value()) {
+            result.leftHanded = *sec.leftHanded;
+            result.hasLeftHanded = true;
+        }
+    };
+
+    applySec(exactDeviceSec);
+    applySec(defaultsSec);
+    applySec(anyDeviceSec);
+    applySec(globalSec);
+
+    return result;
+}
 
 bool isExcludedNonMouse(const QString &devName)
 {
@@ -296,20 +441,38 @@ bool InputMonitor::start()
     setupUInput();
     scanDevices();
 
-    // KDE Natural Scrolling Voreinstellung sofort aus ~/.config/kcminputrc vorinitialisieren
+    // 1. KDE Natural Scrolling Voreinstellung sofort aus ~/.config/kcminputrc vorinitialisieren
+    uint16_t initVendor = 0, initProduct = 0;
+    QString initName;
+    for (const auto &dev : m_devices) {
+        if (!isExcludedNonMouse(QString::fromStdString(dev.name))) {
+            initVendor = dev.vendor;
+            initProduct = dev.product;
+            initName = QString::fromStdString(dev.name);
+            break;
+        }
+    }
+    KdeMouseSettings initSettings = parseKcmInputRc(initVendor, initProduct, initName);
+    if (initSettings.hasNaturalScroll) {
+        m_naturalScroll.store(initSettings.naturalScroll);
+        std::cout << "[InputMonitor] Pre-loaded naturalScroll=" << (initSettings.naturalScroll ? "true" : "false")
+                  << " from kcminputrc\n";
+    }
+
+    // 2. QFileSystemWatcher einrichten, um Änderungen an ~/.config/kcminputrc live zu synchronisieren
     QString kcmPath = QDir::homePath() + QStringLiteral("/.config/kcminputrc");
     if (QFile::exists(kcmPath)) {
-        QSettings kcm(kcmPath, QSettings::IniFormat);
-        for (const QString &group : kcm.childGroups()) {
-            if (!group.startsWith(QStringLiteral("Libinput/")) && !group.startsWith(QStringLiteral("Libinput]["))) continue;
-            if (group.contains(QStringLiteral("Touchpad"), Qt::CaseInsensitive)) continue;
-            if (group.contains(QStringLiteral("karyon-virtual"), Qt::CaseInsensitive)) continue;
-            kcm.beginGroup(group);
-            if (kcm.contains(QStringLiteral("NaturalScroll"))) {
-                m_naturalScroll.store(kcm.value(QStringLiteral("NaturalScroll")).toBool());
-            }
-            kcm.endGroup();
-            break;
+        if (!m_kcmWatcher) {
+            m_kcmWatcher = new QFileSystemWatcher(this);
+            m_kcmWatcher->addPath(kcmPath);
+            connect(m_kcmWatcher, &QFileSystemWatcher::fileChanged, this, [this, kcmPath](const QString &) {
+                if (m_kcmWatcher && !m_kcmWatcher->files().contains(kcmPath) && QFile::exists(kcmPath)) {
+                    m_kcmWatcher->addPath(kcmPath);
+                }
+                QTimer::singleShot(100, this, [this]() {
+                    syncKWinMouseSettings();
+                });
+            });
         }
     }
 
@@ -349,7 +512,7 @@ void InputMonitor::setupUInput()
 
         struct uinput_setup usetup{};
         std::strncpy(usetup.name, "karyon-virtual mouse", UINPUT_MAX_NAME_SIZE);
-        usetup.id.bustype = BUS_USB;
+        usetup.id.bustype = BUS_VIRTUAL;
         usetup.id.vendor = 0x1234;
         usetup.id.product = 0x5678;
         usetup.id.version = 1;
@@ -511,11 +674,20 @@ void InputMonitor::tryGrabPendingDevices()
 void InputMonitor::syncKWinMouseSettings()
 {
     QStringList grabbedSysNames;
+    uint16_t targetVendor = 0;
+    uint16_t targetProduct = 0;
+    QString targetDevName;
+
     for (const auto &dev : m_devices) {
         if (dev.grabbed && !dev.path.empty()) {
             std::string fname = fs::path(dev.path).filename().string();
             if (!fname.empty()) {
                 grabbedSysNames.append(QString::fromStdString(fname));
+            }
+            if (targetVendor == 0 && !isExcludedNonMouse(QString::fromStdString(dev.name))) {
+                targetVendor = dev.vendor;
+                targetProduct = dev.product;
+                targetDevName = QString::fromStdString(dev.name);
             }
         }
     }
@@ -572,9 +744,6 @@ void InputMonitor::syncKWinMouseSettings()
     if (virtualMouseSysName.isEmpty()) return;
 
     // Beste physische Maus auswählen:
-    // 1. Zuerst unter den gegrabbten Geräten suchen, dann Fallback auf alle echten KWin-Pointer
-    // 2. Touchpads, Trackpoints, Consumer Control etc. streng ausschließen bzw. stark abwerten
-    // 3. Echte externe Mäuse mit benutzerdefinierten Einstellungen (Flat-Profil, PointerAcceleration != 0) bevorzugen
     QVariantMap bestProps;
     int bestScore = -10000;
 
@@ -594,9 +763,9 @@ void InputMonitor::syncKWinMouseSettings()
         bool excluded = isExcludedNonMouse(devName);
         int score = 0;
         if (excluded) {
-            score -= 2000; // TrackPoints, Touchpad-Begleitknoten, Media Controls
+            score -= 2000;
         } else {
-            score += 500;  // Echte physische Maus
+            score += 500;
         }
 
         if (grabbedSysNames.contains(sysName)) {
@@ -605,7 +774,7 @@ void InputMonitor::syncKWinMouseSettings()
 
         int vendor = props.value(QStringLiteral("vendor"), 0).toInt();
         if (vendor != 0 && vendor != 2) {
-            score += 400; // USB / Bluetooth / Wireless (kein PS/2)
+            score += 400;
         }
 
         double devAccel = props.value(QStringLiteral("pointerAcceleration"), 0.0).toDouble();
@@ -615,7 +784,7 @@ void InputMonitor::syncKWinMouseSettings()
         double devScrollFac = props.value(QStringLiteral("scrollFactor"), 1.0).toDouble();
 
         if (devFlat) {
-            score += 2000; // Nutzer hat Zeigerbeschleunigung bewusst deaktiviert!
+            score += 2000;
         }
         if (std::abs(devAccel) > 0.001) {
             score += 1000;
@@ -640,49 +809,34 @@ void InputMonitor::syncKWinMouseSettings()
         }
     }
 
-    if (bestProps.isEmpty()) return;
-
     QString bestDevName = bestProps.value(QStringLiteral("name")).toString();
-    double accel = bestProps.value(QStringLiteral("pointerAcceleration"), 0.0).toDouble();
-    bool flat = bestProps.value(QStringLiteral("pointerAccelerationProfileFlat"), false).toBool();
-    bool leftHanded = bestProps.value(QStringLiteral("leftHanded"), false).toBool();
-    bool natScroll = bestProps.value(QStringLiteral("naturalScroll"), false).toBool();
-    double scrollFac = bestProps.value(QStringLiteral("scrollFactor"), 1.0).toDouble();
-
-    // ~/.config/kcminputrc prüfen, um Benutzer-Profile exakt zu matchen
-    QString kcmPath = QDir::homePath() + QStringLiteral("/.config/kcminputrc");
-    if (QFile::exists(kcmPath)) {
-        QSettings kcm(kcmPath, QSettings::IniFormat);
-        for (const QString &group : kcm.childGroups()) {
-            if (!group.startsWith(QStringLiteral("Libinput/")) && !group.startsWith(QStringLiteral("Libinput]["))) continue;
-            if (group.contains(QStringLiteral("Touchpad"), Qt::CaseInsensitive)) continue;
-            if (group.contains(QStringLiteral("karyon-virtual"), Qt::CaseInsensitive)) continue;
-
-            kcm.beginGroup(group);
-            if (kcm.contains(QStringLiteral("PointerAccelerationProfile"))) {
-                int profile = kcm.value(QStringLiteral("PointerAccelerationProfile")).toInt();
-                if (profile == 1) {
-                    flat = true;
-                } else if (profile == 2) {
-                    flat = false;
-                }
-            }
-            if (kcm.contains(QStringLiteral("PointerAcceleration"))) {
-                accel = kcm.value(QStringLiteral("PointerAcceleration")).toDouble();
-            }
-            if (kcm.contains(QStringLiteral("ScrollFactor"))) {
-                scrollFac = kcm.value(QStringLiteral("ScrollFactor")).toDouble();
-            }
-            if (kcm.contains(QStringLiteral("NaturalScroll"))) {
-                natScroll = kcm.value(QStringLiteral("NaturalScroll")).toBool();
-            }
-            if (kcm.contains(QStringLiteral("LeftHanded"))) {
-                leftHanded = kcm.value(QStringLiteral("LeftHanded")).toBool();
-            }
-            kcm.endGroup();
-            break;
-        }
+    if (targetDevName.isEmpty() && !bestDevName.isEmpty()) {
+        targetDevName = bestDevName;
+        targetVendor = static_cast<uint16_t>(bestProps.value(QStringLiteral("vendor"), 0).toUInt());
+        targetProduct = static_cast<uint16_t>(bestProps.value(QStringLiteral("product"), 0).toUInt());
     }
+
+    // 1. Zuerst ~/.config/kcminputrc mit unserem nativen, robusten Parser einlesen
+    KdeMouseSettings kcm = parseKcmInputRc(targetVendor, targetProduct, targetDevName);
+
+    // 2. Werte auflösen: kcminputrc hat Vorrang vor evtl. noch uninitialisiertem KWin D-Bus
+    double accel = kcm.hasAcceleration ? kcm.pointerAcceleration : bestProps.value(QStringLiteral("pointerAcceleration"), 0.0).toDouble();
+    bool flat = kcm.hasProfile ? (kcm.pointerAccelerationProfile == 1) : bestProps.value(QStringLiteral("pointerAccelerationProfileFlat"), false).toBool();
+    bool leftHanded = kcm.hasLeftHanded ? kcm.leftHanded : bestProps.value(QStringLiteral("leftHanded"), false).toBool();
+    bool natScroll = kcm.hasNaturalScroll ? kcm.naturalScroll : bestProps.value(QStringLiteral("naturalScroll"), false).toBool();
+    double scrollFac = kcm.hasScrollFactor ? kcm.scrollFactor : bestProps.value(QStringLiteral("scrollFactor"), 1.0).toDouble();
+
+    // 3. Atomaren State für Overlay-Scrolling sofort aktualisieren
+    m_naturalScroll.store(natScroll);
+
+    // 4. Nur D-Bus Properties senden, die sich TATSÄCHLICH vom aktuellen Stand der virtuellen Maus unterscheiden.
+    // Verhindert unnötige KWin writeEntry / m_config.sync() Aufrufe auf ~/.config/kcminputrc!
+    QVariantMap vProps = getDeviceProps(virtualMouseSysName);
+    double curAccel = vProps.value(QStringLiteral("pointerAcceleration"), 0.0).toDouble();
+    bool curFlat = vProps.value(QStringLiteral("pointerAccelerationProfileFlat"), false).toBool();
+    bool curLeftHanded = vProps.value(QStringLiteral("leftHanded"), false).toBool();
+    bool curNatScroll = vProps.value(QStringLiteral("naturalScroll"), false).toBool();
+    double curScrollFac = vProps.value(QStringLiteral("scrollFactor"), 1.0).toDouble();
 
     auto setVirtualProp = [&](const QString &propName, const QVariant &val) {
         QDBusMessage msg = QDBusMessage::createMethodCall(
@@ -696,27 +850,34 @@ void InputMonitor::syncKWinMouseSettings()
         bus.call(msg, QDBus::NoBlock);
     };
 
-    setVirtualProp(QStringLiteral("pointerAcceleration"), accel);
-    if (flat) {
-        setVirtualProp(QStringLiteral("pointerAccelerationProfileFlat"), true);
-        setVirtualProp(QStringLiteral("pointerAccelerationProfileAdaptive"), false);
-    } else {
-        setVirtualProp(QStringLiteral("pointerAccelerationProfileAdaptive"), true);
-        setVirtualProp(QStringLiteral("pointerAccelerationProfileFlat"), false);
+    if (std::abs(curAccel - accel) > 0.001) {
+        setVirtualProp(QStringLiteral("pointerAcceleration"), accel);
     }
-    setVirtualProp(QStringLiteral("leftHanded"), leftHanded);
-    setVirtualProp(QStringLiteral("naturalScroll"), natScroll);
-    m_naturalScroll.store(natScroll);
-    setVirtualProp(QStringLiteral("scrollFactor"), scrollFac);
-
-    // Do NOT write to ~/.config/kcminputrc! The virtual mouse is ephemeral at runtime,
-    // and QSettings corrupts KConfig section formatting, resetting all user devices on reboot.
+    if (curFlat != flat) {
+        if (flat) {
+            setVirtualProp(QStringLiteral("pointerAccelerationProfileFlat"), true);
+            setVirtualProp(QStringLiteral("pointerAccelerationProfileAdaptive"), false);
+        } else {
+            setVirtualProp(QStringLiteral("pointerAccelerationProfileAdaptive"), true);
+            setVirtualProp(QStringLiteral("pointerAccelerationProfileFlat"), false);
+        }
+    }
+    if (curLeftHanded != leftHanded) {
+        setVirtualProp(QStringLiteral("leftHanded"), leftHanded);
+    }
+    if (curNatScroll != natScroll) {
+        setVirtualProp(QStringLiteral("naturalScroll"), natScroll);
+    }
+    if (std::abs(curScrollFac - scrollFac) > 0.001) {
+        setVirtualProp(QStringLiteral("scrollFactor"), scrollFac);
+    }
 
     std::cout << "[InputMonitor] Synced mouse settings from \""
-              << bestDevName.toStdString()
-              << "\" to karyon-virtual mouse (accel="
-              << accel
+              << (!targetDevName.isEmpty() ? targetDevName.toStdString() : bestDevName.toStdString())
+              << "\" (source=" << (kcm.hasAcceleration || kcm.hasProfile || kcm.hasNaturalScroll ? "kcminputrc" : "kwin-dbus")
+              << ", accel=" << accel
               << ", profile=" << (flat ? "flat (disabled)" : "adaptive (enabled)")
+              << ", naturalScroll=" << (natScroll ? "true" : "false")
               << ", scrollFactor=" << scrollFac
               << ")\n";
 }
@@ -738,9 +899,17 @@ void InputMonitor::scanDevices()
             ioctl(fd, EVIOCGNAME(sizeof(devName)), devName);
             std::string sName = (devName[0] != '\0') ? std::string(devName) : entry.path().string();
 
+            struct input_id id{};
+            uint16_t v = 0, p = 0, b = 0;
+            if (ioctl(fd, EVIOCGID, &id) >= 0) {
+                v = id.vendor;
+                p = id.product;
+                b = id.bustype;
+            }
+
             // Zunächst ungrabbed registrieren; tryGrabPendingDevices() übernimmt den EVIOCGRAB,
             // sobald uinput bereit ist und garantiert keine Maustaste gedrückt gehalten wird.
-            m_devices.push_back({fd, entry.path().string(), false, sName});
+            m_devices.push_back({fd, entry.path().string(), false, sName, {}, v, p, b});
             m_lastReportedMouse = sName;
             m_lastReportedTime = std::chrono::steady_clock::now();
 
@@ -843,7 +1012,15 @@ bool InputMonitor::rescanDevices()
                 ioctl(fd, EVIOCGNAME(sizeof(devName)), devName);
                 std::string sName = (devName[0] != '\0') ? std::string(devName) : path;
 
-                m_devices.push_back({fd, path, false, sName});
+                struct input_id id{};
+                uint16_t v = 0, p = 0, b = 0;
+                if (ioctl(fd, EVIOCGID, &id) >= 0) {
+                    v = id.vendor;
+                    p = id.product;
+                    b = id.bustype;
+                }
+
+                m_devices.push_back({fd, path, false, sName, {}, v, p, b});
                 changed = true;
                 newlyConnectedName = sName;
 
@@ -881,6 +1058,11 @@ bool InputMonitor::rescanDevices()
 
 void InputMonitor::cleanup()
 {
+    if (m_kcmWatcher) {
+        delete m_kcmWatcher;
+        m_kcmWatcher = nullptr;
+    }
+
     if (m_inotifyFd >= 0) {
         close(m_inotifyFd);
         m_inotifyFd = -1;

@@ -12,6 +12,49 @@
 #include <QHash>
 #include <algorithm>
 
+namespace {
+
+bool isExcludedApplication(const QString &appName, const QString &appExec)
+{
+    static const QStringList excludedKeywords = {
+        QStringLiteral("portal"),
+        QStringLiteral("kdialog"),
+        QStringLiteral("browser"),
+        QStringLiteral("firefox"),
+        QStringLiteral("chrome"),
+        QStringLiteral("chromium"),
+        QStringLiteral("brave"),
+        QStringLiteral("opera"),
+        QStringLiteral("vivaldi"),
+        QStringLiteral("edge"),
+        QStringLiteral("librewolf"),
+        QStringLiteral("waterfox"),
+        QStringLiteral("zen"),
+        QStringLiteral("epiphany"),
+        QStringLiteral("konqueror"),
+        QStringLiteral("tor"),
+        QStringLiteral("systemsettings"),
+        QStringLiteral("kfilebox"),
+        QStringLiteral("gtkfilechooser")
+    };
+
+    QString lowerName = appName.toLower();
+    QString lowerExec = appExec.toLower();
+
+    if (lowerName.isEmpty() && lowerExec.isEmpty()) {
+        return true;
+    }
+
+    for (const QString &kw : excludedKeywords) {
+        if (lowerName.contains(kw) || lowerExec.contains(kw)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+} // namespace
+
 RecentFilesManager::RecentFilesManager()
 {
 }
@@ -70,9 +113,36 @@ QList<RecentFileItem> RecentFilesManager::loadFromXbel()
         xml.readNext();
         if (xml.isStartElement() && xml.name() == QLatin1String("bookmark")) {
             QString href = xml.attributes().value(QStringLiteral("href")).toString();
-            QString modified = xml.attributes().value(QStringLiteral("modified")).toString();
-            if (modified.isEmpty()) {
-                modified = xml.attributes().value(QStringLiteral("visited")).toString();
+            QString bookmarkMod = xml.attributes().value(QStringLiteral("modified")).toString();
+            if (bookmarkMod.isEmpty()) {
+                bookmarkMod = xml.attributes().value(QStringLiteral("visited")).toString();
+            }
+
+            bool hasValidApp = false;
+            QDateTime latestValidAppTime;
+
+            // Lese innere Elemente bis zum schließenden </bookmark>
+            while (!xml.atEnd() && !(xml.isEndElement() && xml.name() == QLatin1String("bookmark"))) {
+                xml.readNext();
+                if (xml.isStartElement() && xml.name() == QLatin1String("application")) {
+                    QString appName = xml.attributes().value(QStringLiteral("name")).toString();
+                    QString appExec = xml.attributes().value(QStringLiteral("exec")).toString();
+                    QString appMod = xml.attributes().value(QStringLiteral("modified")).toString();
+
+                    if (!isExcludedApplication(appName, appExec)) {
+                        hasValidApp = true;
+                        QDateTime dt = QDateTime::fromString(appMod, Qt::ISODateWithMs);
+                        if (!dt.isValid()) dt = QDateTime::fromString(appMod, Qt::ISODate);
+                        if (dt.isValid() && (!latestValidAppTime.isValid() || dt > latestValidAppTime)) {
+                            latestValidAppTime = dt;
+                        }
+                    }
+                }
+            }
+
+            // Dateien überspringen, die ausschließlich durch Upload-Dialoge / Portale / Browser angefasst wurden
+            if (!hasValidApp) {
+                continue;
             }
 
             QString filePath;
@@ -86,12 +156,15 @@ QList<RecentFileItem> RecentFilesManager::loadFromXbel()
             QFileInfo fi(filePath);
             if (fi.isDir()) continue;
 
-            QDateTime dt = QDateTime::fromString(modified, Qt::ISODateWithMs);
+            QDateTime dt = latestValidAppTime;
             if (!dt.isValid()) {
-                dt = QDateTime::fromString(modified, Qt::ISODate);
-            }
-            if (!dt.isValid()) {
-                dt = fi.lastModified();
+                dt = QDateTime::fromString(bookmarkMod, Qt::ISODateWithMs);
+                if (!dt.isValid()) {
+                    dt = QDateTime::fromString(bookmarkMod, Qt::ISODate);
+                }
+                if (!dt.isValid()) {
+                    dt = fi.lastModified();
+                }
             }
 
             RecentFileItem item;
