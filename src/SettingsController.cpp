@@ -3,6 +3,7 @@
 #include "ThemeManager.h"
 #include "GestureManager.h"
 #include "PermissionManager.h"
+#include "CrashHandler.h"
 
 #include <QQmlContext>
 #include <QQuickItem>
@@ -892,6 +893,8 @@ void SettingsController::hideSettings()
 void SettingsController::quitApp()
 {
     std::cout << "[Karyon] Quit requested from Settings dialog.\n";
+    CrashHandler::markCleanShutdownRequested();
+    CrashHandler::logShutdown("Settings dialog quit");
     hideSettings();
     qApp->quit();
     QTimer::singleShot(1500, []() {

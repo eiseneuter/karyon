@@ -46,11 +46,6 @@
 #include <sys/wait.h>
 
 namespace {
-void handleSignal(int /*sig*/)
-{
-    _exit(0);
-}
-
 static int g_origStderr = -1;
 
 void setupStderrFilter()
@@ -279,9 +274,13 @@ int main(int argc, char *argv[])
             std::cout << "[CrashHandler] Intentionally triggering test segmentation fault (SIGSEGV)...\n";
             volatile int *ptr = nullptr;
             *ptr = 42;
+        } else if (strcmp(argv[i], "--test-signal-term") == 0) {
+            std::cout << "[CrashHandler] Intentionally sending test SIGTERM to self...\n";
+            kill(getpid(), SIGTERM);
         }
     }
 
+    CrashHandler::logStartup(argc, argv);
     DebugLogger::init();
     KLOG("Main", "Starting Karyon C++ Test Build (PID: %d)", getpid());
     setupStderrFilter();
@@ -467,9 +466,6 @@ int main(int argc, char *argv[])
 
     KWinBridge kwinBridge;
     InputMonitor monitor;
-    std::signal(SIGINT, handleSignal);
-    std::signal(SIGTERM, handleSignal);
-    std::signal(SIGHUP, handleSignal);
 
     // Initialisiere dynamische Einstellungen für InputMonitor (Trigger Hold & Mouse Speed & Game Mode & Trigger Key/Button)
     monitor.setHoldTriggerMs(SettingsManager::instance().triggerHoldMs());
@@ -561,6 +557,8 @@ int main(int argc, char *argv[])
             showSettings();
         } else if (actionId == 3 || actionId == 4) { // Quit
             std::cout << "[Karyon] Quit requested from tray action.\n";
+            CrashHandler::markCleanShutdownRequested();
+            CrashHandler::logShutdown("TrayManager action");
             app.quit();
             QTimer::singleShot(1500, []() {
                 _exit(0);
@@ -611,6 +609,8 @@ int main(int argc, char *argv[])
     QObject::connect(settingsAction, &QAction::triggered, showSettings);
     QObject::connect(quitAction, &QAction::triggered, [&app]() {
         std::cout << "[Karyon] Quit requested from tray menu.\n";
+        CrashHandler::markCleanShutdownRequested();
+        CrashHandler::logShutdown("Tray menu quit");
         app.quit();
         QTimer::singleShot(1500, []() {
             _exit(0);
@@ -940,6 +940,8 @@ int main(int argc, char *argv[])
     }, Qt::QueuedConnection);
 
     QObject::connect(&app, &QCoreApplication::aboutToQuit, [&]() {
+        CrashHandler::markCleanShutdownRequested();
+        CrashHandler::logShutdown("QCoreApplication::aboutToQuit");
         std::cout << "[Karyon] Application shutting down...\n";
         monitor.stop();
         kwinBridge.stopDaemon();
