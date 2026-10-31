@@ -816,17 +816,35 @@ void InputMonitor::syncKWinMouseSettings()
         targetProduct = static_cast<uint16_t>(bestProps.value(QStringLiteral("product"), 0).toUInt());
     }
 
-    // 1. Zuerst ~/.config/kcminputrc mit unserem nativen, robusten Parser einlesen
+    // 1. Live KWin D-Bus Properties des gegrabbten physischen Geräts abfragen.
+    // Wenn KWin D-Bus antwortet, spiegelt bestProps exakt die aktiven Einstellungen der physischen Maus wider!
+    bool dbusReady = !bestProps.isEmpty();
+
+    // 2. ~/.config/kcminputrc einlesen als Fallback, falls KWin D-Bus (z. B. beim Systemstart) noch keine Properties liefert
     KdeMouseSettings kcm = parseKcmInputRc(targetVendor, targetProduct, targetDevName);
 
-    // 2. Werte auflösen: kcminputrc hat Vorrang vor evtl. noch uninitialisiertem KWin D-Bus
-    double accel = kcm.hasAcceleration ? kcm.pointerAcceleration : bestProps.value(QStringLiteral("pointerAcceleration"), 0.0).toDouble();
-    bool flat = kcm.hasProfile ? (kcm.pointerAccelerationProfile == 1) : bestProps.value(QStringLiteral("pointerAccelerationProfileFlat"), false).toBool();
-    bool leftHanded = kcm.hasLeftHanded ? kcm.leftHanded : bestProps.value(QStringLiteral("leftHanded"), false).toBool();
-    bool natScroll = kcm.hasNaturalScroll ? kcm.naturalScroll : bestProps.value(QStringLiteral("naturalScroll"), false).toBool();
-    double scrollFac = kcm.hasScrollFactor ? kcm.scrollFactor : bestProps.value(QStringLiteral("scrollFactor"), 1.0).toDouble();
+    // 3. Werte auflösen: Die aktiven Live-Properties der physischen Maus aus KWin D-Bus haben oberste Priorität!
+    double accel = (dbusReady && bestProps.contains(QStringLiteral("pointerAcceleration")))
+        ? bestProps.value(QStringLiteral("pointerAcceleration")).toDouble()
+        : (kcm.hasAcceleration ? kcm.pointerAcceleration : 0.0);
 
-    // 3. Atomaren State für Overlay-Scrolling sofort aktualisieren
+    bool flat = (dbusReady && bestProps.contains(QStringLiteral("pointerAccelerationProfileFlat")))
+        ? bestProps.value(QStringLiteral("pointerAccelerationProfileFlat")).toBool()
+        : (kcm.hasProfile ? (kcm.pointerAccelerationProfile == 1) : false);
+
+    bool leftHanded = (dbusReady && bestProps.contains(QStringLiteral("leftHanded")))
+        ? bestProps.value(QStringLiteral("leftHanded")).toBool()
+        : (kcm.hasLeftHanded ? kcm.leftHanded : false);
+
+    bool natScroll = (dbusReady && bestProps.contains(QStringLiteral("naturalScroll")))
+        ? bestProps.value(QStringLiteral("naturalScroll")).toBool()
+        : (kcm.hasNaturalScroll ? kcm.naturalScroll : false);
+
+    double scrollFac = (dbusReady && bestProps.contains(QStringLiteral("scrollFactor")))
+        ? bestProps.value(QStringLiteral("scrollFactor")).toDouble()
+        : (kcm.hasScrollFactor ? kcm.scrollFactor : 1.0);
+
+    // 4. Atomaren State für Overlay-Scrolling sofort aktualisieren
     m_naturalScroll.store(natScroll);
 
     // 4. Nur D-Bus Properties senden, die sich TATSÄCHLICH vom aktuellen Stand der virtuellen Maus unterscheiden.
@@ -874,7 +892,7 @@ void InputMonitor::syncKWinMouseSettings()
 
     std::cout << "[InputMonitor] Synced mouse settings from \""
               << (!targetDevName.isEmpty() ? targetDevName.toStdString() : bestDevName.toStdString())
-              << "\" (source=" << (kcm.hasAcceleration || kcm.hasProfile || kcm.hasNaturalScroll ? "kcminputrc" : "kwin-dbus")
+              << "\" (source=" << (dbusReady ? "kwin-dbus" : "kcminputrc")
               << ", accel=" << accel
               << ", profile=" << (flat ? "flat (disabled)" : "adaptive (enabled)")
               << ", naturalScroll=" << (natScroll ? "true" : "false")
@@ -1818,14 +1836,25 @@ void InputMonitor::workerLoop()
                                     double target = rawDelta * speedFactor + subpixel;
                                     int outVal = static_cast<int>(std::round(target));
                                     subpixel = target - outVal;
-                                    effDelta = outVal;
 
                                     if (ev.code == REL_X) trigRelX += outVal;
                                     else if (ev.code == REL_Y) trigRelY += outVal;
                                 }
 
-                                if (ev.code == REL_X) { aimX += effDelta; aimDirty = true; trigBatchDirty = true; }
-                                else if (ev.code == REL_Y) { aimY += effDelta; aimDirty = true; trigBatchDirty = true; }
+                                // Hardware-Aiming (für Spiele und Software-Cursor):
+                                // Dynamische Beschleunigungskurve für reaktionsschnelles Zielen:
+                                // Feine Bewegungen bleiben 1:1 präzise, bei Schwüngen skaliert die Bewegung bis 2.2x,
+                                // damit der Alternativ-Cursor nicht mehr hinterherhängt.
+                                double rawDeltaVal = ev.value;
+                                double absDelta = std::abs(rawDeltaVal);
+                                double accelMult = 1.0;
+                                if (absDelta > 2.0) {
+                                    accelMult = std::min(2.2, 1.0 + (absDelta - 2.0) * 0.12);
+                                }
+                                double aimEffDelta = rawDeltaVal * accelMult;
+
+                                if (ev.code == REL_X) { aimX += static_cast<int>(std::round(aimEffDelta)); aimDirty = true; trigBatchDirty = true; }
+                                else if (ev.code == REL_Y) { aimY += static_cast<int>(std::round(aimEffDelta)); aimDirty = true; trigBatchDirty = true; }
 
                                 const double maxAimDist = 4000.0;
                                 double curDist = std::hypot(aimX, aimY);

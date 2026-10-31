@@ -674,9 +674,14 @@ int main(int argc, char *argv[])
     QObject::connect(&monitor, &InputMonitor::rightPressed, &kwinBridge, onTriggerPress, Qt::QueuedConnection);
     QObject::connect(&monitor, &InputMonitor::triggerPressed, &kwinBridge, onTriggerPress, Qt::QueuedConnection);
 
-    QObject::connect(&kwinBridge, &KWinBridge::cursorPosUpdated, [&gestureStartPos, &inGesture](const QPoint &pos) {
+    QObject::connect(&kwinBridge, &KWinBridge::cursorPosUpdated, [&gestureStartPos, &inGesture, &overlay](const QPoint &pos) {
         if (!inGesture) {
             gestureStartPos = pos;
+        }
+        if (overlay.isVisible() && !overlay.isGameActive()) {
+            int ox = pos.x() - overlay.centerX();
+            int oy = pos.y() - overlay.centerY();
+            overlay.updateAim(ox, oy);
         }
     });
 
@@ -736,16 +741,12 @@ int main(int argc, char *argv[])
     }, Qt::QueuedConnection);
 
     // Aiming im Normalbetrieb erfolgt flackerfrei über MouseArea/DropArea in QML anhand der Compositor-Cursorposition.
-    // Verlässt der Cursor bei gedrückter RMT das Overlay-Fenster (oder bei aktivem Drag & Drop),
-    // steuert cursorMoved das Segment-Aiming direkt und übergangslos über die globale Cursorposition:
-    QObject::connect(&monitor, &InputMonitor::cursorMoved, &overlay, [&overlay, &kwinBridge, &monitor](int aimX, int aimY) {
+    // Verlässt der Cursor bei gedrückter RMT das Overlay-Fenster (oder falls ein Client keine Compositor-Events liefert),
+    // steuert onHardwareCursorMoved das Segment-Aiming direkt und übergangslos über die Hardware-Cursorposition:
+    QObject::connect(&monitor, &InputMonitor::cursorMoved, &overlay, [&overlay, &kwinBridge](int aimX, int aimY) {
         if (!overlay.isVisible()) return;
 
-        if (monitor.isLeftDown()) {
-            overlay.updateAim(aimX, aimY);
-        } else {
-            overlay.onHardwareCursorMoved(aimX, aimY, kwinBridge.lastCursorPos());
-        }
+        overlay.onHardwareCursorMoved(aimX, aimY, kwinBridge.lastCursorPos());
     }, Qt::QueuedConnection);
 
     // Synchronisation des Overlay-Zustands mit der KWinBridge (schützt MRU vor Hintergrund-Fokuswechseln)

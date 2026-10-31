@@ -3775,12 +3775,12 @@ void CircleOverlay::showAt(const QPoint &cursorPos, const QList<WindowInfo> &win
 
     m_monitor = monitor;
     m_isPinHovered = false;
-    m_isCounterBadgeHovered = false;
-    m_isGameActive = isGame;
+    bool isLmbDrag = monitor && monitor->isLeftDown();
+    m_isGameActive = isLmbDrag ? false : isGame;
     m_qmlPointerEverMoved = false;
     m_hardwareMoveCountWithoutQml = 0;
     m_overlayShownTime = std::chrono::steady_clock::now();
-    bool shouldShowFallback = isGame;
+    bool shouldShowFallback = m_isGameActive;
     if (m_fallbackCursorActive != shouldShowFallback) {
         m_fallbackCursorActive = shouldShowFallback;
         emit fallbackCursorActiveChanged(m_fallbackCursorActive);
@@ -3816,14 +3816,28 @@ void CircleOverlay::updateAim(int offsetX, int offsetY)
     m_lastAimX = offsetX;
     m_lastAimY = offsetY;
     if (!m_view || !m_view->rootObject()) return;
-    QMetaObject::invokeMethod(m_view->rootObject(), "setAimOffset",
+    QMetaObject::invokeMethod(m_view->rootObject(), "applyAimOffset",
                               Q_ARG(QVariant, offsetX),
                               Q_ARG(QVariant, offsetY));
 }
 
 void CircleOverlay::onHardwareCursorMoved(int aimX, int aimY, const QPoint &kwinCurPos)
 {
-    Q_UNUSED(kwinCurPos);
+    bool isLmbDrag = m_monitor && m_monitor->isLeftDown();
+    if (isLmbDrag) {
+        // Bei Drag & Drop auf dem Desktop ist der reguläre System-Mauszeiger (inkl. Datei-Icon)
+        // bereits sichtbar. Der Spiele-Fallback-Cursor (virtuelles Fadenkreuz) bleibt strikt deaktiviert!
+        if (m_fallbackCursorActive) {
+            m_fallbackCursorActive = false;
+            emit fallbackCursorActiveChanged(false);
+        }
+        if (!kwinCurPos.isNull() && (kwinCurPos.x() != 0 || kwinCurPos.y() != 0)) {
+            updateAim(kwinCurPos.x() - centerX(), kwinCurPos.y() - centerY());
+        } else {
+            updateAim(aimX, aimY);
+        }
+        return;
+    }
 
     // 1. Wenn QML in dieser Overlay-Sitzung bereits Compositor-Events empfangen hat (Desktop-Betrieb):
     if (m_qmlPointerEverMoved) {
@@ -3844,7 +3858,7 @@ void CircleOverlay::onHardwareCursorMoved(int aimX, int aimY, const QPoint &kwin
     auto elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::steady_clock::now() - m_overlayShownTime).count();
 
-    // Wenn als Spiel erkannt, ODER nach mindestens 20 Hardware-Paketen UND mindestens 120ms ohne QML-Event (Pointer-Lock / versteckter Cursor):
+    // Wenn als Spiel erkannt, ODER nach mindestens 20 Hardware-Paketen UND mindestens 120ms ohne QML-Event (Pointer-Lock / versteckter Cursor im Spiel):
     if (m_isGameActive || (m_hardwareMoveCountWithoutQml >= 20 && elapsedMs >= 120)) {
         if (!m_fallbackCursorActive) {
             m_fallbackCursorActive = true;
@@ -4233,6 +4247,7 @@ void CircleOverlay::markFileLaunched(const QString &filePath)
 QString CircleOverlay::selectedWindowId() const
 {
     if (!m_view || !m_view->rootObject()) return {};
+    QMetaObject::invokeMethod(m_view->rootObject(), "flushPendingAim");
     QString id = m_view->rootObject()->property("selectedWindowId").toString();
     if (m_volumeScrolledThisSession && id.startsWith(QLatin1String("__MEDIA_"))) {
         return QString();

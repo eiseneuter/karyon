@@ -89,6 +89,7 @@ public:
     void updateAim(int offsetX, int offsetY);
     void onHardwareCursorMoved(int aimX, int aimY, const QPoint &kwinCurPos);
     bool fallbackCursorActive() const { return m_fallbackCursorActive; }
+    bool isGameActive() const { return m_isGameActive; }
     Q_INVOKABLE void reportQmlPointerMoved();
     QString selectedWindowId() const;
     bool isCursorOnSegment() const;

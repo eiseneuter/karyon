@@ -343,6 +343,15 @@ Item {
         }
     }
 
+    function flushPendingAim() {
+        if (hasPendingAim) {
+            aimThrottleTimer.stop();
+            hasPendingAim = false;
+            lastAimTimestamp = Date.now();
+            applyAimOffset(pendingAimX, pendingAimY);
+        }
+    }
+
     function applyAimOffset(ox, oy) {
         aimOffsetX = ox;
         aimOffsetY = oy;
@@ -1584,9 +1593,15 @@ Item {
         anchors.fill: parent
         onEntered: function(drag) {
             drag.accept();
+            if (typeof overlayController !== "undefined" && overlayController) {
+                overlayController.reportQmlPointerMoved();
+            }
         }
         onPositionChanged: function(drag) {
             drag.accept();
+            if (typeof overlayController !== "undefined" && overlayController) {
+                overlayController.reportQmlPointerMoved();
+            }
             var cx = root.width / 2;
             var cy = root.height / 2;
             setAimOffset(drag.x - cx, drag.y - cy);
