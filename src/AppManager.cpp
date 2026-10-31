@@ -19,6 +19,8 @@
 #include <KService>
 #include <sqlite3.h>
 #include <QUrl>
+#include <QDBusInterface>
+#include <QDBusReply>
 
 bool AppManager::isAppImage(const QString &path)
 {
@@ -1765,30 +1767,81 @@ QList<AppEntry> AppManager::loadFavorites()
     QSet<QString> seen;
     QStringList orderedKeys;
 
-    // 1. Zuerst kactivitymanagerd-statsrc auslesen (enthält die exakte, vom Nutzer festgelegte Reihenfolge!)
+    // 1. Current KDE Activity via D-Bus ermitteln (falls verfügbar)
+    QString currentActivity;
+    QDBusInterface actInterface(QStringLiteral("org.kde.ActivityManager"),
+                                QStringLiteral("/ActivityManager/Activities"),
+                                QStringLiteral("org.kde.ActivityManager.Activities"),
+                                QDBusConnection::sessionBus());
+    if (actInterface.isValid()) {
+        QDBusReply<QString> reply = actInterface.call(QStringLiteral("CurrentActivity"));
+        if (reply.isValid()) {
+            currentActivity = reply.value().trimmed();
+        }
+    }
+
+    // 2. kactivitymanagerd-statsrc auslesen (enthält die exakte, vom Nutzer festgelegte Reihenfolge!)
     QString statsPath = QDir::homePath() + QStringLiteral("/.config/kactivitymanagerd-statsrc");
     if (QFile::exists(statsPath)) {
         QSettings stats(statsPath, QSettings::IniFormat);
         QStringList bestOrdering;
+        qint64 bestScore = -1;
+
+        static const QRegularExpression instanceRegex(QStringLiteral(R"(instance-(\d+))"));
+
         for (const auto &group : stats.childGroups()) {
-            if (group.contains(QLatin1String("favorite"), Qt::CaseInsensitive)) {
-                stats.beginGroup(group);
-                QString orderingStr = stats.value(QStringLiteral("ordering")).toString();
-                stats.endGroup();
-                if (!orderingStr.isEmpty()) {
-                    QStringList items = orderingStr.split(QLatin1Char(','), Qt::SkipEmptyParts);
-                    if (items.size() > bestOrdering.size() || (bestOrdering.isEmpty() && !items.isEmpty())) {
-                        bestOrdering = items;
-                    }
-                }
+            if (!group.contains(QLatin1String("favorite"), Qt::CaseInsensitive)) {
+                continue;
+            }
+
+            stats.beginGroup(group);
+            QVariant val = stats.value(QStringLiteral("ordering"));
+            QStringList items = val.toStringList();
+            if (items.isEmpty()) {
+                QString s = val.toString();
+                if (!s.isEmpty()) items = s.split(QLatin1Char(','), Qt::SkipEmptyParts);
+            }
+            stats.endGroup();
+
+            if (items.isEmpty()) {
+                continue;
+            }
+
+            // Scoring:
+            // 1. Aktivitäts-Übereinstimmung (aktuelle Aktivität > global > andere Aktivität)
+            // 2. Höchste Instanz-ID (in Plasma erhalten neuere Launcher-Applets höhere IDs)
+            qint64 score = 0;
+            if (!currentActivity.isEmpty() && group.contains(currentActivity)) {
+                score += 10000000;
+            } else if (group.contains(QLatin1String("global"), Qt::CaseInsensitive)) {
+                score += 1000000;
+            } else if (!currentActivity.isEmpty() && group.contains(QLatin1Char('-'))) {
+                // Sektion gehört explizit zu einer ANDEREN Aktivität -> überspringen
+                continue;
+            }
+
+            auto match = instanceRegex.match(group);
+            if (match.hasMatch()) {
+                score += match.captured(1).toLongLong();
+            }
+
+            if (score > bestScore) {
+                bestScore = score;
+                bestOrdering = items;
             }
         }
+
         for (const auto &item : bestOrdering) {
             QString clean = item.trimmed();
             if (clean.startsWith(QLatin1String("applications:"))) {
                 clean = clean.mid(13);
             } else if (clean.startsWith(QLatin1String("file://"))) {
                 clean = QUrl(clean).toLocalFile();
+            } else if (clean.startsWith(QLatin1String("preferred://"))) {
+                QString pref = clean.mid(12).toLower();
+                if (pref == QLatin1String("browser")) {
+                    clean = QStringLiteral("brave-browser.desktop");
+                }
             }
             if (!clean.isEmpty() && !seen.contains(clean)) {
                 seen.insert(clean);
@@ -1797,39 +1850,41 @@ QList<AppEntry> AppManager::loadFavorites()
         }
     }
 
-    // 2. Ergänzend kactivitymanagerd SQLite-Datenbank abfragen (deckt Plasma 6, Plasma 5 und alle Launcher ab)
-    QString dbPath = QDir::homePath() + QStringLiteral("/.local/share/kactivitymanagerd/resources/database");
-    sqlite3 *db = nullptr;
-    if (sqlite3_open_v2(dbPath.toUtf8().constData(), &db, SQLITE_OPEN_READONLY, nullptr) == SQLITE_OK) {
-        sqlite3_busy_timeout(db, 200);
-        // Plasma 6 verwendet 'org.kde.plasma.favorites.applications'
-        // Plasma 5 verwendete 'org.kde.plasma.kickoff.favorites...'
-        const char *sql = "SELECT DISTINCT targettedResource "
-                          "FROM ResourceLink "
-                          "WHERE (initiatingAgent LIKE '%favorite%' OR initiatingAgent LIKE '%kickoff%') "
-                          "  AND (targettedResource LIKE 'applications:%' OR targettedResource LIKE '%.desktop%');";
+    // 3. Fallback: Nur wenn KEINE Einträge in kactivitymanagerd-statsrc gefunden wurden,
+    // fragen wir die kactivitymanagerd SQLite-Datenbank ab.
+    // NIEMALS bestehende Einträge aus der SQLite DB ergänzen, da ResourceLink gelöschte Favoriten ewig behält!
+    if (orderedKeys.isEmpty()) {
+        QString dbPath = QDir::homePath() + QStringLiteral("/.local/share/kactivitymanagerd/resources/database");
+        sqlite3 *db = nullptr;
+        if (sqlite3_open_v2(dbPath.toUtf8().constData(), &db, SQLITE_OPEN_READONLY, nullptr) == SQLITE_OK) {
+            sqlite3_busy_timeout(db, 200);
+            const char *sql = "SELECT DISTINCT targettedResource "
+                              "FROM ResourceLink "
+                              "WHERE (initiatingAgent LIKE '%favorite%' OR initiatingAgent LIKE '%kickoff%') "
+                              "  AND (targettedResource LIKE 'applications:%' OR targettedResource LIKE '%.desktop%');";
 
-        sqlite3_stmt *stmt = nullptr;
-        if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
-            while (sqlite3_step(stmt) == SQLITE_ROW) {
-                const char *resText = (const char *)sqlite3_column_text(stmt, 0);
-                if (!resText) continue;
-                QString res = QString::fromUtf8(resText).trimmed();
-                if (res.startsWith(QLatin1String("applications:"))) {
-                    res = res.mid(13);
-                } else if (res.startsWith(QLatin1String("file://"))) {
-                    res = QUrl(res).toLocalFile();
+            sqlite3_stmt *stmt = nullptr;
+            if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
+                while (sqlite3_step(stmt) == SQLITE_ROW) {
+                    const char *resText = (const char *)sqlite3_column_text(stmt, 0);
+                    if (!resText) continue;
+                    QString res = QString::fromUtf8(resText).trimmed();
+                    if (res.startsWith(QLatin1String("applications:"))) {
+                        res = res.mid(13);
+                    } else if (res.startsWith(QLatin1String("file://"))) {
+                        res = QUrl(res).toLocalFile();
+                    }
+                    if (!res.isEmpty() && !seen.contains(res)) {
+                        seen.insert(res);
+                        orderedKeys.append(res);
+                    }
                 }
-                if (!res.isEmpty() && !seen.contains(res)) {
-                    seen.insert(res);
-                    orderedKeys.append(res);
-                }
+                sqlite3_finalize(stmt);
             }
-            sqlite3_finalize(stmt);
+            sqlite3_close(db);
+        } else if (db) {
+            sqlite3_close(db);
         }
-        sqlite3_close(db);
-    } else if (db) {
-        sqlite3_close(db);
     }
 
     // 3. Desktop-Dateien / Services auflösen

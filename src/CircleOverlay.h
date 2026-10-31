@@ -224,6 +224,7 @@ private:
     void populateRecentAppsSegments(bool &outHasRing2, bool &outHasRing3);
     void populateRecentFilesSegments(bool &outHasRing2, bool &outHasRing3);
     void refreshCurrentMode();
+    void refreshCategoriesAndFavorites(bool force = false);
 
     QHash<QString, QString> m_iconPathCache;
     QHash<QString, QString> m_appNameCache;
@@ -260,6 +261,7 @@ private:
     QList<AppEntry> m_cachedRecentApps;
     QList<AppEntry> m_cachedFavorites;
     QList<CategoryEntry> m_cachedCategories;
+    qint64 m_lastCategoriesLoadTime = 0;
     QList<RecentFileItem> m_cachedRecentFiles;
     QList<TrayProgramItem> m_cachedTrayPrograms;
     int m_trayIconRevision = 0;

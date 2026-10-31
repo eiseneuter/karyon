@@ -3056,9 +3056,7 @@ void CircleOverlay::partitionFavorites(QList<OverlaySegment> &outRing1,
     outRing2.clear();
     outRing3.clear();
 
-    if (m_cachedFavorites.isEmpty()) {
-        m_cachedFavorites = m_appManager.loadFavorites();
-    }
+    m_cachedFavorites = m_appManager.loadFavorites();
     if (m_cachedFavorites.isEmpty()) return;
 
     auto makeAppSeg = [&](const AppEntry &app, double angle, double span, int ring) {
@@ -3642,6 +3640,34 @@ void CircleOverlay::refreshCurrentMode()
     m_isRefreshing = false;
 }
 
+void CircleOverlay::refreshCategoriesAndFavorites(bool force)
+{
+    qint64 now = QDateTime::currentMSecsSinceEpoch();
+    m_cachedFavorites = m_appManager.loadFavorites();
+    if (force || m_cachedCategories.isEmpty() || (now - m_lastCategoriesLoadTime) > 15000) {
+        m_cachedCategories = m_appManager.loadCategories();
+        m_lastCategoriesLoadTime = now;
+    } else {
+        bool favCatFound = false;
+        for (auto &cat : m_cachedCategories) {
+            if (cat.id == QLatin1String("__FAVORITES__")) {
+                cat.apps = m_cachedFavorites;
+                favCatFound = true;
+                break;
+            }
+        }
+        if (!favCatFound && !m_cachedFavorites.isEmpty()) {
+            CategoryEntry fav;
+            fav.id = QStringLiteral("__FAVORITES__");
+            fav.name = QStringLiteral("Favorites");
+            fav.icon = QStringLiteral("favorites");
+            fav.apps = m_cachedFavorites;
+            int centerIdx = m_cachedCategories.size() / 2;
+            m_cachedCategories.insert(centerIdx, fav);
+        }
+    }
+}
+
 void CircleOverlay::showAt(const QPoint &cursorPos, const QList<WindowInfo> &windows, InputMonitor *monitor, bool isGame)
 {
     KLOG("Overlay", "showAt() pos=(%d, %d) windows=%d isGame=%d mode=%d",
@@ -3679,28 +3705,7 @@ void CircleOverlay::showAt(const QPoint &cursorPos, const QList<WindowInfo> &win
         populateSegments(windows, hasRing2, hasRing3);
     } else if (m_mode == OverlayMode::RecentApps) {
         m_cachedRecentApps = m_appManager.loadRecentApps(SettingsManager::instance().maxRecentApps(), openAppIdentifiers());
-        m_cachedFavorites = m_appManager.loadFavorites();
-        if (m_cachedCategories.isEmpty()) {
-            m_cachedCategories = m_appManager.loadCategories();
-        } else {
-            bool favCatFound = false;
-            for (auto &cat : m_cachedCategories) {
-                if (cat.id == QLatin1String("__FAVORITES__")) {
-                    cat.apps = m_cachedFavorites;
-                    favCatFound = true;
-                    break;
-                }
-            }
-            if (!favCatFound && !m_cachedFavorites.isEmpty()) {
-                CategoryEntry fav;
-                fav.id = QStringLiteral("__FAVORITES__");
-                fav.name = QStringLiteral("Favorites");
-                fav.icon = QStringLiteral("favorites");
-                fav.apps = m_cachedFavorites;
-                int centerIdx = m_cachedCategories.size() / 2;
-                m_cachedCategories.insert(centerIdx, fav);
-            }
-        }
+        refreshCategoriesAndFavorites();
         populateRecentAppsSegments(hasRing2, hasRing3);
     } else if (m_mode == OverlayMode::RecentFiles) {
         m_cachedRecentFiles = m_recentFilesManager.loadRecentFiles(SettingsManager::instance().maxRecentFiles());
@@ -4340,28 +4345,7 @@ void CircleOverlay::handleHubWheel(int delta)
 
     if (m_mode == OverlayMode::RecentApps) {
         m_cachedRecentApps = m_appManager.loadRecentApps(SettingsManager::instance().maxRecentApps(), openAppIdentifiers());
-        m_cachedFavorites = m_appManager.loadFavorites();
-        if (m_cachedCategories.isEmpty()) {
-            m_cachedCategories = m_appManager.loadCategories();
-        } else {
-            bool favCatFound = false;
-            for (auto &cat : m_cachedCategories) {
-                if (cat.id == QLatin1String("__FAVORITES__")) {
-                    cat.apps = m_cachedFavorites;
-                    favCatFound = true;
-                    break;
-                }
-            }
-            if (!favCatFound && !m_cachedFavorites.isEmpty()) {
-                CategoryEntry fav;
-                fav.id = QStringLiteral("__FAVORITES__");
-                fav.name = QStringLiteral("Favorites");
-                fav.icon = QStringLiteral("favorites");
-                fav.apps = m_cachedFavorites;
-                int centerIdx = m_cachedCategories.size() / 2;
-                m_cachedCategories.insert(centerIdx, fav);
-            }
-        }
+        refreshCategoriesAndFavorites();
     } else if (m_mode == OverlayMode::RecentFiles) {
         m_cachedRecentFiles = m_recentFilesManager.loadRecentFiles(SettingsManager::instance().maxRecentFiles());
     }
