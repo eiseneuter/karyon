@@ -22,6 +22,7 @@
 #include <unistd.h>
 #include <iostream>
 #include "DebugLogger.h"
+#include "CrashHandler.h"
 #include "CircleOverlay.h"
 #include "InputMonitor.h"
 #include "KWinBridge.h"
@@ -104,6 +105,7 @@ void quietMessageHandler(QtMsgType type, const QMessageLogContext &/*context*/, 
     }
     if (type == QtFatalMsg) {
         std::string out = "Fatal: " + msg.toStdString() + "\n";
+        CrashHandler::setLastFatalMessage(msg);
         int fd = (g_origStderr >= 0) ? g_origStderr : STDERR_FILENO;
         (void)write(fd, out.data(), out.size());
         abort();
@@ -261,6 +263,25 @@ GpuBackend probeHardwareGraphics()
 
 int main(int argc, char *argv[])
 {
+    // 1. Crash Reporter GUI Modus abfangen (wird aufgerufen, wenn ein Karyon-Prozess abstürzt)
+    for (int i = 1; i < argc; ++i) {
+        if (strcmp(argv[i], "--crash-reporter") == 0 && i + 1 < argc) {
+            QApplication app(argc, argv);
+            return CrashHandler::runCrashReporterDialog(QString::fromUtf8(argv[i + 1]));
+        }
+    }
+
+    // 2. Globalen Crash-Handler für Signale (SIGSEGV, SIGABRT, SIGBUS, etc.) installieren
+    CrashHandler::install();
+
+    for (int i = 1; i < argc; ++i) {
+        if (strcmp(argv[i], "--test-crash") == 0) {
+            std::cout << "[CrashHandler] Intentionally triggering test segmentation fault (SIGSEGV)...\n";
+            volatile int *ptr = nullptr;
+            *ptr = 42;
+        }
+    }
+
     DebugLogger::init();
     KLOG("Main", "Starting Karyon C++ Test Build (PID: %d)", getpid());
     setupStderrFilter();

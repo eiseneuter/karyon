@@ -27,6 +27,8 @@ qt_add_executable(karyon
     src/main.cpp
     src/DebugLogger.h
     src/DebugLogger.cpp
+    src/CrashHandler.h
+    src/CrashHandler.cpp
     src/CircleOverlay.h
     src/CircleOverlay.cpp
     src/InputMonitor.h
