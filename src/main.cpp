@@ -9,6 +9,7 @@
 #include <QLabel>
 #include <QMessageBox>
 #include <QTimer>
+#include <QTranslator>
 #include <QFile>
 #include <QLockFile>
 #include <QStandardPaths>
@@ -326,13 +327,9 @@ int main(int argc, char *argv[])
     }
     SettingsManager::instance().setDetectedLocaleName(detectedLocaleStr);
 
-    // Enforce English UI so all Qt dialogs (e.g. QColorDialog), buttons, and tooltips
-    // remain strictly in English regardless of host system language.
-    qputenv("LC_ALL", "C.UTF-8");
-    qputenv("LANG", "C.UTF-8");
-    qputenv("LANGUAGE", "en_US:en");
-    std::setlocale(LC_ALL, "C.UTF-8");
-    QLocale::setDefault(QLocale(QLocale::English, QLocale::UnitedStates));
+    // Respect the desktop locale. QML translation catalogs and Qt's own dialogs
+    // must use the same locale that was detected above.
+    QLocale::setDefault(QLocale(detectedLocaleStr));
 
     // Enforce QT_QPA_PLATFORM=xcb for direct X11/XWayland Override-Redirect (Rule 1)
     // Synchronous cursor positioning and frameless overlay window placement under cursor
@@ -380,8 +377,14 @@ int main(int argc, char *argv[])
     QSurfaceFormat::setDefaultFormat(defaultFormat);
 
     QApplication app(argc, argv);
-    // Re-apply default English QLocale after QApplication constructor (which calls setlocale internally)
-    QLocale::setDefault(QLocale(QLocale::English, QLocale::UnitedStates));
+    // QApplication can update locale state during construction; restore the
+    // desktop locale so translated QML and native dialogs stay in sync.
+    QLocale::setDefault(QLocale(detectedLocaleStr));
+    QTranslator applicationTranslator;
+    if (detectedLocaleStr.startsWith(QLatin1String("sv"), Qt::CaseInsensitive)
+        && applicationTranslator.load(QStringLiteral(":/i18n/karyon_sv.qm"))) {
+        app.installTranslator(&applicationTranslator);
+    }
     app.setApplicationName(QStringLiteral("Karyon"));
     app.setApplicationDisplayName(QStringLiteral("Karyon"));
     app.setDesktopFileName(QStringLiteral("karyon"));

@@ -46,7 +46,7 @@ Item {
                 }
 
                 Text {
-                    text: "Karyon"
+                    text: qsTr("Karyon")
                     color: (typeof karyonTheme !== "undefined") ? karyonTheme.textPrimary : "#ffffff"
                     font.pixelSize: 13
                     font.bold: true
@@ -75,7 +75,7 @@ Item {
             spacing: 8
 
             Text {
-                text: "Input Permissions Required"
+                text: qsTr("Input Permissions Required")
                 color: (typeof karyonTheme !== "undefined") ? karyonTheme.textPrimary : "#ffffff"
                 font.pixelSize: 12
                 font.bold: true
@@ -84,7 +84,7 @@ Item {
             Text {
                 width: parent.width
                 wrapMode: Text.WordWrap
-                text: "Karyon needs permission to access the Linux input subsystem to monitor mouse gestures and display the radial menu."
+                text: qsTr("Karyon needs permission to access the Linux input subsystem to monitor mouse gestures and display the radial menu.")
                 color: (typeof karyonTheme !== "undefined") ? karyonTheme.textSecondary : "#cdd3de"
                 font.pixelSize: 11
                 lineHeight: 1.3
@@ -111,7 +111,7 @@ Item {
                         anchors.verticalCenter: parent.verticalCenter
                     }
                     Text {
-                        text: "/dev/uinput (Virtual Device Creation): "
+                        text: qsTr("/dev/uinput (Virtual Device Creation): ")
                         color: (typeof karyonTheme !== "undefined") ? karyonTheme.textSecondary : "#cdd3de"
                         font.pixelSize: 10
                     }
@@ -133,7 +133,7 @@ Item {
                         anchors.verticalCenter: parent.verticalCenter
                     }
                     Text {
-                        text: "/dev/input/event* (Hardware Mouse Capture): "
+                        text: qsTr("/dev/input/event* (Hardware Mouse Capture): ")
                         color: (typeof karyonTheme !== "undefined") ? karyonTheme.textSecondary : "#cdd3de"
                         font.pixelSize: 10
                     }
@@ -177,7 +177,7 @@ Item {
 
                 Text {
                     anchors.centerIn: parent
-                    text: "Exit"
+                    text: qsTr("Exit")
                     color: exitMa.containsMouse ? ((typeof karyonTheme !== "undefined") ? karyonTheme.textPrimary : "#ffffff") : ((typeof karyonTheme !== "undefined") ? karyonTheme.textSecondary : "#cdd3de")
                     font.pixelSize: 11
                     font.bold: true
