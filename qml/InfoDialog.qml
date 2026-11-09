@@ -54,14 +54,14 @@ Item {
                     anchors.verticalCenter: parent.verticalCenter
 
                     Text {
-                        text: "Karyon"
+                        text: qsTr("Karyon")
                         color: (typeof karyonTheme !== "undefined") ? karyonTheme.textPrimary : "#ffffff"
                         font.pixelSize: 14
                         font.bold: true
                     }
 
                     Text {
-                        text: "Quick Guide & Info"
+                        text: qsTr("Quick Guide & Info")
                         color: (typeof karyonTheme !== "undefined") ? karyonTheme.textSecondary : "#96a2b4"
                         font.pixelSize: 11
                         anchors.verticalCenter: parent.verticalCenter
@@ -132,7 +132,7 @@ Item {
                     spacing: 3
 
                     Text {
-                        text: "BASIC CONTROLS"
+                        text: qsTr("BASIC CONTROLS")
                         color: root.accentColor
                         font.pixelSize: 11
                         font.bold: true
@@ -142,7 +142,7 @@ Item {
                         spacing: 6
                         width: parent.width
                         Text {
-                            text: "• Hold Trigger:"
+                            text: qsTr("• Hold Trigger:")
                             color: (typeof karyonTheme !== "undefined") ? karyonTheme.textPrimary : "#ffffff"
                             font.pixelSize: 11
                             font.bold: true
@@ -150,20 +150,20 @@ Item {
                         Text {
                             width: parent.width - 95
                             wrapMode: Text.WordWrap
-                            text: "Open overlay • Aim & release to trigger. RMB is default. Keep in mind: Karyon is designed for use of RMB! Some custom trigger buttons do not work well or at all."
+                            text: qsTr("Open overlay • Aim & release to trigger. RMB is default. Keep in mind: Karyon is designed for use of RMB! Some custom trigger buttons do not work well or at all.")
                             color: (typeof karyonTheme !== "undefined") ? karyonTheme.textSecondary : "#cdd3de"
                             font.pixelSize: 11
                         }
                     }
                     Row {
                         spacing: 6
-                        Text { text: "• Mouse Wheel in Hub:"; color: (typeof karyonTheme !== "undefined") ? karyonTheme.textPrimary : "#ffffff"; font.pixelSize: 11; font.bold: true }
-                        Text { text: "Switch categories (Windows, Apps, Files)"; color: (typeof karyonTheme !== "undefined") ? karyonTheme.textSecondary : "#cdd3de"; font.pixelSize: 11 }
+                        Text { text: qsTr("• Mouse Wheel in Hub:"); color: (typeof karyonTheme !== "undefined") ? karyonTheme.textPrimary : "#ffffff"; font.pixelSize: 11; font.bold: true }
+                        Text { text: qsTr("Switch categories (Windows, Apps, Files)"); color: (typeof karyonTheme !== "undefined") ? karyonTheme.textSecondary : "#cdd3de"; font.pixelSize: 11 }
                     }
                     Row {
                         spacing: 6
-                        Text { text: "• Left-Click:"; color: (typeof karyonTheme !== "undefined") ? karyonTheme.textPrimary : "#ffffff"; font.pixelSize: 11; font.bold: true }
-                        Text { text: "Cancel & close overlay without action"; color: (typeof karyonTheme !== "undefined") ? karyonTheme.textSecondary : "#cdd3de"; font.pixelSize: 11 }
+                        Text { text: qsTr("• Left-Click:"); color: (typeof karyonTheme !== "undefined") ? karyonTheme.textPrimary : "#ffffff"; font.pixelSize: 11; font.bold: true }
+                        Text { text: qsTr("Cancel & close overlay without action"); color: (typeof karyonTheme !== "undefined") ? karyonTheme.textSecondary : "#cdd3de"; font.pixelSize: 11 }
                     }
                 }
 
@@ -173,7 +173,7 @@ Item {
                     spacing: 3
 
                     Text {
-                        text: "WINDOW CONTROL (ON SEGMENT)"
+                        text: qsTr("WINDOW CONTROL (ON SEGMENT)")
                         color: root.accentColor
                         font.pixelSize: 11
                         font.bold: true
@@ -181,18 +181,18 @@ Item {
 
                     Row {
                         spacing: 6
-                        Text { text: "• Middle-Click (MMB):"; color: (typeof karyonTheme !== "undefined") ? karyonTheme.textPrimary : "#ffffff"; font.pixelSize: 11; font.bold: true }
-                        Text { text: "Close targeted window"; color: (typeof karyonTheme !== "undefined") ? karyonTheme.textSecondary : "#cdd3de"; font.pixelSize: 11 }
+                        Text { text: qsTr("• Middle-Click (MMB):"); color: (typeof karyonTheme !== "undefined") ? karyonTheme.textPrimary : "#ffffff"; font.pixelSize: 11; font.bold: true }
+                        Text { text: qsTr("Close targeted window"); color: (typeof karyonTheme !== "undefined") ? karyonTheme.textSecondary : "#cdd3de"; font.pixelSize: 11 }
                     }
                     Row {
                         spacing: 6
-                        Text { text: "• Wheel Up:"; color: (typeof karyonTheme !== "undefined") ? karyonTheme.textPrimary : "#ffffff"; font.pixelSize: 11; font.bold: true }
-                        Text { text: "Maximize / Restore targeted window"; color: (typeof karyonTheme !== "undefined") ? karyonTheme.textSecondary : "#cdd3de"; font.pixelSize: 11 }
+                        Text { text: qsTr("• Wheel Up:"); color: (typeof karyonTheme !== "undefined") ? karyonTheme.textPrimary : "#ffffff"; font.pixelSize: 11; font.bold: true }
+                        Text { text: qsTr("Maximize / Restore targeted window"); color: (typeof karyonTheme !== "undefined") ? karyonTheme.textSecondary : "#cdd3de"; font.pixelSize: 11 }
                     }
                     Row {
                         spacing: 6
-                        Text { text: "• Wheel Down:"; color: (typeof karyonTheme !== "undefined") ? karyonTheme.textPrimary : "#ffffff"; font.pixelSize: 11; font.bold: true }
-                        Text { text: "Minimize / Restore targeted window"; color: (typeof karyonTheme !== "undefined") ? karyonTheme.textSecondary : "#cdd3de"; font.pixelSize: 11 }
+                        Text { text: qsTr("• Wheel Down:"); color: (typeof karyonTheme !== "undefined") ? karyonTheme.textPrimary : "#ffffff"; font.pixelSize: 11; font.bold: true }
+                        Text { text: qsTr("Minimize / Restore targeted window"); color: (typeof karyonTheme !== "undefined") ? karyonTheme.textSecondary : "#cdd3de"; font.pixelSize: 11 }
                     }
                 }
 
@@ -202,7 +202,7 @@ Item {
                     spacing: 3
 
                     Text {
-                        text: "PINNING (APPS & FILES)"
+                        text: qsTr("PINNING (APPS & FILES)")
                         color: root.accentColor
                         font.pixelSize: 11
                         font.bold: true
@@ -210,13 +210,13 @@ Item {
 
                     Row {
                         spacing: 6
-                        Text { text: "• Pin / Unpin:"; color: (typeof karyonTheme !== "undefined") ? karyonTheme.textPrimary : "#ffffff"; font.pixelSize: 11; font.bold: true }
-                        Text { text: "Aim at needle icon and release RMB"; color: (typeof karyonTheme !== "undefined") ? karyonTheme.textSecondary : "#cdd3de"; font.pixelSize: 11 }
+                        Text { text: qsTr("• Pin / Unpin:"); color: (typeof karyonTheme !== "undefined") ? karyonTheme.textPrimary : "#ffffff"; font.pixelSize: 11; font.bold: true }
+                        Text { text: qsTr("Aim at needle icon and release RMB"); color: (typeof karyonTheme !== "undefined") ? karyonTheme.textSecondary : "#cdd3de"; font.pixelSize: 11 }
                     }
                     Row {
                         spacing: 6
-                        Text { text: "• Supported for pinning:"; color: (typeof karyonTheme !== "undefined") ? karyonTheme.textPrimary : "#ffffff"; font.pixelSize: 11; font.bold: true }
-                        Text { text: "Primary window instances, Applications, Recent Files"; color: (typeof karyonTheme !== "undefined") ? karyonTheme.textSecondary : "#cdd3de"; font.pixelSize: 11 }
+                        Text { text: qsTr("• Supported for pinning:"); color: (typeof karyonTheme !== "undefined") ? karyonTheme.textPrimary : "#ffffff"; font.pixelSize: 11; font.bold: true }
+                        Text { text: qsTr("Primary window instances, Applications, Recent Files"); color: (typeof karyonTheme !== "undefined") ? karyonTheme.textSecondary : "#cdd3de"; font.pixelSize: 11 }
                     }
                 }
 
@@ -226,7 +226,7 @@ Item {
                     spacing: 3
 
                     Text {
-                        text: "MEDIA & VOLUME (BELOW HUB)"
+                        text: qsTr("MEDIA & VOLUME (BELOW HUB)")
                         color: root.accentColor
                         font.pixelSize: 11
                         font.bold: true
@@ -234,13 +234,13 @@ Item {
 
                     Row {
                         spacing: 6
-                        Text { text: "• Media Buttons:"; color: (typeof karyonTheme !== "undefined") ? karyonTheme.textPrimary : "#ffffff"; font.pixelSize: 11; font.bold: true }
-                        Text { text: "Previous Track • Play / Pause • Next Track"; color: (typeof karyonTheme !== "undefined") ? karyonTheme.textSecondary : "#cdd3de"; font.pixelSize: 11 }
+                        Text { text: qsTr("• Media Buttons:"); color: (typeof karyonTheme !== "undefined") ? karyonTheme.textPrimary : "#ffffff"; font.pixelSize: 11; font.bold: true }
+                        Text { text: qsTr("Previous Track • Play / Pause • Next Track"); color: (typeof karyonTheme !== "undefined") ? karyonTheme.textSecondary : "#cdd3de"; font.pixelSize: 11 }
                     }
                     Row {
                         spacing: 6
-                        Text { text: "• Volume (Hub bottom) / Mute (entire Hub):"; color: (typeof karyonTheme !== "undefined") ? karyonTheme.textPrimary : "#ffffff"; font.pixelSize: 11; font.bold: true }
-                        Text { text: "Mouse wheel changes volume • Middle-click toggles mute"; color: (typeof karyonTheme !== "undefined") ? karyonTheme.textSecondary : "#cdd3de"; font.pixelSize: 11 }
+                        Text { text: qsTr("• Volume (Hub bottom) / Mute (entire Hub):"); color: (typeof karyonTheme !== "undefined") ? karyonTheme.textPrimary : "#ffffff"; font.pixelSize: 11; font.bold: true }
+                        Text { text: qsTr("Mouse wheel changes volume • Middle-click toggles mute"); color: (typeof karyonTheme !== "undefined") ? karyonTheme.textSecondary : "#cdd3de"; font.pixelSize: 11 }
                     }
                 }
 
@@ -250,7 +250,7 @@ Item {
                     spacing: 3
 
                     Text {
-                        text: "LIVE TRAY STATUS & NOTIFICATIONS"
+                        text: qsTr("LIVE TRAY STATUS & NOTIFICATIONS")
                         color: root.accentColor
                         font.pixelSize: 11
                         font.bold: true
@@ -258,8 +258,8 @@ Item {
 
                     Row {
                         spacing: 6
-                        Text { text: "• Live Status:"; color: (typeof karyonTheme !== "undefined") ? karyonTheme.textPrimary : "#ffffff"; font.pixelSize: 11; font.bold: true }
-                        Text { text: "Window segments mirror live tray icons (badges, notification indicators)"; color: (typeof karyonTheme !== "undefined") ? karyonTheme.textSecondary : "#cdd3de"; font.pixelSize: 11 }
+                        Text { text: qsTr("• Live Status:"); color: (typeof karyonTheme !== "undefined") ? karyonTheme.textPrimary : "#ffffff"; font.pixelSize: 11; font.bold: true }
+                        Text { text: qsTr("Window segments mirror live tray icons (badges, notification indicators)"); color: (typeof karyonTheme !== "undefined") ? karyonTheme.textSecondary : "#cdd3de"; font.pixelSize: 11 }
                     }
                 }
 
@@ -269,7 +269,7 @@ Item {
                     spacing: 3
 
                     Text {
-                        text: "MOUSE GESTURES"
+                        text: qsTr("MOUSE GESTURES")
                         color: root.accentColor
                         font.pixelSize: 11
                         font.bold: true
@@ -277,13 +277,13 @@ Item {
 
                     Row {
                         spacing: 6
-                        Text { text: "• Execute:"; color: (typeof karyonTheme !== "undefined") ? karyonTheme.textPrimary : "#ffffff"; font.pixelSize: 11; font.bold: true }
-                        Text { text: "Hold RMB + fast swipe (8 directions) • Release RMB to trigger"; color: (typeof karyonTheme !== "undefined") ? karyonTheme.textSecondary : "#cdd3de"; font.pixelSize: 11 }
+                        Text { text: qsTr("• Execute:"); color: (typeof karyonTheme !== "undefined") ? karyonTheme.textPrimary : "#ffffff"; font.pixelSize: 11; font.bold: true }
+                        Text { text: qsTr("Hold RMB + fast swipe (8 directions) • Release RMB to trigger"); color: (typeof karyonTheme !== "undefined") ? karyonTheme.textSecondary : "#cdd3de"; font.pixelSize: 11 }
                     }
                     Row {
                         spacing: 6
-                        Text { text: "• Cancel:"; color: (typeof karyonTheme !== "undefined") ? karyonTheme.textPrimary : "#ffffff"; font.pixelSize: 11; font.bold: true }
-                        Text { text: "Left-click while swiping cancels gesture"; color: (typeof karyonTheme !== "undefined") ? karyonTheme.textSecondary : "#cdd3de"; font.pixelSize: 11 }
+                        Text { text: qsTr("• Cancel:"); color: (typeof karyonTheme !== "undefined") ? karyonTheme.textPrimary : "#ffffff"; font.pixelSize: 11; font.bold: true }
+                        Text { text: qsTr("Left-click while swiping cancels gesture"); color: (typeof karyonTheme !== "undefined") ? karyonTheme.textSecondary : "#cdd3de"; font.pixelSize: 11 }
                     }
                 }
             }
@@ -314,14 +314,14 @@ Item {
                 spacing: 1
 
                 Text {
-                    text: "Karyon 3.2 • © 2026 eisen"
+                    text: qsTr("Karyon 3.2 • © 2026 eisen")
                     color: (typeof karyonTheme !== "undefined") ? karyonTheme.textMuted : "#96a2b4"
                     font.pixelSize: 11
                     font.bold: true
                 }
 
                 Text {
-                    text: "https://github.com/eiseneuter/karyon"
+                    text: qsTr("https://github.com/eiseneuter/karyon")
                     color: (typeof karyonTheme !== "undefined") ? karyonTheme.textSubtle : "#6c788c"
                     font.pixelSize: 10
                 }
@@ -338,7 +338,7 @@ Item {
 
                 Text {
                     anchors.centerIn: parent
-                    text: "OK"
+                    text: qsTr("OK")
                     color: "#ffffff"
                     font.pixelSize: 11
                     font.bold: true

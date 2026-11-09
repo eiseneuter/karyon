@@ -10,7 +10,7 @@ set(CMAKE_AUTOUIC ON)
 
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 
-find_package(Qt6 REQUIRED COMPONENTS Core Gui Quick Qml DBus Widgets)
+find_package(Qt6 REQUIRED COMPONENTS Core Gui Quick Qml DBus Widgets LinguistTools)
 find_package(KF6WindowSystem REQUIRED)
 find_package(KF6Service REQUIRED)
 find_package(KF6KIO REQUIRED)
@@ -104,4 +104,13 @@ target_link_libraries(karyon
         xcb
         xcb-shape
         ${CMAKE_DL_LIBS}
+)
+
+# Keep the Swedish catalog in version control and embed the compiled catalog in
+# the application.  Qt exposes it below :/i18n/, so it travels with AppImage
+# and ordinary builds alike.
+qt_add_translations(karyon
+    TS_FILES translations/karyon_sv.ts
+    SOURCE_TARGETS karyon
+    RESOURCE_PREFIX "/i18n"
 )
