@@ -9,6 +9,7 @@
 #include <QLabel>
 #include <QMessageBox>
 #include <QTimer>
+#include <QTranslator>
 #include <QFile>
 #include <QLockFile>
 #include <QStandardPaths>
@@ -389,8 +390,13 @@ int main(int argc, char *argv[])
     QSurfaceFormat::setDefaultFormat(defaultFormat);
 
     QApplication app(argc, argv);
-    // Re-apply default English QLocale after QApplication constructor (which calls setlocale internally)
+    // QApplication can reset the locale; keep native Qt dialogs in English.
     QLocale::setDefault(QLocale(QLocale::English, QLocale::UnitedStates));
+    QTranslator applicationTranslator;
+    if (detectedLocaleStr.startsWith(QLatin1String("sv"), Qt::CaseInsensitive)
+        && applicationTranslator.load(QStringLiteral(":/i18n/karyon_sv.qm"))) {
+        app.installTranslator(&applicationTranslator);
+    }
     app.setApplicationName(QStringLiteral("Karyon"));
     app.setApplicationDisplayName(QStringLiteral("Karyon"));
     app.setDesktopFileName(QStringLiteral("karyon"));
