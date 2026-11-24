@@ -25,6 +25,7 @@
 #include <QFileInfo>
 #include <algorithm>
 #include <KWindowSystem>
+#include <KSycoca>
 #include <KX11Extras>
 #include <xcb/xcb.h>
 #include <QMimeDatabase>
@@ -40,6 +41,14 @@ CircleOverlay::CircleOverlay(QObject *parent)
     applyWindowProperties();
 
     connect(&m_volumeManager, &VolumeManager::volumeChanged, this, &CircleOverlay::updateVolumeState);
+
+    // Startmenü-Datenbank geändert (App installiert/entfernt/umbenannt) -> Kategorien neu laden
+    connect(KSycoca::self(), &KSycoca::databaseChanged, this, [this]() {
+        KLOG("Overlay", "KSycoca databaseChanged -> invalidating menu categories");
+        m_cachedCategories.clear();
+        m_cachedFavorites.clear();
+        m_lastCategoriesLoadTime = 0;
+    });
     connect(&m_mediaManager, &MediaManager::mediaChanged, this, [this]() {
         KLOG("Media", "mediaChanged signal received (isVisible=%d)", isVisible());
         if (isVisible()) {

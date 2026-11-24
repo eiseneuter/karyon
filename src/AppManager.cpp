@@ -17,6 +17,8 @@
 #include <QSettings>
 #include <KServiceGroup>
 #include <KService>
+#include <KSycoca>
+#include <QFileInfo>
 #include <sqlite3.h>
 #include <QUrl>
 #include <QDBusInterface>
@@ -1275,7 +1277,58 @@ static RawRecentAppsCache s_rawRecentApps;
 struct RawFavoritesCache {
     QList<AppEntry> entries;
     qint64 timestampMs = 0;
+    QString sourceStamp; // mtimes der Quelldateien -> sofortige Invalidierung bei Änderungen
 };
+
+static QString kdeConfigPath(const QString &name)
+{
+    return QStandardPaths::writableLocation(QStandardPaths::GenericConfigLocation) + QLatin1Char('/') + name;
+}
+
+static QString favoritesSourceStamp()
+{
+    QString stamp;
+    const QStringList files = {
+        kdeConfigPath(QStringLiteral("kactivitymanagerd-statsrc")),
+        kdeConfigPath(QStringLiteral("plasma-org.kde.plasma.desktop-appletsrc"))
+    };
+    for (const auto &f : files) {
+        QFileInfo fi(f);
+        stamp += QString::number(fi.exists() ? fi.lastModified().toMSecsSinceEpoch() : 0) + QLatin1Char(';');
+    }
+    return stamp;
+}
+
+// Liefert die Applet-IDs aller Startmenü-Applets (Kickoff / Kicker / Kickerdash),
+// die aktuell wirklich in einem Plasma-Panel bzw. Desktop existieren.
+// kactivitymanagerd-statsrc behält Sektionen gelöschter Applets für immer –
+// ohne diesen Abgleich würden veraltete Favoritenlisten verwendet.
+static QSet<QString> activeLauncherAppletIds()
+{
+    QSet<QString> ids;
+    QFile f(kdeConfigPath(QStringLiteral("plasma-org.kde.plasma.desktop-appletsrc")));
+    if (!f.open(QIODevice::ReadOnly | QIODevice::Text)) return ids;
+
+    static const QRegularExpression appletGroupRe(
+        QStringLiteral(R"(^\[Containments\]\[\d+\]\[Applets\]\[(\d+)\]$)"));
+    QString currentApplet;
+    while (!f.atEnd()) {
+        const QString line = QString::fromUtf8(f.readLine()).trimmed();
+        if (line.startsWith(QLatin1Char('['))) {
+            auto m = appletGroupRe.match(line);
+            currentApplet = m.hasMatch() ? m.captured(1) : QString();
+            continue;
+        }
+        if (currentApplet.isEmpty() || !line.startsWith(QLatin1String("plugin="))) continue;
+        const QString plugin = line.mid(7).trimmed();
+        if (plugin == QLatin1String("org.kde.plasma.kickoff") ||
+            plugin == QLatin1String("org.kde.plasma.kicker") ||
+            plugin == QLatin1String("org.kde.plasma.kickerdash")) {
+            ids.insert(currentApplet);
+        }
+    }
+    return ids;
+}
 static RawFavoritesCache s_rawFavorites;
 
 void AppManager::recordAppUsage(const QString &desktopFileName, const QString &resourceClass, int pid, const QString &caption)
@@ -1719,6 +1772,10 @@ QList<CategoryEntry> AppManager::loadCategories()
 {
     QList<CategoryEntry> categories;
 
+    // Sicherstellen, dass die KDE-Menüdatenbank (sycoca) aktuell ist – sonst bleiben
+    // neu installierte / entfernte Apps bis zum Neustart von Karyon unsichtbar.
+    KSycoca::self()->ensureCacheValid();
+
     KServiceGroup::Ptr root = KServiceGroup::root();
     if (root && root->isValid()) {
         KServiceGroup::List list = root->entries(true, true);
@@ -1759,9 +1816,14 @@ QList<CategoryEntry> AppManager::loadCategories()
 QList<AppEntry> AppManager::loadFavorites()
 {
     qint64 now = QDateTime::currentMSecsSinceEpoch();
-    if (s_rawFavorites.timestampMs > 0 && (now - s_rawFavorites.timestampMs) < 15000) {
+    const QString sourceStamp = favoritesSourceStamp();
+    if (s_rawFavorites.timestampMs > 0 && (now - s_rawFavorites.timestampMs) < 15000 &&
+        s_rawFavorites.sourceStamp == sourceStamp) {
         return s_rawFavorites.entries;
     }
+
+    // Menü-Datenbank (sycoca) aktualisieren, damit neu installierte Apps auflösbar sind
+    KSycoca::self()->ensureCacheValid();
 
     QList<AppEntry> result;
     QSet<QString> seen;
@@ -1781,11 +1843,12 @@ QList<AppEntry> AppManager::loadFavorites()
     }
 
     // 2. kactivitymanagerd-statsrc auslesen (enthält die exakte, vom Nutzer festgelegte Reihenfolge!)
-    QString statsPath = QDir::homePath() + QStringLiteral("/.config/kactivitymanagerd-statsrc");
+    QString statsPath = kdeConfigPath(QStringLiteral("kactivitymanagerd-statsrc"));
     if (QFile::exists(statsPath)) {
         QSettings stats(statsPath, QSettings::IniFormat);
         QStringList bestOrdering;
         qint64 bestScore = -1;
+        const QSet<QString> activeApplets = activeLauncherAppletIds();
 
         static const QRegularExpression instanceRegex(QStringLiteral(R"(instance-(\d+))"));
 
@@ -1822,6 +1885,11 @@ QList<AppEntry> AppManager::loadFavorites()
 
             auto match = instanceRegex.match(group);
             if (match.hasMatch()) {
+                // Sektionen gelöschter Startmenü-Applets ignorieren (die höchste ID ist
+                // oft ein längst entferntes Applet mit veralteter Liste)
+                if (!activeApplets.isEmpty() && !activeApplets.contains(match.captured(1))) {
+                    continue;
+                }
                 score += match.captured(1).toLongLong();
             }
 
@@ -1919,6 +1987,7 @@ QList<AppEntry> AppManager::loadFavorites()
 
     s_rawFavorites.entries = result;
     s_rawFavorites.timestampMs = now;
+    s_rawFavorites.sourceStamp = sourceStamp;
     return result;
 }
 
