@@ -1290,7 +1290,9 @@ static QString favoritesSourceStamp()
     QString stamp;
     const QStringList files = {
         kdeConfigPath(QStringLiteral("kactivitymanagerd-statsrc")),
-        kdeConfigPath(QStringLiteral("plasma-org.kde.plasma.desktop-appletsrc"))
+        kdeConfigPath(QStringLiteral("plasma-org.kde.plasma.desktop-appletsrc")),
+        QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation) + QStringLiteral("/kactivitymanagerd/resources/database"),
+        QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation) + QStringLiteral("/kactivitymanagerd/resources/database-wal")
     };
     for (const auto &f : files) {
         QFileInfo fi(f);
@@ -1843,6 +1845,7 @@ QList<AppEntry> AppManager::loadFavorites()
     }
 
     // 2. kactivitymanagerd-statsrc auslesen (enthält die exakte, vom Nutzer festgelegte Reihenfolge!)
+    QStringList orderingRaw;
     QString statsPath = kdeConfigPath(QStringLiteral("kactivitymanagerd-statsrc"));
     if (QFile::exists(statsPath)) {
         QSettings stats(statsPath, QSettings::IniFormat);
@@ -1899,59 +1902,84 @@ QList<AppEntry> AppManager::loadFavorites()
             }
         }
 
-        for (const auto &item : bestOrdering) {
-            QString clean = item.trimmed();
-            if (clean.startsWith(QLatin1String("applications:"))) {
-                clean = clean.mid(13);
-            } else if (clean.startsWith(QLatin1String("file://"))) {
-                clean = QUrl(clean).toLocalFile();
-            } else if (clean.startsWith(QLatin1String("preferred://"))) {
-                QString pref = clean.mid(12).toLower();
-                if (pref == QLatin1String("browser")) {
-                    clean = QStringLiteral("brave-browser.desktop");
-                }
-            }
-            if (!clean.isEmpty() && !seen.contains(clean)) {
-                seen.insert(clean);
-                orderedKeys.append(clean);
-            }
-        }
+        orderingRaw = bestOrdering;
     }
 
-    // 3. Fallback: Nur wenn KEINE Einträge in kactivitymanagerd-statsrc gefunden wurden,
-    // fragen wir die kactivitymanagerd SQLite-Datenbank ab.
-    // NIEMALS bestehende Einträge aus der SQLite DB ergänzen, da ResourceLink gelöschte Favoriten ewig behält!
-    if (orderedKeys.isEmpty()) {
-        QString dbPath = QDir::homePath() + QStringLiteral("/.local/share/kactivitymanagerd/resources/database");
-        sqlite3 *db = nullptr;
-        if (sqlite3_open_v2(dbPath.toUtf8().constData(), &db, SQLITE_OPEN_READONLY, nullptr) == SQLITE_OK) {
-            sqlite3_busy_timeout(db, 200);
-            const char *sql = "SELECT DISTINCT targettedResource "
-                              "FROM ResourceLink "
-                              "WHERE (initiatingAgent LIKE '%favorite%' OR initiatingAgent LIKE '%kickoff%') "
-                              "  AND (targettedResource LIKE 'applications:%' OR targettedResource LIKE '%.desktop%');";
+    auto normalizeKey = [](const QString &item) -> QString {
+        QString clean = item.trimmed();
+        if (clean.startsWith(QLatin1String("applications:"))) {
+            clean = clean.mid(13);
+        } else if (clean.startsWith(QLatin1String("file://"))) {
+            clean = QUrl(clean).toLocalFile();
+        } else if (clean.startsWith(QLatin1String("preferred://"))) {
+            QString pref = clean.mid(12).toLower();
+            if (pref == QLatin1String("browser")) {
+                clean = QStringLiteral("brave-browser.desktop");
+            }
+        }
+        return clean;
+    };
 
+    // 3. Die eigentliche Favoriten-MENGE steht in der kactivitymanagerd-Datenbank (ResourceLink).
+    // Plasma 6 (Kickoff/Kicker/Kickerdash) verlinkt Favoriten über den gemeinsamen Agent
+    // "org.kde.plasma.favorites.applications" – statsrc enthält nur die REIHENFOLGE und wird
+    // beim Hinzufügen/Entfernen nicht zuverlässig nachgeführt. Daher:
+    //   Menge = ResourceLink (global + aktuelle Aktivität), Reihenfolge = statsrc, Rest hinten an.
+    QStringList linkedRaw;
+    bool linkedQueryOk = false;
+    {
+        QString dbPath = QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation)
+                         + QStringLiteral("/kactivitymanagerd/resources/database");
+        sqlite3 *db = nullptr;
+        if (QFile::exists(dbPath) &&
+            sqlite3_open_v2(dbPath.toUtf8().constData(), &db, SQLITE_OPEN_READONLY, nullptr) == SQLITE_OK) {
+            sqlite3_busy_timeout(db, 200);
+            const char *sql = "SELECT targettedResource FROM ResourceLink "
+                              "WHERE initiatingAgent = 'org.kde.plasma.favorites.applications' "
+                              "  AND (usedActivity = ':global' OR usedActivity = ':any' OR usedActivity = ?1) "
+                              "ORDER BY rowid;";
             sqlite3_stmt *stmt = nullptr;
             if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
-                while (sqlite3_step(stmt) == SQLITE_ROW) {
+                const QByteArray act = currentActivity.toUtf8();
+                sqlite3_bind_text(stmt, 1, act.constData(), act.size(), SQLITE_TRANSIENT);
+                int rc;
+                while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
                     const char *resText = (const char *)sqlite3_column_text(stmt, 0);
-                    if (!resText) continue;
-                    QString res = QString::fromUtf8(resText).trimmed();
-                    if (res.startsWith(QLatin1String("applications:"))) {
-                        res = res.mid(13);
-                    } else if (res.startsWith(QLatin1String("file://"))) {
-                        res = QUrl(res).toLocalFile();
-                    }
-                    if (!res.isEmpty() && !seen.contains(res)) {
-                        seen.insert(res);
-                        orderedKeys.append(res);
-                    }
+                    if (resText) linkedRaw.append(QString::fromUtf8(resText));
                 }
+                linkedQueryOk = (rc == SQLITE_DONE);
                 sqlite3_finalize(stmt);
             }
-            sqlite3_close(db);
-        } else if (db) {
-            sqlite3_close(db);
+        }
+        if (db) sqlite3_close(db);
+    }
+
+    if (linkedQueryOk && !linkedRaw.isEmpty()) {
+        QSet<QString> linkedLower;
+        for (const auto &r : linkedRaw) linkedLower.insert(normalizeKey(r).toLower());
+        QSet<QString> seenLower;
+        // a) in der vom Nutzer festgelegten Reihenfolge – aber nur, was noch verlinkt ist
+        for (const auto &item : orderingRaw) {
+            QString key = normalizeKey(item);
+            if (key.isEmpty() || !linkedLower.contains(key.toLower()) || seenLower.contains(key.toLower())) continue;
+            seenLower.insert(key.toLower());
+            orderedKeys.append(key);
+        }
+        // b) neu hinzugefügte Favoriten, die (noch) nicht in der Reihenfolge stehen
+        for (const auto &r : linkedRaw) {
+            QString key = normalizeKey(r);
+            if (key.isEmpty() || seenLower.contains(key.toLower())) continue;
+            seenLower.insert(key.toLower());
+            orderedKeys.append(key);
+        }
+    } else {
+        // Fallback (ältere Plasma-Versionen / DB nicht lesbar): nur statsrc-Reihenfolge
+        for (const auto &item : orderingRaw) {
+            QString key = normalizeKey(item);
+            if (!key.isEmpty() && !seen.contains(key)) {
+                seen.insert(key);
+                orderedKeys.append(key);
+            }
         }
     }
 
