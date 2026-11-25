@@ -193,22 +193,29 @@ QVariantMap SettingsController::processMouseEvent(int qtButton) const
         code = 276; // BTN_EXTRA
         name = QStringLiteral("Mouse Forward (Button 5)");
         break;
-    case Qt::TaskButton:
-        code = 279; // BTN_TASK
-        name = QStringLiteral("Mouse Task (Button 8)");
-        break;
-    case Qt::ExtraButton4:
+    // Qt nummeriert die Zusatztasten in der Reihenfolge der Kernel-Codes:
+    // ExtraButton3 (= TaskButton) -> 0x115 BTN_FORWARD, ExtraButton4 -> 0x116 BTN_BACK,
+    // ExtraButton5 -> 0x117 BTN_TASK, ExtraButton6 -> 0x118 usw.
+    case Qt::ExtraButton3: // == Qt::TaskButton
         code = 277; // BTN_FORWARD
         name = QStringLiteral("Mouse Button 6");
         break;
-    case Qt::ExtraButton5:
+    case Qt::ExtraButton4:
         code = 278; // BTN_BACK
         name = QStringLiteral("Mouse Button 7");
         break;
+    case Qt::ExtraButton5:
+        code = 279; // BTN_TASK
+        name = QStringLiteral("Mouse Task (Button 8)");
+        break;
     default:
-        if (qtButton > 0) {
-            code = 271 + (qtButton & 0xFF);
-            name = QStringLiteral("Mouse Button %1").arg(code - 271);
+        // ExtraButton6 (0x100) und höher: Bitposition -> Kernel-Code (Bit 3 = ExtraButton1 = 275)
+        for (int bit = 8; bit < 27; ++bit) {
+            if (qtButton == (1 << bit)) {
+                code = 272 + bit;
+                name = QStringLiteral("Mouse Button %1").arg(bit + 1);
+                break;
+            }
         }
         break;
     }
@@ -637,6 +644,8 @@ void SettingsController::emitGesturesChanged(int dir)
     case 7: emit gestureRightUpChanged(); break;
     default: break;
     }
+    ++m_gestureRevision;
+    emit gestureRevisionChanged();
 }
 
 bool SettingsController::gesturesEnabled() const

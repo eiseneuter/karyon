@@ -7,6 +7,7 @@
 #include <QFile>
 #include <QIcon>
 #include <QCoreApplication>
+#include <csignal>
 
 namespace ProcessUtils {
 
@@ -107,6 +108,19 @@ inline QProcessEnvironment cleanHostEnvironment()
         env.remove(QStringLiteral("QT_XCB_GL_INTEGRATION"));
     }
 
+    // Sprache/Locale des Systems wiederherstellen (Karyon erzwingt für sich selbst Englisch)
+    for (const QString &var : {QStringLiteral("LC_ALL"), QStringLiteral("LANG"), QStringLiteral("LANGUAGE")}) {
+        const QString saved = QStringLiteral("KARYON_HOST_") + var;
+        if (!env.contains(saved)) continue;
+        const QString value = env.value(saved);
+        if (value == QStringLiteral("\x01unset")) {
+            env.remove(var);
+        } else {
+            env.insert(var, value);
+        }
+        env.remove(saved);
+    }
+
     env.remove(QStringLiteral("APPDIR"));
 
     // AppImage-Identität darf NIE an gestartete Programme vererbt werden:
@@ -129,12 +143,24 @@ inline QProcessEnvironment cleanHostEnvironment()
     return env;
 }
 
+// Bereitet einen QProcess so vor, dass das gestartete Programm nichts von Karyons
+// Sonderzustand erbt: saubere Umgebung, Standard-Signalbehandlung (Karyon ignoriert SIGPIPE)
+// und kein stderr, das in Karyons Filter-Pipe endet.
+inline void prepareDetached(QProcess &p)
+{
+    p.setProcessEnvironment(cleanHostEnvironment());
+    p.setStandardErrorFile(QProcess::nullDevice());
+    p.setChildProcessModifier([]() {
+        ::signal(SIGPIPE, SIG_DFL);
+    });
+}
+
 inline bool startDetachedHost(const QString &program, const QStringList &arguments = {})
 {
     QProcess p;
     p.setProgram(program);
     p.setArguments(arguments);
-    p.setProcessEnvironment(cleanHostEnvironment());
+    prepareDetached(p);
     return p.startDetached();
 }
 

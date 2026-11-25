@@ -41,6 +41,7 @@ class SettingsController : public QObject
     Q_PROPERTY(QString detectedLocaleName READ detectedLocaleName CONSTANT)
 
     Q_PROPERTY(bool gesturesEnabled READ gesturesEnabled WRITE setGesturesEnabled NOTIFY gesturesEnabledChanged)
+    Q_PROPERTY(int gestureRevision READ gestureRevision NOTIFY gestureRevisionChanged)
     Q_PROPERTY(bool showGestureTrail READ showGestureTrail WRITE setShowGestureTrail NOTIFY showGestureTrailChanged)
     Q_PROPERTY(bool isRecordingKey READ isRecordingKey WRITE setIsRecordingKey NOTIFY isRecordingKeyChanged)
     Q_PROPERTY(QString gestureLeft READ gestureLeft WRITE setGestureLeft NOTIFY gestureLeftChanged)
@@ -256,8 +257,13 @@ signals:
     void gestureRightUpChanged();
     void gestureLeftDownChanged();
     void gestureRightDownChanged();
+    void gestureRevisionChanged();
+
+public:
+    int gestureRevision() const { return m_gestureRevision; }
 
 private:
+    int m_gestureRevision = 0;
     void emitGesturesChanged(int dir);
 
     QQuickView *m_view = nullptr;

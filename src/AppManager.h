@@ -11,6 +11,7 @@ struct AppEntry {
     QString exec;
     QString comment;
     QString desktopFile;
+    bool hidden = false; // NoDisplay/Hidden: gültig für Fenster-Icon/-Titel, aber nie in Menüs oder Recent Apps
 };
 
 struct CategoryEntry {
@@ -34,6 +35,10 @@ public:
     static AppEntry findApp(const QString &desktopFileName, const QString &resourceClass);
     static void recordAppUsage(const QString &desktopFileName, const QString &resourceClass, int pid = 0, const QString &caption = QString());
     static void recordAppUsageById(const QString &appId);
+    // Verwirft alle Auflösungs-Caches (Desktop-Index, App-/Exec-/PID-/Steam-Caches).
+    // Aufzurufen, wenn sich die Programmliste (KSycoca) ändert.
+    static void invalidateCaches();
+    static AppEntry entryFromDesktopFile(const QString &path);
     static QString recentAppsFilePath();
 
     static bool isAppImage(const QString &path);

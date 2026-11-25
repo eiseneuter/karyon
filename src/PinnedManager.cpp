@@ -2,6 +2,9 @@
 #include <QDir>
 #include <QFileInfo>
 #include <QSettings>
+#include <QProcess>
+#include <QSet>
+#include <QRegularExpression>
 
 PinnedManager::PinnedManager()
 {
@@ -162,23 +165,26 @@ bool PinnedManager::itemMatchesApp(const PinnedItem &item, const QString &deskto
         return false;
     }
 
-    auto matchStem = [](const QString &a, const QString &b) {
+    // Vergleich über den "Stamm" einer Kennung: Pfad und .desktop weg, Reverse-DNS auf den
+    // letzten Bestandteil gekürzt (org.kde.dolphin -> dolphin). Programm-Endungen bleiben
+    // erhalten – sonst wären "a.exe" und "b.exe" beide nur noch "exe" und damit gleich.
+    auto stemOf = [](QString v) {
+        if (v.endsWith(QLatin1String(".desktop"))) v.chop(8);
+        int slash = v.lastIndexOf(QLatin1Char('/'));
+        if (slash >= 0) v = v.mid(slash + 1);
+        static const QRegularExpression rdnsRe(QStringLiteral("^[a-z]{2,6}(\\.[a-z0-9_-]+){2,}$"));
+        static const QRegularExpression binSuffixRe(QStringLiteral("\\.(exe|x86_64|x86|bin|appimage|sh|py|run)$"));
+        if (rdnsRe.match(v).hasMatch() && !binSuffixRe.match(v).hasMatch()) {
+            v = v.section(QLatin1Char('.'), -1);
+        }
+        return v;
+    };
+    auto matchStem = [&stemOf](const QString &a, const QString &b) {
         if (a.isEmpty() || b.isEmpty()) return false;
         if (a == b) return true;
-        QString aStem = a;
-        if (aStem.endsWith(QLatin1String(".desktop"))) aStem.chop(8);
-        int slashA = aStem.lastIndexOf(QLatin1Char('/'));
-        if (slashA >= 0) aStem = aStem.mid(slashA + 1);
-        int dotA = aStem.lastIndexOf(QLatin1Char('.'));
-        if (dotA >= 0) aStem = aStem.mid(dotA + 1);
-
-        QString bStem = b;
-        if (bStem.endsWith(QLatin1String(".desktop"))) bStem.chop(8);
-        int slashB = bStem.lastIndexOf(QLatin1Char('/'));
-        if (slashB >= 0) bStem = bStem.mid(slashB + 1);
-        int dotB = bStem.lastIndexOf(QLatin1Char('.'));
-        if (dotB >= 0) bStem = bStem.mid(dotB + 1);
-
+        const QString aStem = stemOf(a);
+        const QString bStem = stemOf(b);
+        if (aStem.isEmpty() || bStem.isEmpty()) return false;
         return (aStem == bStem || aStem == b || a == bStem);
     };
 
@@ -190,18 +196,36 @@ bool PinnedManager::itemMatchesApp(const PinnedItem &item, const QString &deskto
     QString itemExec = item.execOrPath.toLower().trimmed();
 
     // Executable name extraction (e.g. "thunderbird %u" -> "thunderbird", "/usr/bin/dolphin" -> "dolphin")
-    QString execStem = itemExec;
-    int firstSpace = execStem.indexOf(QLatin1Char(' '));
-    if (firstSpace > 0) execStem = execStem.left(firstSpace);
-    int lastSlash = execStem.lastIndexOf(QLatin1Char('/'));
-    if (lastSlash >= 0) execStem = execStem.mid(lastSlash + 1);
-    execStem = execStem.remove(QLatin1Char('"')).remove(QLatin1Char('\''));
+    // Erstes echtes Programm der Exec-Zeile; "env", VAR=wert und allgemeine Starter
+    // (wine, python, flatpak, steam steam://…) identifizieren keine App.
+    QString execStem;
+    {
+        const QStringList toks = QProcess::splitCommand(itemExec);
+        for (const QString &tok : toks) {
+            if (tok == QLatin1String("env") || tok.endsWith(QLatin1String("/env"))) continue;
+            if (tok.startsWith(QLatin1Char('-'))) continue;
+            if (tok.contains(QLatin1Char('=')) && !tok.startsWith(QLatin1Char('/'))) continue;
+            execStem = tok.section(QLatin1Char('/'), -1);
+            break;
+        }
+        static const QSet<QString> genericLaunchers = {
+            QStringLiteral("wine"), QStringLiteral("wine64"), QStringLiteral("python"), QStringLiteral("python3"),
+            QStringLiteral("bash"), QStringLiteral("sh"), QStringLiteral("flatpak"), QStringLiteral("java"),
+            QStringLiteral("electron"), QStringLiteral("gtk-launch"), QStringLiteral("xdg-open"),
+            QStringLiteral("snap"), QStringLiteral("umu-run"), QStringLiteral("plasmawindowed")
+        };
+        if (genericLaunchers.contains(execStem) ||
+            (execStem == QLatin1String("steam") && itemExec.contains(QLatin1String("steam://")))) {
+            execStem.clear();
+        }
+    }
 
     if (matchStem(itemId, idLow) || matchStem(itemId, rcLow) ||
         matchStem(itemDf, idLow) || matchStem(itemDf, rcLow) ||
         (!execStem.isEmpty() && (matchStem(execStem, idLow) || matchStem(execStem, rcLow))) ||
-        (!idLow.isEmpty() && (itemName == idLow || (!itemName.isEmpty() && (itemId.contains(idLow) || idLow.contains(itemId))))) ||
-        (!rcLow.isEmpty() && (itemName == rcLow || (!rcLow.isEmpty() && (itemId.contains(rcLow) || rcLow.contains(itemId))))) ||
+        // Kein Teilwort-Vergleich: "steam" darf nicht "steam_app_123" treffen, "code" nicht "codeblocks".
+        (!idLow.isEmpty() && itemName == idLow) ||
+        (!rcLow.isEmpty() && itemName == rcLow) ||
         (!itemExec.isEmpty() && (matchStem(itemExec, idLow) || matchStem(itemExec, rcLow)))) {
         return true;
     }
@@ -220,9 +244,9 @@ bool PinnedManager::isAppPinned(const QString &desktopEntryName, const QString &
 
 bool PinnedManager::isFilePinned(const QString &filePath) const
 {
-    QString pLow = filePath.toLower().trimmed();
+    const QString p = filePath.trimmed();
     for (const auto &item : m_items) {
-        if (item.type == PinnedItemType::File && item.execOrPath.toLower().trimmed() == pLow) {
+        if (item.type == PinnedItemType::File && item.execOrPath.trimmed() == p) {
             return true;
         }
     }
@@ -231,7 +255,8 @@ bool PinnedManager::isFilePinned(const QString &filePath) const
 
 void PinnedManager::pinApp(const QString &id, const QString &name, const QString &exec, const QString &icon, const QString &desktopFile)
 {
-    if (isAppPinned(id)) return;
+    // Ein Eintrag ohne Kennung würde auf JEDE App passen
+    if (id.trimmed().isEmpty() || isAppPinned(id)) return;
     PinnedItem item;
     item.type = PinnedItemType::App;
     item.id = id;
@@ -268,9 +293,9 @@ void PinnedManager::unpinApp(const QString &id, const QString &resourceClass)
 
 void PinnedManager::unpinFile(const QString &filePath)
 {
-    QString pLow = filePath.toLower().trimmed();
+    const QString p = filePath.trimmed();
     for (int i = m_items.size() - 1; i >= 0; --i) {
-        if (m_items[i].type == PinnedItemType::File && m_items[i].execOrPath.toLower().trimmed() == pLow) {
+        if (m_items[i].type == PinnedItemType::File && m_items[i].execOrPath.trimmed() == p) {
             m_items.removeAt(i);
         }
     }

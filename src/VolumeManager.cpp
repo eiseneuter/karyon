@@ -42,7 +42,16 @@ void VolumeManager::refresh()
     QProcess proc;
     proc.setProcessEnvironment(ProcessUtils::cleanHostEnvironment());
     proc.start(QStringLiteral("wpctl"), {QStringLiteral("get-volume"), QStringLiteral("@DEFAULT_AUDIO_SINK@")});
-    if (proc.waitForFinished(100) && proc.exitStatus() == QProcess::NormalExit && proc.exitCode() == 0) {
+    const bool wpctlFinished = proc.waitForFinished(150);
+    if (!wpctlFinished && proc.state() != QProcess::NotRunning && m_hasWpctl) {
+        // wpctl ist vorhanden, war nur gerade zu langsam (Systemlast): letzten Stand behalten.
+        // Früher schaltete das dauerhaft auf pactl um – ohne pactl ging die Lautstärke dann gar nicht mehr.
+        proc.kill();
+        proc.waitForFinished(50);
+        emit volumeChanged(m_volume, m_muted, m_maxVolume);
+        return;
+    }
+    if (wpctlFinished && proc.exitStatus() == QProcess::NormalExit && proc.exitCode() == 0) {
         QString out = QString::fromUtf8(proc.readAllStandardOutput()).trimmed();
         int volIdx = out.indexOf(QLatin1String("Volume:"));
         if (volIdx >= 0) {

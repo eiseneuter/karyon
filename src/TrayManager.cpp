@@ -858,10 +858,12 @@ void TrayManager::syncPlasmoidConfig(const QString &pluginId)
             QString line = in.readLine().trimmed();
             if (line.isEmpty()) continue;
             if (line.startsWith(QLatin1Char('[')) && line.endsWith(QLatin1Char(']'))) {
-                if (!currentSection.name.isEmpty()) {
+                // Auch den namenlosen Abschnitt vor der ersten Überschrift sichern – sonst
+                // wanderten dessen Einträge beim Zurückschreiben in die erste Gruppe.
+                if (!currentSection.name.isEmpty() || !currentSection.entries.isEmpty()) {
                     windowedSections.append(currentSection);
-                    currentSection.entries.clear();
                 }
+                currentSection = Section();
                 currentSection.name = line;
 
                 static const QRegularExpression appletRe(QStringLiteral("^\\[Applets\\]\\[(\\d+)\\]$"));
@@ -875,9 +877,12 @@ void TrayManager::syncPlasmoidConfig(const QString &pluginId)
                 QString k = line.left(eq).trimmed();
                 QString v = line.mid(eq + 1).trimmed();
                 currentSection.entries.append({k, v});
+            } else {
+                // Zeilen ohne "=" (Kommentare o.ä.) unverändert erhalten
+                currentSection.entries.append({QStringLiteral("\x01raw"), line});
             }
         }
-        if (!currentSection.name.isEmpty()) {
+        if (!currentSection.name.isEmpty() || !currentSection.entries.isEmpty()) {
             windowedSections.append(currentSection);
         }
         windowedFile.close();
@@ -932,9 +937,15 @@ void TrayManager::syncPlasmoidConfig(const QString &pluginId)
         QTextStream out(&sf);
         for (int i = 0; i < windowedSections.size(); ++i) {
             const auto &sec = windowedSections.at(i);
-            out << sec.name << "\n";
+            if (!sec.name.isEmpty()) {
+                out << sec.name << "\n";
+            }
             for (const auto &e : sec.entries) {
-                out << e.first << "=" << e.second << "\n";
+                if (e.first == QStringLiteral("\x01raw")) {
+                    out << e.second << "\n";
+                } else {
+                    out << e.first << "=" << e.second << "\n";
+                }
             }
             if (i < windowedSections.size() - 1) {
                 out << "\n";

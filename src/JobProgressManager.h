@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QObject>
+#include <QDBusContext>
 #include <QString>
 #include <QHash>
 #include <QSet>
@@ -23,7 +24,7 @@ private:
     JobProgressManager *m_mgr = nullptr;
 };
 
-class JobProgressManager : public QObject
+class JobProgressManager : public QObject, protected QDBusContext
 {
     Q_OBJECT
 
@@ -54,5 +55,6 @@ private:
 
     QHash<QString, int> m_appProgress;
     QHash<QString, QString> m_clientToApp;
+    QHash<QString, QString> m_unitySenderToApp; // D-Bus-Absender -> App (Unity-LauncherEntry-Fortschritt)
     QHash<QString, QString> m_pathToApp;
 };

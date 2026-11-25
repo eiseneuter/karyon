@@ -235,7 +235,7 @@ void MediaManager::refresh(const QList<WindowInfo> &windows)
         );
         msgPlayer << QStringLiteral("org.mpris.MediaPlayer2.Player");
 
-        QDBusReply<QVariantMap> replyPlayer = bus.call(msgPlayer);
+        QDBusReply<QVariantMap> replyPlayer = bus.call(msgPlayer, QDBus::Block, 250);
         if (!replyPlayer.isValid()) {
             continue;
         }
@@ -352,7 +352,7 @@ void MediaManager::refresh(const QList<WindowInfo> &windows)
 
         QString appName;
         QString desktopEntry;
-        QDBusReply<QVariantMap> replyRoot = bus.call(msgRoot);
+        QDBusReply<QVariantMap> replyRoot = bus.call(msgRoot, QDBus::Block, 250);
         if (replyRoot.isValid()) {
             appName = replyRoot.value().value(QStringLiteral("Identity")).toString().trimmed();
             desktopEntry = replyRoot.value().value(QStringLiteral("DesktopEntry")).toString().trimmed();

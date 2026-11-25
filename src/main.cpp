@@ -328,6 +328,15 @@ int main(int argc, char *argv[])
 
     // Enforce English UI so all Qt dialogs (e.g. QColorDialog), buttons, and tooltips
     // remain strictly in English regardless of host system language.
+    // Die Sprache des Systems vorher sichern: über Karyon gestartete Programme sollen in der
+    // Sprache des Benutzers laufen, nicht in Karyons erzwungenem Englisch
+    // (ProcessUtils::cleanHostEnvironment() stellt die Werte wieder her).
+    for (const char *var : {"LC_ALL", "LANG", "LANGUAGE"}) {
+        const QByteArray saved = QByteArray("KARYON_HOST_") + var;
+        if (!qEnvironmentVariableIsSet(saved.constData())) {
+            qputenv(saved.constData(), qEnvironmentVariableIsSet(var) ? qgetenv(var) : QByteArray("\x01unset"));
+        }
+    }
     qputenv("LC_ALL", "C.UTF-8");
     qputenv("LANG", "C.UTF-8");
     qputenv("LANGUAGE", "en_US:en");
@@ -473,13 +482,25 @@ int main(int argc, char *argv[])
     monitor.setGameModeEnabled(SettingsManager::instance().gameModeEnabled());
     monitor.setPerformanceMode(SettingsManager::instance().performanceMode());
     monitor.setGameModeActive(kwinBridge.isActiveWindowGame());
+    auto applyGestureMask = [&monitor]() {
+        int mask = 0;
+        if (SettingsManager::instance().gesturesEnabled()) {
+            for (int dir = 0; dir < 8; ++dir) {
+                const QString action = SettingsManager::instance().gestureAction(dir);
+                if (!action.isEmpty() && action != QLatin1String("none")) mask |= (1 << dir);
+            }
+        }
+        monitor.setGestureMask(mask);
+    };
+    applyGestureMask();
     monitor.setTrigger(
         SettingsManager::instance().triggerType(),
         SettingsManager::instance().triggerButton(),
         SettingsManager::instance().triggerKeySeq()
     );
 
-    QObject::connect(&SettingsManager::instance(), &SettingsManager::settingsChanged, [&monitor]() {
+    QObject::connect(&SettingsManager::instance(), &SettingsManager::settingsChanged, [&monitor, applyGestureMask]() {
+        applyGestureMask();
         monitor.setHoldTriggerMs(SettingsManager::instance().triggerHoldMs());
         monitor.setOverlayMouseSpeed(SettingsManager::instance().overlayMouseSpeed());
         monitor.setGameModeEnabled(SettingsManager::instance().gameModeEnabled());
@@ -692,7 +713,8 @@ int main(int argc, char *argv[])
         inGesture = false;
         kwinBridge.queryCursor();
     };
-    QObject::connect(&monitor, &InputMonitor::rightPressed, &kwinBridge, onTriggerPress, Qt::QueuedConnection);
+    // rightPressed und triggerPressed werden immer gemeinsam gesendet – nur eines verbinden,
+    // sonst wird die Cursorposition bei jedem Druck doppelt bei KWin abgefragt.
     QObject::connect(&monitor, &InputMonitor::triggerPressed, &kwinBridge, onTriggerPress, Qt::QueuedConnection);
 
     QObject::connect(&kwinBridge, &KWinBridge::cursorPosUpdated, [&gestureStartPos, &inGesture, &overlay](const QPoint &pos) {
@@ -783,6 +805,14 @@ int main(int argc, char *argv[])
     QObject::connect(&kwinBridge, &KWinBridge::showDesktopChanged, &overlay, &CircleOverlay::setDesktopShowing);
 
     // Abbruch-Aktion (z.B. Linksklick bei RMB-Trigger, RMT bei Custom-Trigger, ESC) -> Schließt Overlay sofort ohne Aktion
+    // Klick knapp über der Haltezeit: Overlay ohne Aktion schließen, danach reicht der
+    // Eingabe-Thread den Rechtsklick an das Fenster darunter weiter.
+    QObject::connect(&monitor, &InputMonitor::lateClick, &overlay, [&overlay, &monitor]() {
+        KLOG("Main", "lateClick signal -> hide overlay, forward click");
+        overlay.hideOverlay();
+        monitor.confirmLateClick();
+    }, Qt::QueuedConnection);
+
     QObject::connect(&monitor, &InputMonitor::holdCancelled, &overlay, [&overlay, &monitor]() {
         KLOG("Main", "holdCancelled signal");
         overlay.hideOverlay();

@@ -161,6 +161,12 @@ void JobProgressManager::onUnityUpdate(const QString &appUri, const QMap<QString
     QString appKey = cleanAppKey(appUri);
     if (appKey.isEmpty()) return;
 
+    // Absender merken: Beendet sich die App mitten in einem Download, kommt kein
+    // "progress-visible=false" mehr – der Ring würde sonst bis zum Karyon-Neustart stehen bleiben.
+    if (calledFromDBus()) {
+        m_unitySenderToApp.insert(message().service(), appKey);
+    }
+
     bool visible = properties.value(QStringLiteral("progress-visible"), false).toBool();
     if (visible && properties.contains(QStringLiteral("progress"))) {
         double p = properties.value(QStringLiteral("progress")).toDouble();
@@ -199,9 +205,29 @@ void JobProgressManager::handleJobViewMessage(const QDBusMessage &msg)
         if (!desktopEntry.isEmpty()) {
             m_clientToApp[sender] = cleanAppKey(desktopEntry);
         }
-    } else if (member == QLatin1String("setPercent")) {
-        if (!args.isEmpty()) {
-            uint p = args.at(0).toUInt();
+    } else if (member == QLatin1String("setPercent") || member == QLatin1String("update")) {
+        // JobViewV2: setPercent(uint). JobViewV3 (Plasma 6): update(a{sv}) mit Schlüssel "percent".
+        bool havePercent = false;
+        uint p = 0;
+        if (member == QLatin1String("setPercent")) {
+            if (!args.isEmpty()) {
+                p = args.at(0).toUInt();
+                havePercent = true;
+            }
+        } else if (!args.isEmpty()) {
+            QVariantMap props;
+            const QVariant a0 = args.at(0);
+            if (a0.canConvert<QDBusArgument>()) {
+                props = qdbus_cast<QVariantMap>(a0.value<QDBusArgument>());
+            } else {
+                props = a0.toMap();
+            }
+            if (props.contains(QStringLiteral("percent"))) {
+                p = props.value(QStringLiteral("percent")).toUInt();
+                havePercent = true;
+            }
+        }
+        if (havePercent) {
             QString path = msg.path();
             if (m_clientToApp.contains(sender)) {
                 m_pathToApp[path] = m_clientToApp.value(sender);
@@ -233,6 +259,9 @@ void JobProgressManager::onNameOwnerChanged(const QString &name, const QString &
         if (m_clientToApp.contains(name)) {
             QString appKey = m_clientToApp.take(name);
             removeAppProgress(appKey);
+        }
+        if (m_unitySenderToApp.contains(name)) {
+            removeAppProgress(m_unitySenderToApp.take(name));
         }
     }
 }

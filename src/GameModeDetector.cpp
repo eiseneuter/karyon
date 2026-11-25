@@ -6,6 +6,9 @@
 #include <QByteArray>
 #include <QStringList>
 #include <QSet>
+#include <QHash>
+#include <QDateTime>
+#include <QRegularExpression>
 #include <KService>
 #include <iostream>
 
@@ -268,10 +271,9 @@ bool GameModeDetector::checkProtonAndLauncherEnv(int pid, const QString &resourc
             "SteamAppId=",
             "SteamGameId=",
             "LUTRIS_GAME_UUID=",
-            "HEROIC_APP_NAME=",
-            "WINEFSYNC=",
-            "WINEESYNC=",
-            "DXVK_STATE_CACHE_PATH="
+            "HEROIC_APP_NAME="
+            // WINEESYNC/WINEFSYNC/DXVK_STATE_CACHE_PATH bewusst NICHT: wer sie global exportiert
+            // (verbreiteter Tweak), hätte sonst jedes Programm als Spiel – und damit keine Auslösetaste.
         };
 
         for (const auto &marker : markers) {
@@ -323,16 +325,65 @@ bool GameModeDetector::checkDesktopCategory(const QString &desktopFileName, cons
     return checkService(desktopFileName) || checkService(resourceClass);
 }
 
+namespace {
+struct MapsFlags {
+    bool graphicsLayer = false; // DXVK / VKD3D / Direct3D-DLLs geladen
+    bool engine = false;        // Unity, Unreal, Godot, LOVE, Pygame
+    qint64 timestampMs = 0;
+};
+
+// Liest die GESAMTE Bibliotheksliste des Prozesses. Früher wurden nur die ersten 32 KB gelesen –
+// Spiele-Bibliotheken stehen aber meist weit hinten und wurden so nie gefunden.
+// Ergebnis 20 s pro PID gemerkt (die Prüfung läuft bei jedem Fensterwechsel).
+MapsFlags scanProcessMaps(int pid)
+{
+    static QHash<int, MapsFlags> s_cache;
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    auto it = s_cache.constFind(pid);
+    if (it != s_cache.constEnd() && (now - it->timestampMs) < 20000) {
+        return *it;
+    }
+    if (s_cache.size() > 256) s_cache.clear();
+
+    MapsFlags flags;
+    flags.timestampMs = now;
+    QFile mapsFile(QStringLiteral("/proc/%1/maps").arg(pid));
+    if (mapsFile.open(QIODevice::ReadOnly)) {
+        const QByteArray maps = mapsFile.read(32 * 1024 * 1024);
+        mapsFile.close();
+        flags.graphicsLayer = maps.contains("dxgi") || maps.contains("d3d11") || maps.contains("d3d12") ||
+                              maps.contains("dxvk") || maps.contains("vkd3d");
+        flags.engine = maps.contains("libUnityPlayer.so") || maps.contains("UnityPlayer.so") ||
+                       maps.contains("libUE4") || maps.contains("libUnrealEngine") ||
+                       maps.contains("libgodot") || maps.contains("liblove") ||
+                       maps.contains("/pygame/");
+    }
+    s_cache.insert(pid, flags);
+    return flags;
+}
+} // namespace
+
 bool GameModeDetector::checkProcessPathAndWine(int pid, const QString &resourceClass)
 {
     if (pid <= 0) return false;
 
     QString exePath = QFile::symLinkTarget(QStringLiteral("/proc/%1/exe").arg(pid));
+    // Nur das gestartete Programm selbst betrachten (argv[0], bei Interpretern zusätzlich das
+    // Skript in argv[1]) – NICHT die übrigen Argumente. Sonst gilt z.B. "dolphin ~/Games" oder
+    // ein Editor mit einer Datei aus /Games/ als Spiel.
     QString cmdline;
     QFile cmdFile(QStringLiteral("/proc/%1/cmdline").arg(pid));
     if (cmdFile.open(QIODevice::ReadOnly)) {
-        cmdline = QString::fromUtf8(cmdFile.read(4096));
+        const QList<QByteArray> argv = cmdFile.read(8192).split('\0');
         cmdFile.close();
+        if (!argv.isEmpty()) {
+            cmdline = QString::fromUtf8(argv[0]);
+            static const QRegularExpression interpRe(
+                QStringLiteral("(^|/)(python[0-9.]*|bash|sh|java|mono|wine(64)?(-preloader)?|proton|umu-run)$"));
+            if (argv.size() > 1 && interpRe.match(cmdline).hasMatch()) {
+                cmdline += QLatin1Char(' ') + QString::fromUtf8(argv[1]);
+            }
+        }
     }
 
     auto pathMatches = [](const QString &p) {
@@ -370,16 +421,8 @@ bool GameModeDetector::checkProcessPathAndWine(int pid, const QString &resourceC
                   exeName.endsWith(QLatin1String(".exe"), Qt::CaseInsensitive) ||
                   resourceClass.endsWith(QLatin1String(".exe"), Qt::CaseInsensitive);
 
-    if (isWine) {
-        QFile mapsFile(QStringLiteral("/proc/%1/maps").arg(pid));
-        if (mapsFile.open(QIODevice::ReadOnly)) {
-            QByteArray maps = mapsFile.read(32768);
-            mapsFile.close();
-            if (maps.contains("dxgi") || maps.contains("d3d11") || maps.contains("d3d12") ||
-                maps.contains("dxvk") || maps.contains("vkd3d")) {
-                return true;
-            }
-        }
+    if (isWine && scanProcessMaps(pid).graphicsLayer) {
+        return true;
     }
 
     return false;
@@ -389,20 +432,5 @@ bool GameModeDetector::checkEngines(int pid)
 {
     if (pid <= 0) return false;
 
-    QFile mapsFile(QStringLiteral("/proc/%1/maps").arg(pid));
-    if (mapsFile.open(QIODevice::ReadOnly)) {
-        QByteArray maps = mapsFile.read(32768);
-        mapsFile.close();
-
-        if (maps.contains("libUnityPlayer.so") ||
-            maps.contains("libUE4") ||
-            maps.contains("libUnrealEngine") ||
-            maps.contains("libgodot") ||
-            maps.contains("liblove") ||
-            maps.contains("/pygame/")) {
-            return true;
-        }
-    }
-
-    return false;
+    return scanProcessMaps(pid).engine;
 }

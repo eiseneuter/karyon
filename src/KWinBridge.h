@@ -36,13 +36,20 @@ public:
     bool isActiveWindowGame() const;
     QPoint lastCursorPos() const;
     QList<WindowInfo> lastWindows() const;
-    QString activeWindowId() const { return m_mruOrder.isEmpty() ? QString() : m_mruOrder.first(); }
+    // Das Fenster, das gerade wirklich den Fokus hat (auch Dialoge). Nur wenn KWin keines
+    // gemeldet hat, das zuletzt aktive normale Fenster.
+    QString activeWindowId() const
+    {
+        if (!m_focusedId.isEmpty()) return m_focusedId;
+        return m_mruOrder.isEmpty() ? QString() : m_mruOrder.first();
+    }
 
 public slots:
     Q_SCRIPTABLE void onDaemonInit(const QString &json);
     Q_SCRIPTABLE void onWindowActivated(const QString &id, const QString &rc, const QString &df, const QString &cap, bool min, int pid = 0);
     Q_SCRIPTABLE void onWindowAdded(const QString &id, const QString &rc, const QString &df, const QString &cap, bool min, int pid = 0);
     Q_SCRIPTABLE void onWindowRemoved(const QString &id);
+    Q_SCRIPTABLE void onOtherActivated(const QString &id);
     Q_SCRIPTABLE void reportCursorPos(int x, int y);
     Q_SCRIPTABLE void reportCursorPos(double x, double y);
     Q_SCRIPTABLE void onShowDesktopDone(bool showing, const QString &json);
@@ -62,6 +69,9 @@ private:
     QPoint m_lastPos{0, 0};
     QHash<QString, WindowInfo> m_knownWindows;
     QStringList m_mruOrder;
+    bool m_focusOnDesktop = false;
+    QString m_focusedId; // tatsächlich fokussiertes Fenster laut KWin (leer = Desktop/keines)
+    QDBusServiceWatcher *m_kwinWatcher = nullptr;
     int m_counter = 0;
     int m_daemonSid = -1;
     QString m_daemonScriptPath;

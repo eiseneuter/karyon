@@ -422,7 +422,12 @@ void InputMonitor::setTrigger(const QString &type, int button, const QString &ke
     m_triggerInitialized = true;
     m_triggerType.store(newType);
     m_triggerButton.store(newBtn);
-    m_triggerKeyCodes = std::move(newKeyCodes);
+    {
+        // Der Eingabe-Thread liest die Tastenliste – nur unter Sperre austauschen
+        std::lock_guard<std::mutex> lock(m_sharedMutex);
+        m_triggerKeyCodes = std::move(newKeyCodes);
+    }
+    m_triggerGen.fetch_add(1);
 
     if (changed) {
         std::cout << "[InputMonitor] Trigger configured: type=" << (newType == 1 ? "keyboard" : "mouse")
@@ -664,11 +669,25 @@ void InputMonitor::tryGrabPendingDevices()
         }
     }
 
+    publishGrabbedSnapshot();
+
     if (newlyGrabbed) {
         QMetaObject::invokeMethod(this, [this]() {
             syncKWinMouseSettings();
         }, Qt::QueuedConnection);
     }
+}
+
+// Der GUI-Thread darf m_devices nicht direkt lesen (der Eingabe-Thread fügt beim Ein-/Ausstecken
+// Geräte hinzu und entfernt sie). Er bekommt stattdessen diese Kopie.
+void InputMonitor::publishGrabbedSnapshot()
+{
+    std::vector<DeviceInfo> snap;
+    for (const auto &dev : m_devices) {
+        if (dev.grabbed) snap.push_back(dev);
+    }
+    std::lock_guard<std::mutex> lock(m_sharedMutex);
+    m_grabbedSnapshot = std::move(snap);
 }
 
 void InputMonitor::syncKWinMouseSettings()
@@ -678,7 +697,12 @@ void InputMonitor::syncKWinMouseSettings()
     uint16_t targetProduct = 0;
     QString targetDevName;
 
-    for (const auto &dev : m_devices) {
+    std::vector<DeviceInfo> devices;
+    {
+        std::lock_guard<std::mutex> lock(m_sharedMutex);
+        devices = m_grabbedSnapshot;
+    }
+    for (const auto &dev : devices) {
         if (dev.grabbed && !dev.path.empty()) {
             std::string fname = fs::path(dev.path).filename().string();
             if (!fname.empty()) {
@@ -1156,6 +1180,7 @@ void InputMonitor::workerLoop()
 
     std::vector<pollfd> pfds;
     auto rebuildPfds = [&pfds, this]() {
+        publishGrabbedSnapshot();
         pfds.clear();
         for (const auto &dev : m_devices) {
             pfds.push_back({dev.fd, POLLIN, 0});
@@ -1170,6 +1195,8 @@ void InputMonitor::workerLoop()
     rebuildPfds();
 
     std::vector<bool> activeKeys(KEY_CNT, false);
+    std::vector<int> triggerKeys; // lokale Kopie von m_triggerKeyCodes (siehe m_triggerGen)
+    int triggerKeysGen = -1;
     std::vector<bool> uinputBtnDown(KEY_MAX + 1, false);
 
     auto emitUInputButton = [&](uint16_t code, int32_t val) {
@@ -1201,6 +1228,17 @@ void InputMonitor::workerLoop()
         }
     };
 
+    // Klick an der Haltezeit-Grenze: Wird der Auslöser direkt nach dem Öffnen des Overlays
+    // wieder losgelassen (ohne Mausbewegung), war das ein etwas zu langer Klick und kein Halten.
+    // Dann Overlay schließen und den Klick nachreichen, sobald das Overlay wirklich weg ist.
+    auto triggeredAt = std::chrono::steady_clock::now();
+    float movedSinceTrigger = 0.0f;
+    bool lateClickAwaiting = false;
+    bool lateClickConfirmed = false;
+    int lateClickButton = BTN_RIGHT;
+    auto lateClickAt = std::chrono::steady_clock::now();
+    auto lateClickDeadline = std::chrono::steady_clock::now();
+
     int pendingHotplugRetries = 0;
     auto lastHotplugCheck = std::chrono::steady_clock::now();
     auto lastIdleScan = std::chrono::steady_clock::now();
@@ -1219,7 +1257,7 @@ void InputMonitor::workerLoop()
         tryGrabPendingDevices();
 
         int pollTimeout = 250;
-        if (state == State::Pending) {
+        if (state == State::Pending || lateClickAwaiting) {
             pollTimeout = 5;
         } else if (state == State::Triggered) {
             pollTimeout = m_performanceMode.load() ? 33 : 11;
@@ -1232,6 +1270,21 @@ void InputMonitor::workerLoop()
 
         auto now = std::chrono::steady_clock::now();
         int currentTriggerBtn = m_triggerButton.load();
+
+        if (lateClickAwaiting) {
+            if (!lateClickConfirmed && m_lateClickConfirmed.exchange(false)) {
+                lateClickConfirmed = true;
+                lateClickAt = now + std::chrono::milliseconds(LATE_CLICK_SETTLE_MS);
+            }
+            if ((lateClickConfirmed && now >= lateClickAt) || now >= lateClickDeadline) {
+                lateClickAwaiting = false;
+                KLOG("Input", "Late click forwarded (confirmed=%d)", lateClickConfirmed ? 1 : 0);
+                if (m_uinputFd >= 0) {
+                    emitUInputButton(static_cast<uint16_t>(lateClickButton), 1);
+                    emitUInputButton(static_cast<uint16_t>(lateClickButton), 0);
+                }
+            }
+        }
 
         if (state == State::Triggered && (aimX != lastEmittedAimX || aimY != lastEmittedAimY)) {
             auto elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(now - lastCursorMovedEmitTime).count();
@@ -1247,13 +1300,17 @@ void InputMonitor::workerLoop()
         if (state == State::Pending) {
             auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - pressTime).count();
             bool isLmbDrag = m_leftDown.load();
-            if ((dragDistance < 14.0f || isLmbDrag) && elapsed >= m_holdTriggerMs.load()) {
+            const bool keyboardTrigger = (m_triggerType.load() == 1);
+            if ((dragDistance < STILL_LIMIT || isLmbDrag) && elapsed >= m_holdTriggerMs.load()) {
                 if (trailActive) {
                     trailActive = false;
                     emit gestureFinished();
                 }
                 state = State::Triggered;
-                KLOG("Input", "State transition: Pending -> Triggered (holdTriggered after %lld ms)", elapsed);
+                triggeredAt = now;
+                movedSinceTrigger = 0.0f;
+                KLOG("Input", "State transition: Pending -> Triggered (holdTriggered after %lld ms, moved=%.0f net=%d/%d)",
+                     static_cast<long long>(elapsed), static_cast<double>(dragDistance), deltaX, deltaY);
                 subpixelX = 0.0;
                 subpixelY = 0.0;
                 aimX = deltaX;
@@ -1263,17 +1320,24 @@ void InputMonitor::workerLoop()
                 lastCursorMovedEmitTime = std::chrono::steady_clock::now();
                 emit holdTriggered(deltaX, deltaY);
                 emit cursorMoved(aimX, aimY);
-            } else if (!isLmbDrag && dragDistance >= 14.0f && elapsed > GESTURE_TIME_WINDOW_MS) {
+            } else if (!isLmbDrag && dragDistance >= STILL_LIMIT && elapsed > GESTURE_TIME_WINDOW_MS) {
                 if (trailActive) {
                     trailActive = false;
                     emit gestureFinished();
                 }
-                state = State::Dragging;
                 pendingGestureDir = -1;
-                for (const auto &dev : m_devices) {
-                    if (dev.grabbed && m_uinputFd >= 0) {
-                        emitUInputButton(static_cast<uint16_t>(currentTriggerBtn), 1);
-                        break;
+                if (keyboardTrigger) {
+                    // Tastatur-Auslöser: es gibt keine Maustaste, die "gezogen" werden könnte.
+                    // Ohne diese Abzweigung bliebe eine virtuelle rechte Maustaste gedrückt.
+                    // Idle (nicht Cancelled), damit Mausklicks bei gehaltener Taste normal durchgehen.
+                    state = State::Idle;
+                } else {
+                    state = State::Dragging;
+                    for (const auto &dev : m_devices) {
+                        if (dev.grabbed && m_uinputFd >= 0) {
+                            emitUInputButton(static_cast<uint16_t>(currentTriggerBtn), 1);
+                            break;
+                        }
                     }
                 }
             }
@@ -1326,6 +1390,13 @@ void InputMonitor::workerLoop()
                     break;
                 }
             }
+        }
+
+        // Nach einem Rescan passen die pfds-Indizes nicht mehr zu m_devices/m_keyboards:
+        // erst neu aufbauen, dann im nächsten Durchlauf auswerten.
+        if (needsRebuild) {
+            rebuildPfds();
+            continue;
         }
 
         // 2. Trennungs- und Fehlererkennung an FDs
@@ -1611,11 +1682,27 @@ void InputMonitor::workerLoop()
                                     lastEmittedAimY = aimY;
                                     emit cursorMoved(aimX, aimY);
                                 }
+                                const auto sinceTrigger = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                    std::chrono::steady_clock::now() - triggeredAt).count();
                                 state = State::Idle;
-                                KLOG("Input", "State transition: Triggered -> Idle (trigger released)");
                                 pendingGestureDir = -1;
                                 subpixelX = 0.0;
                                 subpixelY = 0.0;
+                                if (isMouseTrigger && !m_leftDown.load() && sinceTrigger < LATE_CLICK_GRACE_MS &&
+                                    movedSinceTrigger < LATE_CLICK_MOVE_LIMIT && dev.grabbed && m_uinputFd >= 0) {
+                                    KLOG("Input", "State transition: Triggered -> Idle (late click: released %lld ms after open, moved=%.0f)",
+                                         static_cast<long long>(sinceTrigger), static_cast<double>(movedSinceTrigger));
+                                    m_lateClickConfirmed.store(false);
+                                    lateClickAwaiting = true;
+                                    lateClickConfirmed = false;
+                                    lateClickButton = currentTriggerBtn;
+                                    lateClickDeadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(250);
+                                    emit lateClick();
+                                    releaseAllUInputButtons();
+                                    continue;
+                                }
+                                KLOG("Input", "State transition: Triggered -> Idle (trigger released %lld ms after open)",
+                                     static_cast<long long>(sinceTrigger));
                                 emit holdReleased();
                                 releaseAllUInputButtons();
                             }
@@ -1649,16 +1736,20 @@ void InputMonitor::workerLoop()
                         if (isTrigger) {
                             if (ev.value == 0) { // Vor Haltezeit losgelassen -> Kurzklick
                                 state = State::Idle;
+                                KLOG("Input", "State transition: Pending -> Idle (short click after %lld ms, moved=%.0f net=%d/%d, forwarded=%d)",
+                                     static_cast<long long>(std::chrono::duration_cast<std::chrono::milliseconds>(
+                                         std::chrono::steady_clock::now() - pressTime).count()),
+                                     static_cast<double>(dragDistance), deltaX, deltaY, (dev.grabbed && m_uinputFd >= 0) ? 1 : 0);
                                 pendingGestureDir = -1;
                                 if (trailActive) {
                                     trailActive = false;
                                     emit gestureFinished();
                                 }
-                                if (dragDistance < 14.0f) {
-                                    if (dev.grabbed && m_uinputFd >= 0) {
-                                        emitUInputButton(static_cast<uint16_t>(currentTriggerBtn), 1);
-                                        emitUInputButton(static_cast<uint16_t>(currentTriggerBtn), 0);
-                                    }
+                                // Kurzer Klick: immer weiterreichen, auch wenn die Maus dabei leicht
+                                // gewandert ist. (Eine erkannte Geste hätte Pending bereits verlassen.)
+                                if (dev.grabbed && m_uinputFd >= 0) {
+                                    emitUInputButton(static_cast<uint16_t>(currentTriggerBtn), 1);
+                                    emitUInputButton(static_cast<uint16_t>(currentTriggerBtn), 0);
                                 }
                             }
                             continue;
@@ -1745,6 +1836,7 @@ void InputMonitor::workerLoop()
                                 gestureFired = false;
                                 pendingGestureDir = -1;
                                 state = State::Pending;
+                                lateClickAwaiting = false; // neuer Druck: nachzureichenden Klick verwerfen
                                 KLOG("Input", "State transition: Idle -> Pending (trigger pressed, code=%d)", ev.code);
                                 emit rightPressed();
                                 emit triggerPressed();
@@ -1778,7 +1870,8 @@ void InputMonitor::workerLoop()
                         dragDistance += std::abs(ev.value);
 
                         bool isLmbDrag = m_leftDown.load();
-                        if (!isLmbDrag && !trailActive && !gestureFired && dragDistance >= 6.0f) {
+                        const int gestureMask = m_gestureMask.load();
+                        if (gestureMask != 0 && !isLmbDrag && !trailActive && !gestureFired && dragDistance >= 6.0f) {
                             trailActive = true;
                             emit gestureStarted();
                         }
@@ -1791,26 +1884,33 @@ void InputMonitor::workerLoop()
                             auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - pressTime).count();
                             double dispSq = static_cast<double>(deltaX) * deltaX + static_cast<double>(deltaY) * deltaY;
 
-                            if (!isLmbDrag && dispSq >= GESTURE_MIN_DISPLACEMENT * GESTURE_MIN_DISPLACEMENT && elapsed <= GESTURE_TIME_WINDOW_MS) {
+                            const bool gestureReached = !isLmbDrag && dispSq >= GESTURE_MIN_DISPLACEMENT * GESTURE_MIN_DISPLACEMENT && elapsed <= GESTURE_TIME_WINDOW_MS;
+                            const int gestureDir = gestureReached ? GestureManager::determineDirection(deltaX, deltaY) : -1;
+                            // Nur abfangen, wenn in dieser Richtung wirklich eine Geste belegt ist
+                            if (gestureReached && gestureDir >= 0 && (gestureMask & (1 << gestureDir))) {
                                 gestureFired = true;
                                 state = State::Gesture;
-                                int dir = GestureManager::determineDirection(deltaX, deltaY);
+                                int dir = gestureDir;
                                 pendingGestureDir = -1;
                                 emit gestureDetected(dir, deltaX, deltaY);
                                 if (trailActive) {
                                     trailActive = false;
                                     emit gestureFinished();
                                 }
-                            } else if (!isLmbDrag && dragDistance > 14.0f && elapsed > GESTURE_TIME_WINDOW_MS) {
+                            } else if (!isLmbDrag && dragDistance > STILL_LIMIT && elapsed > GESTURE_TIME_WINDOW_MS) {
                                 if (trailActive) {
                                     trailActive = false;
                                     emit gestureFinished();
                                 }
-                                state = State::Dragging;
                                 pendingGestureDir = -1;
-                                flushPassthruRel();
-                                if (dev.grabbed && m_uinputFd >= 0) {
-                                    emitUInputButton(static_cast<uint16_t>(currentTriggerBtn), 1);
+                                if (m_triggerType.load() == 1) {
+                                    state = State::Idle; // Tastatur-Auslöser: kein virtuelles Ziehen
+                                } else {
+                                    state = State::Dragging;
+                                    flushPassthruRel();
+                                    if (dev.grabbed && m_uinputFd >= 0) {
+                                        emitUInputButton(static_cast<uint16_t>(currentTriggerBtn), 1);
+                                    }
                                 }
                             }
                         }
@@ -1853,6 +1953,7 @@ void InputMonitor::workerLoop()
                                 }
                                 double aimEffDelta = rawDeltaVal * accelMult;
 
+                                movedSinceTrigger += static_cast<float>(absDelta);
                                 if (ev.code == REL_X) { aimX += static_cast<int>(std::round(aimEffDelta)); aimDirty = true; trigBatchDirty = true; }
                                 else if (ev.code == REL_Y) { aimY += static_cast<int>(std::round(aimEffDelta)); aimDirty = true; trigBatchDirty = true; }
 
@@ -1922,11 +2023,16 @@ void InputMonitor::workerLoop()
                         activeKeys[ev.code] = (ev.value != 0);
                     }
 
-                    if (m_triggerType.load() == 1 && !m_triggerKeyCodes.empty()) {
-                        int mainKey = m_triggerKeyCodes.back();
+                    if (triggerKeysGen != m_triggerGen.load()) {
+                        std::lock_guard<std::mutex> lock(m_sharedMutex);
+                        triggerKeys = m_triggerKeyCodes;
+                        triggerKeysGen = m_triggerGen.load();
+                    }
+                    if (m_triggerType.load() == 1 && !triggerKeys.empty()) {
+                        int mainKey = triggerKeys.back();
                         bool modifiersMatch = true;
-                        for (size_t m = 0; m + 1 < m_triggerKeyCodes.size(); ++m) {
-                            int mod = m_triggerKeyCodes[m];
+                        for (size_t m = 0; m + 1 < triggerKeys.size(); ++m) {
+                            int mod = triggerKeys[m];
                             if (mod == KEY_LEFTCTRL || mod == KEY_RIGHTCTRL) {
                                 if (!activeKeys[KEY_LEFTCTRL] && !activeKeys[KEY_RIGHTCTRL]) modifiersMatch = false;
                             } else if (mod == KEY_LEFTALT || mod == KEY_RIGHTALT) {
@@ -1941,7 +2047,10 @@ void InputMonitor::workerLoop()
                         }
 
                         if (ev.code == mainKey) {
-                            if (ev.value == 1 && modifiersMatch) { // Key pressed
+                            if (ev.value == 1 && modifiersMatch &&
+                                m_gameModeEnabled.load() && m_gameModeActive.load()) {
+                                // Spielmodus: Taste gehört dem Spiel, Overlay bleibt zu
+                            } else if (ev.value == 1 && modifiersMatch) { // Key pressed
                                 pressTime = std::chrono::steady_clock::now();
                                 deltaX = 0; deltaY = 0; dragDistance = 0.0f;
                                 trailActive = false; gestureFired = false; pendingGestureDir = -1;
@@ -1958,7 +2067,8 @@ void InputMonitor::workerLoop()
                                     subpixelX = 0.0; subpixelY = 0.0;
                                     emit holdReleased();
                                     releaseAllUInputButtons();
-                                } else if (state == State::Pending || state == State::Cancelled || state == State::Gesture) {
+                                } else if (state == State::Pending || state == State::Cancelled ||
+                                           state == State::Gesture || state == State::Dragging) {
                                     state = State::Idle;
                                     releaseAllUInputButtons();
                                 }

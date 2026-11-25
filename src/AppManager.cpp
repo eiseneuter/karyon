@@ -18,6 +18,9 @@
 #include <KServiceGroup>
 #include <KService>
 #include <KSycoca>
+#include <KDesktopFile>
+#include <KConfigGroup>
+#include <QDirIterator>
 #include <QFileInfo>
 #include <sqlite3.h>
 #include <QUrl>
@@ -29,6 +32,29 @@ bool AppManager::isAppImage(const QString &path)
     if (path.isEmpty()) return false;
     return path.endsWith(QLatin1String(".AppImage"), Qt::CaseInsensitive) ||
            path.endsWith(QLatin1String(".appimage"), Qt::CaseInsensitive);
+}
+
+AppEntry AppManager::entryFromDesktopFile(const QString &path)
+{
+    AppEntry e;
+    if (path.isEmpty() || !path.endsWith(QLatin1String(".desktop"), Qt::CaseInsensitive) || !QFile::exists(path)) {
+        return e;
+    }
+    // KDesktopFile statt QSettings: QSettings zerlegt Werte mit Komma/Semikolon in Listen
+    // und liefert dann leere Namen/Befehle.
+    KDesktopFile df(path);
+    const KConfigGroup g = df.desktopGroup();
+    const QString base = QFileInfo(path).completeBaseName();
+    e.id = base;
+    e.name = df.readName().trimmed();
+    if (e.name.isEmpty()) e.name = base;
+    e.icon = df.readIcon().trimmed();
+    if (e.icon.isEmpty()) e.icon = base;
+    e.exec = g.readEntry("Exec", QString()).trimmed();
+    e.comment = df.readComment();
+    e.desktopFile = path;
+    e.hidden = df.noDisplay() || g.readEntry("Hidden", false);
+    return e;
 }
 
 QString AppManager::findDesktopFilePath(const QString &name)
@@ -70,34 +96,78 @@ struct DesktopIndex {
 
 static DesktopIndex s_desktopIndex;
 
+// Auflösungs-Caches. Alle werden von AppManager::invalidateCaches() geleert, damit ein
+// einmaliger Fehlschlag (App noch nicht installiert, Desktop-Datei fehlte) nicht bis zum
+// Neustart hängen bleibt.
+static QHash<QString, AppEntry> s_steamGameCache;
+static QHash<QString, qint64> s_steamMissCache;      // steamId -> Zeitpunkt des letzten Fehlschlags
+static QHash<QString, AppEntry> s_execCache;
+static QHash<QString, AppEntry> s_pidCache;          // "pid:startzeit" -> AppImage
+static QHash<QString, AppEntry> s_findAppCache;
+static QHash<QString, AppEntry> s_windowAppCache;
+
+inline void idxInsert(DesktopIndex &idx, const QString &key, const QString &path)
+{
+    if (key.isEmpty()) return;
+    // Exakte Dateinamen-Treffer aus dem Hauptverzeichnis dürfen nicht von später gelesenen
+    // Unterordner-Einträgen (z.B. "GoldWave Help.desktop") überschrieben werden.
+    if (!idx.keyToPath.contains(key)) idx.keyToPath.insert(key, path);
+}
+
 void buildDesktopIndex(DesktopIndex &idx)
 {
     if (idx.initialized) return;
     idx.initialized = true;
 
+    // XDG-Reihenfolge: Benutzerverzeichnis zuerst (überschreibt Systemeinträge), erster Treffer gewinnt.
     QStringList searchDirs = QStandardPaths::standardLocations(QStandardPaths::ApplicationsLocation);
-    searchDirs.prepend(QStringLiteral("/usr/share/applications"));
+    searchDirs.append(QStringLiteral("/usr/share/applications"));
     searchDirs.append(QStringLiteral("/var/lib/flatpak/exports/share/applications"));
     searchDirs.append(QDir::homePath() + QStringLiteral("/.local/share/flatpak/exports/share/applications"));
     searchDirs.removeDuplicates();
 
+    // Versteckte Einträge (NoDisplay/Hidden, z.B. "…UrlHandler.desktop") erst im zweiten Durchgang:
+    // teilt sich ein versteckter Eintrag Fensterklasse oder Programmname mit dem sichtbaren
+    // Haupteintrag, muss der sichtbare gewinnen.
+    auto isHiddenEntry = [](const QString &path) {
+        QFile f(path);
+        if (!f.open(QIODevice::ReadOnly | QIODevice::Text)) return false;
+        bool inDesktopEntry = false;
+        while (!f.atEnd()) {
+            const QByteArray line = f.readLine().trimmed();
+            if (line.startsWith('[')) {
+                if (inDesktopEntry) break;
+                inDesktopEntry = (line == "[Desktop Entry]");
+                continue;
+            }
+            if (!inDesktopEntry) continue;
+            if (line == "NoDisplay=true" || line == "Hidden=true") return true;
+        }
+        return false;
+    };
+
+    for (int pass = 0; pass < 2; ++pass)
     for (const auto &dirPath : searchDirs) {
-        QDir dir(dirPath);
-        if (!dir.exists()) continue;
-        QFileInfoList list = dir.entryInfoList({QStringLiteral("*.desktop")}, QDir::Files, QDir::NoSort);
-        for (const auto &fi : list) {
+        if (!QDir(dirPath).exists()) continue;
+        // Rekursiv: Wine/Proton und andere legen ihre Einträge in Unterordnern ab
+        // (z.B. applications/wine/Programs/<App>/<App>.desktop).
+        QDirIterator it(dirPath, {QStringLiteral("*.desktop")}, QDir::Files, QDirIterator::Subdirectories);
+        while (it.hasNext()) {
+            it.next();
+            const QFileInfo fi = it.fileInfo();
             QString path = fi.absoluteFilePath();
+            if (isHiddenEntry(path) != (pass == 1)) continue;
             QString fileName = fi.fileName();
             QString baseName = fi.completeBaseName();
 
             QString fnLow = fileName.toLower();
             QString bnLow = baseName.toLower();
-            idx.keyToPath.insert(fnLow, path);
-            idx.keyToPath.insert(bnLow, path);
+            idxInsert(idx, fnLow, path);
+            idxInsert(idx, bnLow, path);
 
             QString norm = bnLow;
             norm.remove(QLatin1Char('_')).remove(QLatin1Char('-')).remove(QLatin1Char(' '));
-            idx.keyToPath.insert(norm, path);
+            idxInsert(idx, norm, path);
 
             QFile f(path);
             if (f.open(QIODevice::ReadOnly | QIODevice::Text)) {
@@ -128,32 +198,62 @@ void buildDesktopIndex(DesktopIndex &idx)
                 }
 
                 if (!wmClass.isEmpty()) {
-                    idx.keyToPath.insert(wmClass.toLower(), path);
+                    // Teilen sich mehrere Einträge eine Fensterklasse (Programm, Hilfe, Setup …),
+                    // gewinnt der, dessen Dateiname zur Klasse passt ("goldwave.exe" -> GoldWave.desktop).
+                    QString stem = wmClass.toLower();
+                    if (stem.endsWith(QLatin1String(".exe"))) stem.chop(4);
+                    const QString existing = idx.keyToPath.value(wmClass.toLower());
+                    if (!existing.isEmpty() && bnLow == stem &&
+                        QFileInfo(existing).completeBaseName().toLower() != stem) {
+                        idx.keyToPath.insert(wmClass.toLower(), path);
+                    }
+                    idxInsert(idx, wmClass.toLower(), path);
                     QString wmNorm = wmClass.toLower().remove(QLatin1Char('_')).remove(QLatin1Char('-')).remove(QLatin1Char(' '));
-                    idx.keyToPath.insert(wmNorm, path);
+                    idxInsert(idx, wmNorm, path);
                 }
                 if (!nameVal.isEmpty()) {
-                    idx.keyToPath.insert(nameVal.toLower(), path);
+                    idxInsert(idx, nameVal.toLower(), path);
                 }
                 if (!execVal.isEmpty()) {
                     static const QRegularExpression rungameRe(QStringLiteral("steam://rungameid/(\\d+)"), QRegularExpression::CaseInsensitiveOption);
                     auto mRun = rungameRe.match(execVal);
                     if (mRun.hasMatch()) {
                         QString sId = mRun.captured(1);
-                        idx.keyToPath.insert(QStringLiteral("steam_app_") + sId, path);
-                        idx.keyToPath.insert(QStringLiteral("steam_app_") + sId + QStringLiteral(".desktop"), path);
-                        idx.keyToPath.insert(sId, path);
+                        idxInsert(idx, QStringLiteral("steam_app_") + sId, path);
+                        idxInsert(idx, QStringLiteral("steam_app_") + sId + QStringLiteral(".desktop"), path);
+                        idxInsert(idx, sId, path);
                     }
 
-                    QString bin = execVal.section(QLatin1Char(' '), 0, 0);
+                    // Erstes echtes Programm der Exec-Zeile ("env", VAR=wert und Wrapper überspringen)
+                    QString bin;
+                    const QStringList execToks = QProcess::splitCommand(execVal);
+                    for (const QString &tok : execToks) {
+                        if (tok == QLatin1String("env") || tok.endsWith(QLatin1String("/env"))) continue;
+                        if (tok.startsWith(QLatin1Char('-'))) continue;
+                        if (tok.contains(QLatin1Char('=')) && !tok.startsWith(QLatin1Char('/'))) continue;
+                        bin = tok;
+                        break;
+                    }
                     int slash = bin.lastIndexOf(QLatin1Char('/'));
                     if (slash >= 0) bin = bin.mid(slash + 1);
+                    // Allgemeine Starter/Interpreter identifizieren keine App
+                    static const QSet<QString> genericLaunchers = {
+                        QStringLiteral("wine"), QStringLiteral("wine64"), QStringLiteral("python"),
+                        QStringLiteral("python3"), QStringLiteral("bash"), QStringLiteral("sh"),
+                        QStringLiteral("flatpak"), QStringLiteral("java"), QStringLiteral("electron"),
+                        QStringLiteral("gtk-launch"), QStringLiteral("xdg-open"), QStringLiteral("snap"),
+                        QStringLiteral("umu-run"), QStringLiteral("proton"), QStringLiteral("kioclient")
+                    };
+                    if (genericLaunchers.contains(bin.toLower()) ||
+                        (bin.compare(QLatin1String("steam"), Qt::CaseInsensitive) == 0 && execVal.contains(QLatin1String("steam://")))) {
+                        bin.clear();
+                    }
                     if (!bin.isEmpty()) {
-                        idx.keyToPath.insert(bin.toLower(), path);
+                        idxInsert(idx, bin.toLower(), path);
                         if (bin.endsWith(QLatin1String(".AppImage"), Qt::CaseInsensitive) ||
                             bin.endsWith(QLatin1String(".appimage"), Qt::CaseInsensitive)) {
                             QString binNoExt = bin.left(bin.length() - 9);
-                            idx.keyToPath.insert(binNoExt.toLower(), path);
+                            idxInsert(idx, binNoExt.toLower(), path);
                         }
                     }
                 }
@@ -293,23 +393,36 @@ bool AppManager::isSteamApp(const QString &desktopFileName, const QString &resou
     return false;
 }
 
+void AppManager::invalidateCaches()
+{
+    s_desktopIndex.keyToPath.clear();
+    s_desktopIndex.initialized = false;
+    s_steamGameCache.clear();
+    s_steamMissCache.clear();
+    s_execCache.clear();
+    s_pidCache.clear();
+    s_findAppCache.clear();
+    s_windowAppCache.clear();
+}
+
+// Liefert ein Steam-Spiel NUR, wenn Steam es wirklich kennt (appmanifest in einer Bibliothek)
+// oder eine Desktop-Datei mit steam://rungameid/<id> existiert. Für alles andere
+// (Proton/Wine-Spiele aus Heroic/Lutris mit Klasse steam_app_0, in Steam eingetragene
+// Fremdspiele ohne Manifest) wird ein leerer Eintrag zurückgegeben – der Aufrufer nimmt
+// dann Fenstertitel und Fenster-Icon. Es gibt keinen erfundenen Titel "Steam App <id>" mehr.
 AppEntry AppManager::resolveSteamGame(const QString &steamId, const QString &captionFallback)
 {
+    Q_UNUSED(captionFallback);
     if (steamId.isEmpty() || steamId == QLatin1String("0")) return {};
+    static const QRegularExpression digitsRe(QStringLiteral("^\\d+$"));
+    if (!digitsRe.match(steamId).hasMatch()) return {};
 
-    static QHash<QString, AppEntry> s_steamGameCache;
     if (s_steamGameCache.contains(steamId)) {
-        AppEntry cached = s_steamGameCache.value(steamId);
-        if (!captionFallback.isEmpty() && (cached.name.isEmpty() || cached.name.startsWith(QLatin1String("Steam App ")))) {
-            QString cleanCap = captionFallback;
-            cleanCap.remove(QStringLiteral(" — Steam"));
-            cleanCap.remove(QStringLiteral(" - Steam"));
-            if (!cleanCap.trimmed().isEmpty()) {
-                cached.name = cleanCap.trimmed();
-                s_steamGameCache.insert(steamId, cached);
-            }
-        }
-        return cached;
+        return s_steamGameCache.value(steamId);
+    }
+    const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
+    if (s_steamMissCache.contains(steamId) && (nowMs - s_steamMissCache.value(steamId)) < 30000) {
+        return {};
     }
 
     QString foundName;
@@ -320,24 +433,23 @@ AppEntry AppManager::resolveSteamGame(const QString &steamId, const QString &cap
     QStringList libPaths = {
         home + QStringLiteral("/.local/share/Steam"),
         home + QStringLiteral("/.steam/steam"),
-        home + QStringLiteral("/.steam/root")
+        home + QStringLiteral("/.steam/root"),
+        home + QStringLiteral("/.var/app/com.valvesoftware.Steam/.local/share/Steam")
     };
 
     // libraryfolders.vdf auslesen
     for (const QString &base : QStringList(libPaths)) {
         QString vdfPath = base + QStringLiteral("/steamapps/libraryfolders.vdf");
-        if (QFile::exists(vdfPath)) {
-            QFile f(vdfPath);
-            if (f.open(QIODevice::ReadOnly | QIODevice::Text)) {
-                static const QRegularExpression pathRe(QStringLiteral("\"path\"\\s+\"([^\"]+)\""));
-                while (!f.atEnd()) {
-                    QString line = QString::fromUtf8(f.readLine());
-                    auto match = pathRe.match(line);
-                    if (match.hasMatch()) {
-                        QString p = match.captured(1);
-                        if (QDir(p).exists() && !libPaths.contains(p)) {
-                            libPaths.append(p);
-                        }
+        QFile f(vdfPath);
+        if (f.open(QIODevice::ReadOnly | QIODevice::Text)) {
+            static const QRegularExpression pathRe(QStringLiteral("\"path\"\\s+\"([^\"]+)\""));
+            while (!f.atEnd()) {
+                QString line = QString::fromUtf8(f.readLine());
+                auto match = pathRe.match(line);
+                if (match.hasMatch()) {
+                    QString p = match.captured(1);
+                    if (QDir(p).exists() && !libPaths.contains(p)) {
+                        libPaths.append(p);
                     }
                 }
             }
@@ -346,69 +458,49 @@ AppEntry AppManager::resolveSteamGame(const QString &steamId, const QString &cap
 
     // appmanifest_<steamId>.acf auslesen für den offiziellen Spielnamen
     for (const QString &lib : libPaths) {
-        QString acfPath = lib + QStringLiteral("/steamapps/appmanifest_") + steamId + QStringLiteral(".acf");
-        if (QFile::exists(acfPath)) {
-            QFile f(acfPath);
-            if (f.open(QIODevice::ReadOnly | QIODevice::Text)) {
-                static const QRegularExpression nameRe(QStringLiteral("\"name\"\\s+\"([^\"]+)\""));
-                while (!f.atEnd()) {
-                    QString line = QString::fromUtf8(f.readLine());
-                    auto match = nameRe.match(line);
-                    if (match.hasMatch()) {
-                        foundName = match.captured(1).trimmed();
-                        break;
-                    }
+        QFile f(lib + QStringLiteral("/steamapps/appmanifest_") + steamId + QStringLiteral(".acf"));
+        if (f.open(QIODevice::ReadOnly | QIODevice::Text)) {
+            static const QRegularExpression nameRe(QStringLiteral("\"name\"\\s+\"([^\"]+)\""));
+            while (!f.atEnd()) {
+                QString line = QString::fromUtf8(f.readLine());
+                auto match = nameRe.match(line);
+                if (match.hasMatch()) {
+                    foundName = match.captured(1).trimmed();
+                    break;
                 }
             }
         }
         if (!foundName.isEmpty()) break;
     }
 
-    // Fallback: Desktop-Datei
+    // Desktop-Datei (von Steam angelegte Verknüpfung)
     QString resolvedDf = findDesktopFilePathCaseInsensitive(QStringLiteral("steam_app_") + steamId);
-    if (foundName.isEmpty()) {
-        if (!resolvedDf.isEmpty() && QFile::exists(resolvedDf)) {
-            QSettings ini(resolvedDf, QSettings::IniFormat);
-            ini.beginGroup(QStringLiteral("Desktop Entry"));
-            foundName = ini.value(QStringLiteral("Name")).toString().trimmed();
-        }
+    AppEntry dfEntry = entryFromDesktopFile(resolvedDf);
+    if (!dfEntry.exec.contains(QLatin1String("steam://rungameid/") + steamId)) {
+        dfEntry = {};
+        resolvedDf.clear();
     }
-
-    // Fallback: Fenstertitel
-    if (foundName.isEmpty() && !captionFallback.trimmed().isEmpty()) {
-        QString cleanCap = captionFallback.trimmed();
-        cleanCap.remove(QStringLiteral(" — Steam"));
-        cleanCap.remove(QStringLiteral(" - Steam"));
-        foundName = cleanCap.trimmed();
+    if (foundName.isEmpty() && !dfEntry.name.isEmpty()) {
+        foundName = dfEntry.name;
     }
 
     if (foundName.isEmpty()) {
-        foundName = QStringLiteral("Steam App ") + steamId;
+        s_steamMissCache.insert(steamId, nowMs);
+        return {};
     }
 
     // 2. Icon auflösen
-    const QStringList iconGlobs = {
-        home + QStringLiteral("/.local/share/icons/hicolor/256x256/apps/steam_icon_") + steamId + QStringLiteral(".png"),
-        home + QStringLiteral("/.local/share/icons/hicolor/128x128/apps/steam_icon_") + steamId + QStringLiteral(".png"),
-        home + QStringLiteral("/.local/share/icons/hicolor/64x64/apps/steam_icon_") + steamId + QStringLiteral(".png"),
-        home + QStringLiteral("/.local/share/icons/hicolor/48x48/apps/steam_icon_") + steamId + QStringLiteral(".png"),
-        home + QStringLiteral("/.local/share/icons/hicolor/32x32/apps/steam_icon_") + steamId + QStringLiteral(".png")
-    };
-    for (const QString &ip : iconGlobs) {
+    for (const char *size : {"256x256", "128x128", "96x96", "64x64", "48x48", "32x32"}) {
+        QString ip = home + QStringLiteral("/.local/share/icons/hicolor/") + QLatin1String(size) +
+                     QStringLiteral("/apps/steam_icon_") + steamId + QStringLiteral(".png");
         if (QFile::exists(ip)) {
             foundIcon = ip;
             break;
         }
     }
-
-    if (foundIcon.isEmpty()) {
-        if (!resolvedDf.isEmpty() && QFile::exists(resolvedDf)) {
-            QSettings ini(resolvedDf, QSettings::IniFormat);
-            ini.beginGroup(QStringLiteral("Desktop Entry"));
-            foundIcon = ini.value(QStringLiteral("Icon")).toString().trimmed();
-        }
+    if (foundIcon.isEmpty() && !dfEntry.icon.isEmpty() && dfEntry.icon != dfEntry.id) {
+        foundIcon = dfEntry.icon;
     }
-
     if (foundIcon.isEmpty()) {
         foundIcon = QStringLiteral("steam_icon_") + steamId;
     }
@@ -504,11 +596,40 @@ int readProcPpid(int pid)
 
 } // namespace
 
+static QStringList readProcCmdline(int pid)
+{
+    if (pid <= 0) return {};
+    QFile f(QStringLiteral("/proc/%1/cmdline").arg(pid));
+    if (!f.open(QIODevice::ReadOnly)) return {};
+    QByteArray data = f.readAll();
+    QList<QByteArray> raw = data.split('\0');
+    QStringList args;
+    for (const auto &tok : raw) {
+        if (!tok.isEmpty()) {
+            args.append(QString::fromUtf8(tok));
+        }
+    }
+    return args;
+}
+
+// Startzeit eines Prozesses (Feld 22 in /proc/<pid>/stat). Zusammen mit der PID eindeutig,
+// auch wenn die PID später neu vergeben wird.
+static QString procIdentity(int pid)
+{
+    if (pid <= 0) return {};
+    QFile f(QStringLiteral("/proc/%1/stat").arg(pid));
+    if (!f.open(QIODevice::ReadOnly)) return QString::number(pid);
+    QByteArray data = f.readAll();
+    int closeParen = data.lastIndexOf(')');
+    QList<QByteArray> parts = data.mid(closeParen + 2).split(' ');
+    QByteArray start = parts.size() > 19 ? parts[19] : QByteArray();
+    return QString::number(pid) + QLatin1Char(':') + QString::fromLatin1(start);
+}
+
 AppEntry AppManager::findAppByExec(const QString &execPath)
 {
     if (execPath.isEmpty()) return {};
 
-    static QHash<QString, AppEntry> s_execCache;
     if (s_execCache.contains(execPath)) {
         return s_execCache.value(execPath);
     }
@@ -517,63 +638,66 @@ AppEntry AppManager::findAppByExec(const QString &execPath)
     QString baseName = fi.completeBaseName();
     QString fileName = fi.fileName();
 
+    // Allgemeine Starter/Interpreter stehen in vielen Exec-Zeilen ("python3 /opt/x/main.py",
+    // "wine …") – sie identifizieren keine bestimmte App.
+    static const QRegularExpression genericRe(
+        QStringLiteral("^(python[0-9.]*|bash|sh|dash|zsh|perl|ruby|node|java|wine(64)?(-preloader)?|wineserver|"
+                       "electron[0-9]*|flatpak|snap|env|gtk-launch|xdg-open|steam|proton|umu-run)$"),
+        QRegularExpression::CaseInsensitiveOption);
+    if (genericRe.match(fileName).hasMatch()) {
+        s_execCache.insert(execPath, {});
+        return {};
+    }
+
     // 1. Direkt über BaseName.desktop prüfen (z.B. JusticeViewer -> JusticeViewer.desktop)
     if (!baseName.isEmpty()) {
-        QString directDf = findDesktopFilePath(baseName);
-        if (!directDf.isEmpty() && QFile::exists(directDf)) {
-            QSettings ini(directDf, QSettings::IniFormat);
-            ini.beginGroup(QStringLiteral("Desktop Entry"));
-            if (!ini.value(QStringLiteral("NoDisplay"), false).toBool()) {
-                QString exec = ini.value(QStringLiteral("Exec")).toString().trimmed();
-                if (!exec.isEmpty()) {
-                    AppEntry entry;
-                    entry.id = baseName;
-                    entry.name = ini.value(QStringLiteral("Name")).toString();
-                    if (entry.name.isEmpty()) entry.name = baseName;
-                    entry.icon = ini.value(QStringLiteral("Icon")).toString();
-                    if (entry.icon.isEmpty()) entry.icon = baseName;
-                    entry.exec = exec;
-                    entry.comment = ini.value(QStringLiteral("Comment")).toString();
-                    entry.desktopFile = directDf;
-                    s_execCache.insert(execPath, entry);
-                    return entry;
-                }
-            }
+        AppEntry entry = entryFromDesktopFile(findDesktopFilePath(baseName));
+        if (!entry.id.isEmpty() && !entry.exec.isEmpty()) {
+            s_execCache.insert(execPath, entry);
+            return entry;
         }
     }
 
-    // 2. Durchsuche Desktop-Verzeichnisse nach Exec-Einträgen, die execPath enthalten
-    static const QStringList searchDirs = []() {
-        QStringList dirs = QStandardPaths::standardLocations(QStandardPaths::ApplicationsLocation);
-        dirs.prepend(QStringLiteral("/usr/share/applications"));
-        dirs.append(QStringLiteral("/var/lib/flatpak/exports/share/applications"));
-        dirs.append(QDir::homePath() + QStringLiteral("/.local/share/flatpak/exports/share/applications"));
-        dirs.removeDuplicates();
-        return dirs;
-    }();
+    // 2. Desktop-Einträge, deren Exec-Zeile genau dieses Programm startet.
+    //    Verglichen wird pro Argument (voller Pfad oder Dateiname), nicht per Teilwort –
+    //    sonst würde "code" auch "codeblocks" treffen.
+    QStringList searchDirs = QStandardPaths::standardLocations(QStandardPaths::ApplicationsLocation);
+    searchDirs.append(QStringLiteral("/usr/share/applications"));
+    searchDirs.append(QStringLiteral("/var/lib/flatpak/exports/share/applications"));
+    searchDirs.append(QDir::homePath() + QStringLiteral("/.local/share/flatpak/exports/share/applications"));
+    searchDirs.removeDuplicates();
 
+    const bool hasDir = execPath.contains(QLatin1Char('/'));
     for (const auto &dirPath : searchDirs) {
-        QDir dir(dirPath);
-        QStringList dfFiles = dir.entryList({QStringLiteral("*.desktop")}, QDir::Files);
-        for (const auto &df : dfFiles) {
-            QString fullPath = dir.filePath(df);
-            QSettings ini(fullPath, QSettings::IniFormat);
-            ini.beginGroup(QStringLiteral("Desktop Entry"));
-            if (ini.value(QStringLiteral("NoDisplay"), false).toBool()) continue;
+        if (!QDir(dirPath).exists()) continue;
+        QDirIterator it(dirPath, {QStringLiteral("*.desktop")}, QDir::Files, QDirIterator::Subdirectories);
+        while (it.hasNext()) {
+            const QString fullPath = it.next();
+            AppEntry entry = entryFromDesktopFile(fullPath);
+            if (entry.exec.isEmpty()) continue;
 
-            QString exec = ini.value(QStringLiteral("Exec")).toString().trimmed();
-            if (exec.contains(execPath) || (!fileName.isEmpty() && exec.contains(fileName))) {
-                AppEntry entry;
-                QString id = df;
-                if (id.endsWith(QLatin1String(".desktop"))) id.chop(8);
-                entry.id = id;
-                entry.name = ini.value(QStringLiteral("Name")).toString();
-                if (entry.name.isEmpty()) entry.name = id;
-                entry.icon = ini.value(QStringLiteral("Icon")).toString();
-                if (entry.icon.isEmpty()) entry.icon = id;
-                entry.exec = exec;
-                entry.comment = ini.value(QStringLiteral("Comment")).toString();
-                entry.desktopFile = fullPath;
+            bool match = false;
+            const QStringList toks = QProcess::splitCommand(entry.exec);
+            for (const QString &tok : toks) {
+                if (tok.startsWith(QLatin1Char('%'))) continue;
+                if (tok == execPath) { match = true; break; }
+                if (!fileName.isEmpty() && tok.contains(QLatin1Char('/')) &&
+                    tok.section(QLatin1Char('/'), -1) == fileName &&
+                    (!hasDir || QFileInfo(tok).canonicalFilePath() == fi.canonicalFilePath())) {
+                    match = true;
+                    break;
+                }
+                if (!tok.contains(QLatin1Char('/')) && tok == fileName) {
+                    // Exec nennt nur den Programmnamen: über PATH auflösen und mit dem echten Pfad vergleichen
+                    if (!hasDir) { match = true; break; }
+                    const QString resolved = QStandardPaths::findExecutable(tok);
+                    if (!resolved.isEmpty() && QFileInfo(resolved).canonicalFilePath() == fi.canonicalFilePath()) {
+                        match = true;
+                        break;
+                    }
+                }
+            }
+            if (match) {
                 s_execCache.insert(execPath, entry);
                 return entry;
             }
@@ -629,15 +753,11 @@ AppEntry AppManager::resolveAppImageFromPath(const QString &appImagePath, int pi
             // .desktop-Datei im Mount-Ordner suchen
             QStringList dfs = mountDir.entryList({QStringLiteral("*.desktop")}, QDir::Files);
             if (!dfs.isEmpty()) {
-                QString mDfPath = mountDir.filePath(dfs.first());
-                QSettings dfIni(mDfPath, QSettings::IniFormat);
-                dfIni.beginGroup(QStringLiteral("Desktop Entry"));
-                QString n = dfIni.value(QStringLiteral("Name")).toString();
-                if (!n.isEmpty()) entry.name = n;
-                entry.comment = dfIni.value(QStringLiteral("Comment")).toString();
-                QString ic = dfIni.value(QStringLiteral("Icon")).toString();
-                if (!ic.isEmpty() && entry.icon == baseId) {
-                    entry.icon = ic;
+                const AppEntry mEntry = entryFromDesktopFile(mountDir.filePath(dfs.first()));
+                if (!mEntry.name.isEmpty()) entry.name = mEntry.name;
+                entry.comment = mEntry.comment;
+                if (!mEntry.icon.isEmpty() && mEntry.icon != mEntry.id && entry.icon == baseId) {
+                    entry.icon = mEntry.icon;
                 }
             }
 
@@ -671,72 +791,73 @@ AppEntry AppManager::resolveAppImageFromPid(int pid)
 {
     if (pid <= 0) return {};
 
-    static QHash<int, AppEntry> s_pidCache;
-    if (s_pidCache.contains(pid)) {
-        return s_pidCache.value(pid);
+    const QString cacheKey = procIdentity(pid);
+    if (s_pidCache.contains(cacheKey)) {
+        return s_pidCache.value(cacheKey);
     }
+    auto cacheAndReturn = [&](const AppEntry &e) {
+        s_pidCache.insert(cacheKey, e);
+        return e;
+    };
 
     QString appImagePath = readProcEnv(pid, "APPIMAGE");
-    if (appImagePath.isEmpty()) {
+    QString appDir = readProcEnv(pid, "APPDIR");
+    if (appImagePath.isEmpty() || appDir.isEmpty()) {
         int ppid = readProcPpid(pid);
         if (ppid > 0) {
-            appImagePath = readProcEnv(ppid, "APPIMAGE");
+            if (appImagePath.isEmpty()) appImagePath = readProcEnv(ppid, "APPIMAGE");
+            if (appDir.isEmpty()) appDir = readProcEnv(ppid, "APPDIR");
         }
     }
 
-    // Niemals andere Prozesse als Karyon selbst auflösen!
+    // Karyon selbst niemals als AppImage eines fremden Fensters auflösen
     if (appImagePath.contains(QLatin1String("karyon"), Qt::CaseInsensitive)) {
-        s_pidCache.insert(pid, {});
-        return {};
+        return cacheAndReturn({});
     }
 
-    QString exeTarget = QFile::symLinkTarget(QStringLiteral("/proc/%1/exe").arg(pid));
+    const QString exeTarget = QFile::symLinkTarget(QStringLiteral("/proc/%1/exe").arg(pid));
 
-    // Validierung: Ein echter AppImage-Prozess läuft aus /tmp/.mount_* oder /tmp/appimage_extracted_*,
-    // oder /proc/<pid>/exe ist die .AppImage Datei selbst.
-    // Liegt /proc/<pid>/exe in /usr/ oder /bin/ (z.B. /usr/bin/steam), ist es KEIN AppImage!
+    // Ein Prozess gehört nur dann zu einer AppImage, wenn er nachweislich AUS ihr läuft.
+    // Die Umgebungsvariablen allein reichen nicht (sie werden an Kindprozesse vererbt,
+    // z.B. an ein aus einer AppImage gestartetes /usr/bin/steam). Gültige Nachweise:
+    //   a) das Programm selbst liegt im gemounteten AppDir bzw. ist die AppImage-Datei
+    //   b) ein System-Interpreter (python3, bash, ...) führt ein Skript aus dem AppDir aus
     bool isRealAppImage = false;
-    QString appDir = readProcEnv(pid, "APPDIR");
-    if (appDir.isEmpty()) {
-        int ppid = readProcPpid(pid);
-        if (ppid > 0) appDir = readProcEnv(ppid, "APPDIR");
-    }
-
-    if (!appDir.isEmpty() && (exeTarget.startsWith(appDir) || exeTarget.contains(QLatin1String("/.mount_")) || exeTarget.contains(QLatin1String("/appimage_extracted_")))) {
+    const bool exeInMount = exeTarget.contains(QLatin1String("/.mount_")) ||
+                            exeTarget.contains(QLatin1String("/appimage_extracted_")) ||
+                            (!appDir.isEmpty() && exeTarget.startsWith(appDir));
+    if (exeInMount || isAppImage(exeTarget)) {
         isRealAppImage = true;
-    } else if (isAppImage(exeTarget) || (!appImagePath.isEmpty() && isAppImage(appImagePath))) {
-        if (!exeTarget.startsWith(QLatin1String("/usr/")) && !exeTarget.startsWith(QLatin1String("/bin/"))) {
-            isRealAppImage = true;
+    } else if (!appDir.isEmpty() && isAppImage(appImagePath) && QDir(appDir).exists()) {
+        const QStringList args = readProcCmdline(pid);
+        for (int i = 0; i < args.size() && i < 4; ++i) {
+            if (args[i].startsWith(appDir + QLatin1Char('/'))) {
+                isRealAppImage = true;
+                break;
+            }
         }
     }
 
     if (!isRealAppImage) {
-        s_pidCache.insert(pid, {});
-        return {};
+        return cacheAndReturn({});
     }
 
-    if (!appImagePath.isEmpty() && isAppImage(appImagePath)) {
-        AppEntry entry = resolveAppImageFromPath(appImagePath, pid);
+    const QString aiPath = isAppImage(appImagePath) ? appImagePath : (isAppImage(exeTarget) ? exeTarget : QString());
+    if (!aiPath.isEmpty()) {
+        AppEntry entry = resolveAppImageFromPath(aiPath, pid);
         if (!entry.id.isEmpty()) {
-            s_pidCache.insert(pid, entry);
-            return entry;
-        }
-    } else if (isAppImage(exeTarget)) {
-        AppEntry entry = resolveAppImageFromPath(exeTarget, pid);
-        if (!entry.id.isEmpty()) {
-            s_pidCache.insert(pid, entry);
-            return entry;
+            return cacheAndReturn(entry);
         }
     }
 
-    s_pidCache.insert(pid, {});
-    return {};
+    return cacheAndReturn({});
 }
 
-AppEntry AppManager::findApp(const QString &desktopFileName, const QString &resourceClass)
+// Gemeinsame Suche nach dem Desktop-Eintrag einer App.
+// allowHidden=true: auch NoDisplay-Einträge (für Fenster-Icon/-Titel, wie Taskleiste und Alt+Tab).
+static AppEntry findAppImpl(const QString &desktopFileName, const QString &resourceClass, bool allowHidden)
 {
-    static QHash<QPair<QString, QString>, AppEntry> s_findAppCache;
-    QPair<QString, QString> cacheKey{desktopFileName, resourceClass};
+    const QString cacheKey = desktopFileName + QLatin1Char('|') + resourceClass + (allowHidden ? QLatin1String("|h") : QLatin1String("|v"));
     if (s_findAppCache.contains(cacheKey)) {
         return s_findAppCache.value(cacheKey);
     }
@@ -745,20 +866,23 @@ AppEntry AppManager::findApp(const QString &desktopFileName, const QString &reso
         s_findAppCache.insert(cacheKey, entry);
         return entry;
     };
+    auto usable = [&](const AppEntry &e) {
+        return !e.id.isEmpty() && !e.exec.trimmed().isEmpty() && (allowHidden || !e.hidden);
+    };
 
     QString steamId;
-    if (isSteamApp(desktopFileName, resourceClass, &steamId)) {
-        AppEntry steamGame = resolveSteamGame(steamId);
+    if (AppManager::isSteamApp(desktopFileName, resourceClass, &steamId)) {
+        AppEntry steamGame = AppManager::resolveSteamGame(steamId);
         if (!steamGame.id.isEmpty()) return cacheAndReturn(steamGame);
     }
 
-    if (isAppImage(desktopFileName)) {
-        AppEntry ai = resolveAppImageFromPath(desktopFileName);
-        if (!ai.id.isEmpty()) return cacheAndReturn(ai);
+    if (AppManager::isAppImage(desktopFileName)) {
+        AppEntry ai = AppManager::resolveAppImageFromPath(desktopFileName);
+        if (usable(ai)) return cacheAndReturn(ai);
     }
-    if (isAppImage(resourceClass)) {
-        AppEntry ai = resolveAppImageFromPath(resourceClass);
-        if (!ai.id.isEmpty()) return cacheAndReturn(ai);
+    if (AppManager::isAppImage(resourceClass)) {
+        AppEntry ai = AppManager::resolveAppImageFromPath(resourceClass);
+        if (usable(ai)) return cacheAndReturn(ai);
     }
 
     auto serviceFrom = [](const QString &key) -> KService::Ptr {
@@ -785,11 +909,8 @@ AppEntry AppManager::findApp(const QString &desktopFileName, const QString &reso
         s = serviceFrom(resourceClass);
     }
 
-    if (s && s->isValid() && !s->noDisplay() && !s->exec().trimmed().isEmpty()) {
-        QString nameLow = s->name().toLower();
-        if (nameLow == QLatin1String("steam game 0") || s->desktopEntryName() == QLatin1String("steam_app_0")) {
-            return cacheAndReturn({});
-        }
+    if (s && s->isValid() && !s->exec().trimmed().isEmpty() &&
+        s->desktopEntryName() != QLatin1String("steam_app_0")) {
         AppEntry entry;
         entry.id = s->desktopEntryName();
         entry.name = s->name();
@@ -797,72 +918,34 @@ AppEntry AppManager::findApp(const QString &desktopFileName, const QString &reso
         entry.exec = s->exec();
         entry.comment = s->comment();
         entry.desktopFile = s->entryPath();
-        return cacheAndReturn(entry);
+        entry.hidden = s->noDisplay();
+        if (usable(entry)) return cacheAndReturn(entry);
     }
 
-    // Fallback: direct desktop file search with case-insensitive / normalized index
-    QString dfPath = findDesktopFilePathCaseInsensitive(desktopFileName);
-    if (dfPath.isEmpty() && !resourceClass.isEmpty()) {
-        dfPath = findDesktopFilePathCaseInsensitive(resourceClass);
+    // Index: Dateiname, StartupWMClass, Name, Programmname (ohne Rücksicht auf Groß/Klein, -, _)
+    for (const QString &key : {desktopFileName, resourceClass}) {
+        if (key.isEmpty()) continue;
+        const QString dfPath = AppManager::findDesktopFilePathCaseInsensitive(key);
+        if (dfPath.isEmpty() || dfPath.endsWith(QLatin1String("steam_app_0.desktop"))) continue;
+        AppEntry entry = AppManager::entryFromDesktopFile(dfPath);
+        if (usable(entry)) return cacheAndReturn(entry);
     }
 
-    if (!dfPath.isEmpty() && QFile::exists(dfPath)) {
-        QSettings ini(dfPath, QSettings::IniFormat);
-        ini.beginGroup(QStringLiteral("Desktop Entry"));
-        if (ini.value(QStringLiteral("NoDisplay"), false).toBool()) {
-            return cacheAndReturn({});
-        }
-        QString exec = ini.value(QStringLiteral("Exec")).toString().trimmed();
-        if (exec.isEmpty()) return cacheAndReturn({});
-
-        QString name = ini.value(QStringLiteral("Name")).toString();
-        if (!name.isEmpty()) {
-            QString nameLow = name.toLower();
-            if (nameLow == QLatin1String("steam game 0") || dfPath.endsWith(QLatin1String("steam_app_0.desktop"))) {
-                return cacheAndReturn({});
-            }
-        }
-
-        AppEntry entry;
-        QString base = dfPath.section(QLatin1Char('/'), -1);
-        if (base.endsWith(QLatin1String(".desktop"))) base.chop(8);
-        entry.id = base;
-        entry.name = name.isEmpty() ? base : name;
-        entry.icon = ini.value(QStringLiteral("Icon")).toString();
-        if (entry.icon.isEmpty()) entry.icon = base;
-        entry.exec = exec;
-        entry.comment = ini.value(QStringLiteral("Comment")).toString();
-        entry.desktopFile = dfPath;
-        return cacheAndReturn(entry);
+    for (const QString &key : {desktopFileName, resourceClass}) {
+        AppEntry byExec = AppManager::findAppByExec(key);
+        if (usable(byExec)) return cacheAndReturn(byExec);
     }
-
-    AppEntry byExec = findAppByExec(desktopFileName);
-    if (!byExec.id.isEmpty()) return cacheAndReturn(byExec);
-    byExec = findAppByExec(resourceClass);
-    if (!byExec.id.isEmpty()) return cacheAndReturn(byExec);
 
     return cacheAndReturn({});
 }
 
-static QStringList readProcCmdline(int pid)
+AppEntry AppManager::findApp(const QString &desktopFileName, const QString &resourceClass)
 {
-    if (pid <= 0) return {};
-    QFile f(QStringLiteral("/proc/%1/cmdline").arg(pid));
-    if (!f.open(QIODevice::ReadOnly)) return {};
-    QByteArray data = f.readAll();
-    QList<QByteArray> raw = data.split('\0');
-    QStringList args;
-    for (const auto &tok : raw) {
-        if (!tok.isEmpty()) {
-            args.append(QString::fromUtf8(tok));
-        }
-    }
-    return args;
+    return findAppImpl(desktopFileName, resourceClass, false);
 }
 
 AppEntry AppManager::resolveWindowApp(const QString &desktopFileName, const QString &resourceClass, int pid, const QString &caption)
 {
-    static QHash<QString, AppEntry> s_windowAppCache;
     bool isPlasmaWindowed = resourceClass.contains(QLatin1String("plasmawindowed"), Qt::CaseInsensitive) ||
                             desktopFileName.contains(QLatin1String("plasmawindowed"), Qt::CaseInsensitive);
 
@@ -871,19 +954,10 @@ AppEntry AppManager::resolveWindowApp(const QString &desktopFileName, const QStr
     // Daher darf der Cache-Key für plasmawindowed NIEMALS die PID nutzen, sondern muss die Caption nutzen!
     QString cacheKey = isPlasmaWindowed
         ? QStringLiteral("pw|%1").arg(caption.trimmed().toLower())
-        : QStringLiteral("%1|%2|%3").arg(desktopFileName, resourceClass, QString::number(pid));
+        : QStringLiteral("%1|%2|%3").arg(desktopFileName, resourceClass, procIdentity(pid));
 
     if (s_windowAppCache.contains(cacheKey)) {
-        AppEntry cached = s_windowAppCache.value(cacheKey);
-        if (!caption.isEmpty() && cached.name.startsWith(QLatin1String("Steam App "))) {
-            QString cleanCap = caption;
-            cleanCap.remove(QStringLiteral(" — Steam")).remove(QStringLiteral(" - Steam"));
-            if (!cleanCap.trimmed().isEmpty()) {
-                cached.name = cleanCap.trimmed();
-                s_windowAppCache.insert(cacheKey, cached);
-            }
-        }
-        return cached;
+        return s_windowAppCache.value(cacheKey);
     }
 
     auto cacheAndReturn = [&](const AppEntry &entry) -> AppEntry {
@@ -999,20 +1073,35 @@ AppEntry AppManager::resolveWindowApp(const QString &desktopFileName, const QStr
         return cacheAndReturn(pwEntry);
     }
 
-    // 1. Steam / Proton Game
+    // Reihenfolge wie bei der Taskleiste: Desktop-Eintrag des Fensters -> StartupWMClass ->
+    // Programm des Prozesses -> sonst Fenstertitel + Fenster-Icon (Fallback-Eintrag).
+
+    // 1. Steam-Spiel – nur wenn Steam die ID wirklich kennt (sonst leer, siehe resolveSteamGame)
     QString steamId;
     if (isSteamApp(desktopFileName, resourceClass, &steamId, pid)) {
-        AppEntry steamGame = resolveSteamGame(steamId, caption);
+        AppEntry steamGame = resolveSteamGame(steamId);
         if (!steamGame.id.isEmpty()) return cacheAndReturn(steamGame);
     }
 
-    // 2. Reguläre App-Suche (.desktop / sycoca / desktop index)
-    AppEntry app = findApp(desktopFileName, resourceClass);
-    if (!app.id.isEmpty() && !app.name.isEmpty()) {
-        return cacheAndReturn(app);
+    // Wine/Proton vergibt für alles ohne Steam-ID dieselbe Sammelklasse – sie identifiziert keine App.
+    static const QRegularExpression genericClassRe(
+        QStringLiteral("^(steam_app_(0|default)|steam_proton|wine|explorer\\.exe|)$"),
+        QRegularExpression::CaseInsensitiveOption);
+    const bool genericClass = genericClassRe.match(resourceClass).hasMatch() &&
+                              (desktopFileName.isEmpty() || genericClassRe.match(desktopFileName).hasMatch());
+
+    // 2. Desktop-Eintrag (Dateiname, StartupWMClass, Name, Programmname) – auch NoDisplay-Einträge
+    if (!genericClass) {
+        AppEntry app = findAppImpl(desktopFileName, resourceClass, false);
+        if (app.id.isEmpty()) {
+            app = findAppImpl(desktopFileName, resourceClass, true);
+        }
+        if (!app.id.isEmpty() && !app.name.isEmpty()) {
+            return cacheAndReturn(app);
+        }
     }
 
-    // 3. Echter AppImage-Prozess via PID
+    // 3. AppImage: Prozess läuft nachweislich aus einer AppImage
     if (pid > 0) {
         AppEntry ai = resolveAppImageFromPid(pid);
         if (!ai.id.isEmpty()) {
@@ -1020,43 +1109,84 @@ AppEntry AppManager::resolveWindowApp(const QString &desktopFileName, const QStr
         }
     }
 
-    // 4. AppImage via Pfad
-    if (isAppImage(desktopFileName) || isAppImage(resourceClass)) {
-        QString aiPath = isAppImage(desktopFileName) ? desktopFileName : resourceClass;
-        AppEntry ai = resolveAppImageFromPath(aiPath, pid);
-        if (!ai.id.isEmpty()) {
-            return cacheAndReturn(ai);
+    // 4. Programm des Prozesses -> Desktop-Eintrag, der genau dieses Programm startet
+    QString exeBase;
+    if (pid > 0) {
+        const QString exeTarget = QFile::symLinkTarget(QStringLiteral("/proc/%1/exe").arg(pid));
+        static const QRegularExpression interpreterRe(
+            QStringLiteral("^(python[0-9.]*|bash|sh|dash|zsh|perl|ruby|node|java|wine(64)?(-preloader)?|wineserver|electron[0-9]*|bwrap|srt-bwrap|pressure-vessel.*)$"));
+        const QString exeName = exeTarget.section(QLatin1Char('/'), -1);
+        if (!exeTarget.isEmpty() && !interpreterRe.match(exeName).hasMatch()) {
+            exeBase = exeName;
+            AppEntry byExec = findAppByExec(exeTarget);
+            if (!byExec.id.isEmpty() && !byExec.exec.isEmpty()) {
+                return cacheAndReturn(byExec);
+            }
+        } else if (!exeTarget.isEmpty()) {
+            // Wine/Proton: Programmname aus der Befehlszeile (…\Spiel.exe)
+            const QStringList args = readProcCmdline(pid);
+            for (const QString &a : args) {
+                if (a.endsWith(QLatin1String(".exe"), Qt::CaseInsensitive)) {
+                    QString n = a;
+                    n.replace(QLatin1Char('\\'), QLatin1Char('/'));
+                    exeBase = n.section(QLatin1Char('/'), -1);
+                    break;
+                }
+            }
         }
     }
 
-    // 5. Fallback für Fenster ohne Treffer
-    QString raw = desktopFileName.isEmpty() ? resourceClass : desktopFileName;
-    if (raw.endsWith(QLatin1String(".desktop"), Qt::CaseInsensitive)) {
-        raw.chop(8);
+    // 5. Kein Desktop-Eintrag: Fallback-Eintrag. Name = Fenstertitel, Icon kommt vom Fenster selbst
+    //    (icon bleibt ein reiner Themen-Kandidat; der Aufrufer fragt bei Fehlschlag das Fenster-Icon ab).
+    auto prettify = [](QString raw) {
+        if (raw.endsWith(QLatin1String(".desktop"), Qt::CaseInsensitive)) raw.chop(8);
+        int slash = raw.lastIndexOf(QLatin1Char('/'));
+        if (slash >= 0 && slash + 1 < raw.length()) raw = raw.mid(slash + 1);
+        // Programm-Endungen entfernen (Spiel.x86_64, spiel.exe, tool.AppImage)
+        static const QRegularExpression binSuffixRe(
+            QStringLiteral("\\.(x86_64|x86|x64|amd64|exe|bin|sh|py|appimage|run)$"),
+            QRegularExpression::CaseInsensitiveOption);
+        raw.remove(binSuffixRe);
+        // Reverse-DNS (org.kde.dolphin) -> letzter Bestandteil
+        static const QRegularExpression rdnsRe(QStringLiteral("^[a-z]{2,6}(\\.[A-Za-z0-9_-]+){2,}$"));
+        if (rdnsRe.match(raw).hasMatch()) {
+            raw = raw.section(QLatin1Char('.'), -1);
+        }
+        return raw;
+    };
+
+    QString rawKey;
+    if (!genericClass) {
+        rawKey = prettify(desktopFileName.isEmpty() ? resourceClass : desktopFileName);
     }
-    int slash = raw.lastIndexOf(QLatin1Char('/'));
-    if (slash >= 0 && slash + 1 < raw.length()) {
-        raw = raw.mid(slash + 1);
-    }
-    int dot = raw.lastIndexOf(QLatin1Char('.'));
-    if (dot >= 0 && dot + 1 < raw.length()) {
-        raw = raw.mid(dot + 1);
+    if (rawKey.isEmpty() && !exeBase.isEmpty()) {
+        rawKey = prettify(exeBase);
     }
 
+    QString cleanCap = caption.trimmed();
+    cleanCap.remove(QStringLiteral(" — Steam")).remove(QStringLiteral(" - Steam"));
+    cleanCap = cleanCap.trimmed();
+
     AppEntry fallback;
-    fallback.id = raw.isEmpty() ? QStringLiteral("window") : raw;
-    if (!caption.trimmed().isEmpty()) {
-        QString cleanCap = caption.trimmed();
-        cleanCap.remove(QStringLiteral(" — Steam")).remove(QStringLiteral(" - Steam"));
+    if (!rawKey.isEmpty()) {
+        fallback.id = rawKey;
+    } else if (!cleanCap.isEmpty()) {
+        // Sammelklasse ohne erkennbares Programm: der Titel hält verschiedene Spiele auseinander
+        fallback.id = QStringLiteral("window:") + cleanCap.toLower();
+    } else {
+        fallback.id = QStringLiteral("window");
+    }
+
+    if (!cleanCap.isEmpty()) {
         fallback.name = cleanCap;
-    } else if (!raw.isEmpty()) {
-        QString n = raw;
+    } else if (!rawKey.isEmpty()) {
+        QString n = rawKey;
         n[0] = n[0].toUpper();
         fallback.name = n;
     } else {
         fallback.name = QStringLiteral("Window");
     }
-    fallback.icon = resourceClass.isEmpty() ? desktopFileName : resourceClass;
+    fallback.icon = genericClass ? rawKey : (resourceClass.isEmpty() ? desktopFileName : resourceClass);
     return cacheAndReturn(fallback);
 }
 
@@ -1154,113 +1284,63 @@ bool AppManager::isBlacklistedRecentApp(const AppEntry &entry, int pid, const QS
         }
     }
 
-    // 5. Allgemeingültige Prüfung: Wurde das Programm über eine Datei aufgerufen (Datei-Handler)?
-    // Apps, die nativ Verzeichnisse verwalten, Web-URLs ansteuern oder Steam-Spiele ausführen, sind ausgenommen.
+    // 5. Über eine Datei oder einen Link geöffnet? Solche Starts gehören nicht in Recent Apps
+    //    (die Datei steht in Recent Files). Maßgeblich ist allein der Startbefehl im Vergleich
+    //    zur Exec-Zeile des Desktop-Eintrags:
+    //      - Hat Exec keinen Datei-Platzhalter (%f %F %u %U), KANN die App nicht über eine Datei
+    //        geöffnet worden sein -> zählt immer.
+    //      - Sonst gilt jedes zusätzliche Argument, das eine vorhandene Datei oder eine URL ist,
+    //        als Datei-Start. Argumente, die schon fest in Exec stehen, zählen nicht.
+    //    Fenstertitel werden nicht mehr ausgewertet (sie ändern sich während der Benutzung).
+    Q_UNUSED(caption);
     bool isExemptApp = false;
     if (id.contains(QLatin1String("brave")) || id.contains(QLatin1String("firefox")) ||
         id.contains(QLatin1String("chrome")) || id.contains(QLatin1String("chromium")) ||
         id.contains(QLatin1String("vivaldi")) || id.contains(QLatin1String("opera")) ||
-        id.contains(QLatin1String("edge")) || id.contains(QLatin1String("tor-browser")) ||
-        exec.contains(QLatin1String("brave")) || exec.contains(QLatin1String("firefox")) ||
-        exec.contains(QLatin1String("chrome")) || exec.contains(QLatin1String("chromium"))) {
-        isExemptApp = true;
+        id.contains(QLatin1String("microsoft-edge")) || id.contains(QLatin1String("tor-browser")) ||
+        id.contains(QLatin1String("zen-browser")) || id.contains(QLatin1String("librewolf"))) {
+        isExemptApp = true; // Browser: eine URL als Argument ist der Normalfall
     } else if (id == QLatin1String("org.kde.dolphin") || id == QLatin1String("dolphin") ||
                id.contains(QLatin1String("nemo")) || id.contains(QLatin1String("nautilus")) ||
                id.contains(QLatin1String("thunar")) || id.contains(QLatin1String("pcmanfm")) ||
-               id.contains(QLatin1String("krusader")) || exec.contains(QLatin1String("dolphin"))) {
-        isExemptApp = true;
-    } else if (id == QLatin1String("org.kde.konsole") || id == QLatin1String("konsole") ||
-               id.contains(QLatin1String("alacritty")) || id.contains(QLatin1String("kitty")) ||
-               id.contains(QLatin1String("foot")) || id.contains(QLatin1String("wezterm")) ||
-               id.contains(QLatin1String("gnome-terminal")) || id.contains(QLatin1String("xterm"))) {
-        isExemptApp = true;
+               id.contains(QLatin1String("krusader"))) {
+        isExemptApp = true; // Dateimanager
     } else if (id.startsWith(QLatin1String("steam_app_")) || id == QLatin1String("steam") ||
                exec.contains(QLatin1String("steam://rungameid/"))) {
         isExemptApp = true;
     }
 
-    if (!isExemptApp) {
-        static const QSet<QString> dataExtensions = {
-            // Archive
-            QStringLiteral("zip"), QStringLiteral("tar"), QStringLiteral("gz"), QStringLiteral("tgz"),
-            QStringLiteral("bz2"), QStringLiteral("tbz2"), QStringLiteral("xz"), QStringLiteral("txz"),
-            QStringLiteral("7z"), QStringLiteral("rar"), QStringLiteral("zst"), QStringLiteral("tzst"),
-            QStringLiteral("iso"), QStringLiteral("dmg"), QStringLiteral("cab"),
-            // Bilder & Grafik
-            QStringLiteral("png"), QStringLiteral("jpg"), QStringLiteral("jpeg"), QStringLiteral("jpe"),
-            QStringLiteral("jfif"), QStringLiteral("gif"), QStringLiteral("bmp"), QStringLiteral("dib"),
-            QStringLiteral("webp"), QStringLiteral("svg"), QStringLiteral("svgz"), QStringLiteral("ico"),
-            QStringLiteral("tiff"), QStringLiteral("tif"), QStringLiteral("avif"), QStringLiteral("heic"),
-            QStringLiteral("heif"), QStringLiteral("raw"), QStringLiteral("cr2"), QStringLiteral("nef"),
-            QStringLiteral("arw"), QStringLiteral("dng"), QStringLiteral("xcf"), QStringLiteral("psd"),
-            QStringLiteral("kra"),
-            // Dokumente & Office
-            QStringLiteral("pdf"), QStringLiteral("djvu"), QStringLiteral("epub"), QStringLiteral("mobi"),
-            QStringLiteral("cbr"), QStringLiteral("cbz"), QStringLiteral("doc"), QStringLiteral("docx"),
-            QStringLiteral("odt"), QStringLiteral("ott"), QStringLiteral("rtf"), QStringLiteral("txt"),
-            QStringLiteral("md"), QStringLiteral("markdown"), QStringLiteral("xls"), QStringLiteral("xlsx"),
-            QStringLiteral("ods"), QStringLiteral("ots"), QStringLiteral("csv"), QStringLiteral("tsv"),
-            QStringLiteral("ppt"), QStringLiteral("pptx"), QStringLiteral("odp"), QStringLiteral("otp"),
-            // Audio & Video
-            QStringLiteral("mp3"), QStringLiteral("flac"), QStringLiteral("wav"), QStringLiteral("ogg"),
-            QStringLiteral("oga"), QStringLiteral("m4a"), QStringLiteral("aac"), QStringLiteral("opus"),
-            QStringLiteral("wma"), QStringLiteral("mp4"), QStringLiteral("mkv"), QStringLiteral("avi"),
-            QStringLiteral("mov"), QStringLiteral("webm"), QStringLiteral("flv"), QStringLiteral("wmv"),
-            QStringLiteral("m4v"), QStringLiteral("mpg"), QStringLiteral("mpeg")
-        };
-
-        // A. Start-Argumente prüfen (/proc/<pid>/cmdline)
-        if (pid > 0) {
-            QStringList args = readProcCmdline(pid);
-            for (int i = 1; i < args.size(); ++i) {
-                const QString &arg = args[i];
-                if (arg.isEmpty()) continue;
-                QString low = arg.toLower();
-
-                // file:// URI
-                if (low.startsWith(QLatin1String("file://"))) {
-                    return true;
-                }
-
-                // Dateiendung als Argument prüfen
-                int dot = low.lastIndexOf(QLatin1Char('.'));
-                if (dot > 0 && dot + 1 < low.length()) {
-                    QString ext = low.mid(dot + 1);
-                    if (dataExtensions.contains(ext) && !arg.startsWith(QLatin1String("--"))) {
-                        return true;
-                    }
-                }
-
-                // Absoluter Pfad zu einer Datei im Benutzerbereich
-                if (arg.startsWith(QLatin1Char('/')) &&
-                    !arg.startsWith(QLatin1String("/usr")) &&
-                    !arg.startsWith(QLatin1String("/opt")) &&
-                    !arg.startsWith(QLatin1String("/bin")) &&
-                    !arg.startsWith(QLatin1String("/sbin")) &&
-                    !arg.startsWith(QLatin1String("/lib")) &&
-                    !arg.startsWith(QLatin1String("/tmp/.mount_")) &&
-                    !arg.startsWith(QLatin1String("/etc")) &&
-                    !arg.startsWith(QLatin1String("/dev")) &&
-                    !arg.startsWith(QLatin1String("/proc")) &&
-                    !arg.startsWith(QLatin1String("/sys"))) {
-                    QFileInfo fi(arg);
-                    if (fi.exists() && fi.isFile()) {
-                        return true;
-                    }
-                }
-            }
+    static const QRegularExpression fileCodeRe(QStringLiteral("%[fFuU]"));
+    if (!isExemptApp && pid > 0 && entry.exec.contains(fileCodeRe)) {
+        QSet<QString> fixedArgs;
+        const QStringList execToks = QProcess::splitCommand(entry.exec);
+        for (const QString &tok : execToks) {
+            if (!tok.startsWith(QLatin1Char('%'))) fixedArgs.insert(tok);
         }
 
-        // B. Ergänzende Fenstertitel-Prüfung (caption)
-        if (!caption.isEmpty()) {
-            static const QRegularExpression fileInTitleRe(QStringLiteral("\\.([a-zA-Z0-9]{2,5})(?![a-zA-Z0-9])"));
-            auto it = fileInTitleRe.globalMatch(caption);
-            while (it.hasNext()) {
-                auto match = it.next();
-                QString ext = match.captured(1).toLower();
-                if (dataExtensions.contains(ext)) {
-                    return true;
-                }
+        const QString cwd = QFile::symLinkTarget(QStringLiteral("/proc/%1/cwd").arg(pid));
+        const QStringList args = readProcCmdline(pid);
+        for (int i = 1; i < args.size(); ++i) {
+            const QString &arg = args[i];
+            if (arg.isEmpty() || arg.startsWith(QLatin1Char('-')) || fixedArgs.contains(arg)) continue;
+
+            static const QRegularExpression urlRe(QStringLiteral("^[a-zA-Z][a-zA-Z0-9+.-]*://"));
+            if (urlRe.match(arg).hasMatch()) {
+                return true;
+            }
+
+            QString path = arg;
+            if (!path.startsWith(QLatin1Char('/')) && !cwd.isEmpty()) {
+                path = cwd + QLatin1Char('/') + path;
+            }
+            // Dateien aus der eigenen Installation (AppImage-Mount, /usr, /opt) sind Programmteile
+            if (path.startsWith(QLatin1String("/tmp/.mount_")) || path.startsWith(QLatin1String("/usr/")) ||
+                path.startsWith(QLatin1String("/opt/")) || path.startsWith(QLatin1String("/app/"))) {
+                continue;
+            }
+            QFileInfo fi(path);
+            if (fi.exists() && fi.isFile()) {
+                return true;
             }
         }
     }
@@ -1347,7 +1427,8 @@ void AppManager::recordAppUsage(const QString &desktopFileName, const QString &r
     if (desktopFileName.isEmpty() && resourceClass.isEmpty() && pid <= 0) return;
 
     AppEntry app = resolveWindowApp(desktopFileName, resourceClass, pid, caption);
-    if (app.id.isEmpty() || app.exec.trimmed().isEmpty() || isBlacklistedRecentApp(app, pid, caption)) {
+    // Ohne Startbefehl (Fenster ohne Desktop-Eintrag) oder mit NoDisplay kann/soll nichts gestartet werden
+    if (app.id.isEmpty() || app.hidden || app.exec.trimmed().isEmpty() || isBlacklistedRecentApp(app, pid, caption)) {
         return;
     }
 
@@ -1355,7 +1436,7 @@ void AppManager::recordAppUsage(const QString &desktopFileName, const QString &r
     static qint64 s_lastRecordedTime = 0;
     qint64 now = QDateTime::currentSecsSinceEpoch();
 
-    if (s_lastRecordedId == app.id && (now - s_lastRecordedTime) < 2) {
+    if (s_lastRecordedId == app.id && (now - s_lastRecordedTime) < 20) {
         return; // Throttle redundant writes
     }
     s_lastRecordedId = app.id;
@@ -1623,8 +1704,10 @@ static QList<AppEntry> getRawRecentApps()
         }
     }
 
-    // 2. Supplement from kactivitymanagerd if needed
-    if (rawList.size() < 50) {
+    // 2. Nur beim allerersten Start (noch keine eigene Liste): aus der KDE-Statistik vorbelegen.
+    //    Danach zählt ausschließlich, was Karyon selbst als Programmstart beobachtet hat –
+    //    die KDE-Statistik unterscheidet nicht zwischen Programmstart und "Datei geöffnet mit".
+    if (rawList.isEmpty()) {
         QString dbPath = QDir::homePath() + QStringLiteral("/.local/share/kactivitymanagerd/resources/database");
         sqlite3 *db = nullptr;
         if (sqlite3_open_v2(dbPath.toUtf8().constData(), &db, SQLITE_OPEN_READONLY, nullptr) == SQLITE_OK) {
@@ -2091,7 +2174,7 @@ bool AppManager::launchApp(const QString &execLine)
     QProcess p;
     p.setProgram(prog);
     p.setArguments(args);
-    p.setProcessEnvironment(ProcessUtils::cleanHostEnvironment());
+    ProcessUtils::prepareDetached(p);
     bool ok = p.startDetached();
     if (!ok) {
         // Allgemeingültiger Fallback: Über AppManager::findApp nach Desktop-Eintrag / Binary suchen
@@ -2108,7 +2191,7 @@ bool AppManager::launchApp(const QString &execLine)
                 prog = sArgs.takeFirst();
                 p.setProgram(prog);
                 p.setArguments(sArgs);
-                p.setProcessEnvironment(ProcessUtils::cleanHostEnvironment());
+                ProcessUtils::prepareDetached(p);
                 ok = p.startDetached();
             }
         }

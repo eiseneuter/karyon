@@ -3,6 +3,7 @@
 #include <QObject>
 #include <QPoint>
 #include <atomic>
+#include <mutex>
 #include <thread>
 #include <vector>
 #include <string>
@@ -56,8 +57,26 @@ public:
     // Gesture detection constants
     static constexpr double GESTURE_MIN_DISPLACEMENT = 60.0;
     static constexpr int GESTURE_TIME_WINDOW_MS = 350;
+    // Solange die Maus seit dem Drücken insgesamt weniger als so viele Schritte zurückgelegt hat
+    // (aufsummiert, nicht netto), gilt sie als "ruhig gehalten" und das Overlay darf öffnen.
+    // Bewusst streng: ein normaler Rechtsklick mit leichter Handbewegung darf das Overlay nie öffnen.
+    static constexpr float STILL_LIMIT = 14.0f;
+
+    // Welche der 8 Gestenrichtungen belegt sind (0 = Gesten ganz aus). Unbelegte Richtungen
+    // werden nicht abgefangen: Rechtsklick und Rechts-Ziehen funktionieren dort normal.
+    void setGestureMask(int mask) { m_gestureMask.store(mask); }
+
+    // Klick an der Haltezeit-Grenze: Lässt man den Auslöser höchstens so lange nach dem Öffnen
+    // des Overlays wieder los, ohne die Maus bewegt zu haben, zählt das als normaler Klick
+    // (Kontextmenü) statt als Schnellwechsel zum letzten Fenster.
+    static constexpr int LATE_CLICK_GRACE_MS = 45;
+    static constexpr float LATE_CLICK_MOVE_LIMIT = 6.0f;
+    static constexpr int LATE_CLICK_SETTLE_MS = 15; // Wartezeit nach dem Schließen des Overlays
+    // GUI-Thread meldet: Overlay ist geschlossen, der Klick darf jetzt an das Fenster darunter gehen.
+    void confirmLateClick() { m_lateClickConfirmed.store(true); }
 
 signals:
+    void lateClick();
     void rightPressed();
     void triggerPressed();
     void inputCaptured(const QString &type, int button, const QString &keySeq, const QString &displayName);
@@ -115,6 +134,8 @@ private:
     std::atomic<double> m_overlayMouseSpeed{-0.5};
     std::atomic<bool> m_gameModeActive{false};
     std::atomic<bool> m_gameModeEnabled{true};
+    std::atomic<bool> m_lateClickConfirmed{false};
+    std::atomic<int> m_gestureMask{0xFF}; // Bit n = Geste in Richtung n ist belegt; 0 = Gesten aus
     std::atomic<int> m_triggerType{0}; // 0 = mouse, 1 = keyboard
     std::atomic<int> m_triggerButton{273}; // BTN_RIGHT
     std::vector<int> m_triggerKeyCodes;
@@ -127,8 +148,13 @@ private:
     std::atomic<int> m_syncAimX{0};
     std::atomic<int> m_syncAimY{-20};
     std::thread m_thread;
-    std::vector<DeviceInfo> m_devices;
-    std::vector<DeviceInfo> m_keyboards;
+    std::vector<DeviceInfo> m_devices;   // nur im Eingabe-Thread anfassen
+    std::vector<DeviceInfo> m_keyboards; // nur im Eingabe-Thread anfassen
+    // Zwischen GUI-Thread und Eingabe-Thread geteilte Daten (durch m_sharedMutex geschützt):
+    std::mutex m_sharedMutex;
+    std::vector<DeviceInfo> m_grabbedSnapshot; // Kopie der gegrabbten Mäuse für den GUI-Thread
+    std::atomic<int> m_triggerGen{0};          // erhöht sich bei jeder Änderung von m_triggerKeyCodes
+    void publishGrabbedSnapshot();
     std::string m_lastReportedMouse;
     std::chrono::steady_clock::time_point m_lastReportedTime{};
     std::chrono::steady_clock::time_point m_uinputCreatedTime{};

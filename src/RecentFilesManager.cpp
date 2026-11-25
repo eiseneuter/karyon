@@ -10,6 +10,7 @@
 #include <QStandardPaths>
 #include <QProcess>
 #include <QHash>
+#include <QRegularExpression>
 #include <algorithm>
 
 namespace {
@@ -19,8 +20,13 @@ bool isExcludedApplication(const QString &appName, const QString &appExec)
     static const QStringList excludedKeywords = {
         QStringLiteral("portal"),
         QStringLiteral("kdialog"),
-        QStringLiteral("browser"),
         QStringLiteral("firefox"),
+        QStringLiteral("falkon"),
+        QStringLiteral("midori"),
+        QStringLiteral("qutebrowser"),
+        QStringLiteral("floorp"),
+        QStringLiteral("thorium"),
+        QStringLiteral("torbrowser"),
         QStringLiteral("chrome"),
         QStringLiteral("chromium"),
         QStringLiteral("brave"),
@@ -45,8 +51,23 @@ bool isExcludedApplication(const QString &appName, const QString &appExec)
         return true;
     }
 
+    // Als ganze Wörter vergleichen, nicht als Teilwort: sonst träfe "tor" auch "Text Editor"
+    // und "Qt Creator", "zen" auch "zenity", und Dateien dieser Programme fehlten im Files-Ring.
+    static const QRegularExpression splitRe(QStringLiteral("[^a-z0-9]+"));
+    QStringList words = lowerName.split(splitRe, Qt::SkipEmptyParts);
+    // Von der Befehlszeile zählt nur das Programm selbst, nicht Pfade/Argumente
+    const QStringList execToks = QProcess::splitCommand(lowerExec);
+    for (const QString &tok : execToks) {
+        if (tok == QLatin1String("env") || tok.startsWith(QLatin1Char('-')) || tok.startsWith(QLatin1Char('%')) ||
+            (tok.contains(QLatin1Char('=')) && !tok.startsWith(QLatin1Char('/')))) {
+            continue;
+        }
+        words += tok.section(QLatin1Char('/'), -1).split(splitRe, Qt::SkipEmptyParts);
+        break;
+    }
+
     for (const QString &kw : excludedKeywords) {
-        if (lowerName.contains(kw) || lowerExec.contains(kw)) {
+        if (words.contains(kw)) {
             return true;
         }
     }

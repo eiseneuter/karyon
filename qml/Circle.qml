@@ -1515,12 +1515,9 @@ Item {
     Repeater {
         model: (hasRing3Active && segmentList3) ? segmentList3 : []
 
-        Image {
-            id: segIcon3
-            source: (modelData && modelData.iconSource) ? modelData.iconSource : ""
-            width: iconSize
-            height: iconSize
-            smooth: true
+        // Wie Ring 1 und 2: Icon ODER Text. Ohne den Text-Zweig blieben Menüeinträge von
+        // Tray-Programmen, die auf Ring 3 landen, leer.
+        Item {
             anchors.centerIn: parent
 
             transform: Translate {
@@ -1545,6 +1542,41 @@ Item {
                     var r3 = (innerR3 + outerR3) / 2;
                     var ang = (modelData && typeof modelData.angle !== "undefined") ? modelData.angle : 0;
                     return r3 * Math.sin(ang);
+                }
+            }
+
+            Image {
+                id: segIcon3
+                visible: (modelData && !modelData.isTextSegment && !!modelData.iconSource)
+                source: (modelData && modelData.iconSource) ? modelData.iconSource : ""
+                width: iconSize
+                height: iconSize
+                smooth: true
+                anchors.centerIn: parent
+            }
+
+            Text {
+                id: segText3
+                visible: (modelData && !!modelData.isTextSegment)
+                text: (modelData && modelData.label) ? modelData.label : ""
+                color: (selectedRing === 3 && selectedIndex === index)
+                    ? ((typeof karyonTheme !== "undefined") ? karyonTheme.identApps : "#37d0ff")
+                    : ((typeof karyonTheme !== "undefined") ? karyonTheme.textPrimary : "#e8eef6")
+                font.pixelSize: Math.max(9, Math.round(10 * (circleRadius / 75.0)))
+                font.bold: (selectedRing === 3 && selectedIndex === index)
+                horizontalAlignment: Text.AlignHCenter
+                verticalAlignment: Text.AlignVCenter
+                elide: Text.ElideRight
+                width: ring3Depth - 4
+                anchors.centerIn: parent
+
+                rotation: {
+                    var ang = (modelData && typeof modelData.angle !== "undefined") ? modelData.angle : 0;
+                    var deg = ang * 180 / Math.PI;
+                    if (ang < -Math.PI / 2 || ang > Math.PI / 2) {
+                        return deg + 180;
+                    }
+                    return deg;
                 }
             }
         }

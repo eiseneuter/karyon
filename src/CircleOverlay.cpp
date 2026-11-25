@@ -27,6 +27,7 @@
 #include <KWindowSystem>
 #include <KSycoca>
 #include <KX11Extras>
+#include <KWindowInfo>
 #include <xcb/xcb.h>
 #include <QMimeDatabase>
 #include <QMimeType>
@@ -44,10 +45,29 @@ CircleOverlay::CircleOverlay(QObject *parent)
 
     // Startmenü-Datenbank geändert (App installiert/entfernt/umbenannt) -> Kategorien neu laden
     connect(KSycoca::self(), &KSycoca::databaseChanged, this, [this]() {
-        KLOG("Overlay", "KSycoca databaseChanged -> invalidating menu categories");
-        m_cachedCategories.clear();
-        m_cachedFavorites.clear();
+        KLOG("Overlay", "KSycoca databaseChanged -> invalidating app caches");
+        AppManager::invalidateCaches();
+        m_appNameCache.clear();
+        m_iconMissUntil.clear();
+        m_steamNameCache.clear();
+        m_steamIconCache.clear();
+        // Icon-Dateien der Apps verwerfen (Tray-/Datei-/Glyph-Icons bleiben), damit neue
+        // Desktop-Einträge und Icons sofort greifen.
+        for (auto it = m_iconPathCache.begin(); it != m_iconPathCache.end();) {
+            if (it.key().startsWith(QLatin1String("file:")) || it.key().startsWith(QLatin1String("tray_"))) {
+                ++it;
+            } else {
+                QFile::remove(it.value());
+                it = m_iconPathCache.erase(it);
+            }
+        }
+        // Kategorien beim nächsten Öffnen neu laden. Ist das Menü gerade offen, bleibt die
+        // angezeigte Liste stehen – sonst würden die Kategorien unter dem Mauszeiger verschwinden.
         m_lastCategoriesLoadTime = 0;
+        if (!isVisible()) {
+            m_cachedCategories.clear();
+            m_cachedFavorites.clear();
+        }
     });
     connect(&m_mediaManager, &MediaManager::mediaChanged, this, [this]() {
         KLOG("Media", "mediaChanged signal received (isVisible=%d)", isVisible());
@@ -55,12 +75,28 @@ CircleOverlay::CircleOverlay(QObject *parent)
             refreshCurrentMode();
         }
     });
-    connect(&m_trayManager, &TrayManager::trayIconsChanged, this, [this]() {
-        KLOG("Tray", "trayIconsChanged signal received (isVisible=%d)", isVisible());
+    // Tray-Signale kommen in Schüben (animierte Icons, Badges, Verbindungsanzeigen). Die Liste
+    // neu aufzubauen kostet pro Eintrag mehrere D-Bus-Abfragen – deshalb:
+    //  - Overlay zu: nur als veraltet markieren, beim nächsten Öffnen wird neu geladen.
+    //  - Overlay offen: Signale 150 ms sammeln und dann EINMAL neu aufbauen.
+    m_trayRebuildTimer.setSingleShot(true);
+    m_trayRebuildTimer.setInterval(150);
+    connect(&m_trayRebuildTimer, &QTimer::timeout, this, [this]() {
         m_trayIconRevision++;
         m_cachedTrayPrograms = m_trayManager.runningPrograms();
         if (isVisible()) {
             refreshCurrentMode();
+        }
+    });
+    connect(&m_trayManager, &TrayManager::trayIconsChanged, this, [this]() {
+        KLOG("Tray", "trayIconsChanged signal received (isVisible=%d)", isVisible());
+        if (isVisible()) {
+            if (!m_trayRebuildTimer.isActive()) m_trayRebuildTimer.start();
+        } else {
+            if (!m_cachedTrayPrograms.isEmpty()) {
+                m_trayIconRevision++;
+                m_cachedTrayPrograms.clear();
+            }
         }
     });
 
@@ -393,8 +429,10 @@ QIcon CircleOverlay::resolveIcon(const QString &name)
         };
         for (const auto &ext : imgExts) {
             if (name.endsWith(ext, Qt::CaseInsensitive)) {
+                // availableSizes() ist für SVG-Dateien immer leer – maßgeblich ist, ob sich
+                // das Bild tatsächlich rendern lässt.
                 QIcon imgIcon(name);
-                if (!imgIcon.isNull() && !imgIcon.availableSizes().isEmpty()) {
+                if (!imgIcon.isNull() && !imgIcon.pixmap(64, 64).isNull()) {
                     return imgIcon;
                 }
                 break;
@@ -422,7 +460,7 @@ QIcon CircleOverlay::resolveIcon(const QString &name)
 
     // 3. System Theme Icon
     QIcon icon = QIcon::fromTheme(name);
-    if (!icon.isNull() && !icon.availableSizes().isEmpty()) {
+    if (!icon.isNull() && (!icon.availableSizes().isEmpty() || !icon.pixmap(64, 64).isNull())) {
         return icon;
     }
 
@@ -453,7 +491,7 @@ QIcon CircleOverlay::resolveIcon(const QString &name)
     QString lower = name.toLower();
     if (lower != name) {
         icon = QIcon::fromTheme(lower);
-        if (!icon.isNull() && !icon.availableSizes().isEmpty()) {
+        if (!icon.isNull() && (!icon.availableSizes().isEmpty() || !icon.pixmap(64, 64).isNull())) {
             return icon;
         }
         for (const QString &dir : pixmapDirs) {
@@ -508,8 +546,9 @@ bool CircleOverlay::resolveSteamGame(const QString &steamId, QString &outName, Q
         return true;
     }
 
-    outName = QStringLiteral("Steam App ") + steamId;
-    outIcon = QIcon::fromTheme(QStringLiteral("steam"));
+    // Unbekannte ID (kein Steam-Spiel): kein erfundener Titel, kein Steam-Icon
+    outName.clear();
+    outIcon = QIcon();
     return false;
 }
 
@@ -574,8 +613,112 @@ QIcon CircleOverlay::resolveWindowIcon(const QString &desktopFileName, const QSt
         }
     }
 
-    // 5. Fallback
-    return QIcon::fromTheme(QStringLiteral("application-x-executable"));
+    // 5. Kein Themen-/Datei-Icon gefunden: leer zurückgeben. iconFileForSegment() fragt dann
+    //    das Icon des Fensters selbst ab und nimmt erst zuletzt den Platzhalter.
+    return {};
+}
+
+// Icon, das das Fenster selbst mitbringt (_NET_WM_ICON) – dieselbe Quelle, die Taskleiste und
+// Alt+Tab für X11/XWayland-Fenster (Wine, Proton, Steam, viele Spiele) verwenden.
+// KWin meldet uns nur seine interne Fenster-ID; das passende X11-Fenster wird über
+// Klasse, Titel und PID gesucht.
+QIcon CircleOverlay::x11WindowIcon(const WindowInfo &w)
+{
+    if (!KWindowSystem::isPlatformX11()) return {};
+
+    WId best = 0;
+    int bestScore = 0;
+    const QList<WId> wins = KX11Extras::windows();
+    for (WId id : wins) {
+        KWindowInfo info(id, NET::WMPid | NET::WMName | NET::WMVisibleName, NET::WM2WindowClass);
+        if (!info.valid()) continue;
+        const QString cls = QString::fromUtf8(info.windowClassClass());
+        const QString clsName = QString::fromUtf8(info.windowClassName());
+        int score = 0;
+        if (!w.resourceClass.isEmpty() &&
+            (cls.compare(w.resourceClass, Qt::CaseInsensitive) == 0 ||
+             clsName.compare(w.resourceClass, Qt::CaseInsensitive) == 0)) {
+            score += 2;
+        }
+        if (!w.caption.isEmpty() && (info.name() == w.caption || info.visibleName() == w.caption)) {
+            score += 3;
+        }
+        if (w.pid > 0 && info.pid() == w.pid) {
+            score += 2;
+        }
+        if (score > bestScore) {
+            bestScore = score;
+            best = id;
+        }
+    }
+    // Mindestens Klasse ODER PID muss passen und zusätzlich ein zweites Merkmal,
+    // oder der Titel allein ist eindeutig genug (3).
+    if (!best || bestScore < 3) return {};
+
+    QPixmap pm = KX11Extras::icon(best, 128, 128, false, KX11Extras::NETWM | KX11Extras::WMHints);
+    if (pm.isNull()) return {};
+    return QIcon(pm);
+}
+
+// Liefert die PNG-Datei mit dem Icon eines Segments (Fenster oder App).
+// Reihenfolge: Cache -> Desktop-Eintrag/Thema -> Icon des Fensters -> Platzhalter.
+// Der Platzhalter wird NIE unter dem App-Schlüssel gespeichert, damit ein einmaliger
+// Fehlschlag nicht bis zum Neustart als falsches Icon hängen bleibt.
+QString CircleOverlay::iconFileForSegment(const OverlaySegment &seg, const QString &tmpDir)
+{
+    const QString key = seg.appKey;
+    QString iconPath = m_iconPathCache.value(key);
+    if (!iconPath.isEmpty() && QFile::exists(iconPath)) return iconPath;
+
+    const int genericSize = iconSize();
+    const QString genericPath = tmpDir + QStringLiteral("/_generic_%1.png").arg(genericSize);
+    // Nach einem Fehlschlag 10 s lang nicht erneut suchen (die Suche fragt u.a. alle X11-Fenster ab);
+    // danach wird wieder versucht – ein Fehlschlag bleibt also nie dauerhaft hängen.
+    const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
+    if (m_iconMissUntil.value(key, 0) > nowMs && QFile::exists(genericPath)) {
+        return genericPath;
+    }
+
+    QString cleanKey = key;
+    cleanKey.replace(QLatin1Char('/'), QLatin1Char('_')).replace(QLatin1Char(':'), QLatin1Char('_'));
+    const int size = iconSize();
+    const QString candidatePath = tmpDir + QStringLiteral("/") + cleanKey + QStringLiteral("_%1.png").arg(size);
+    if (QFile::exists(candidatePath)) {
+        m_iconPathCache.insert(key, candidatePath);
+        return candidatePath;
+    }
+
+    QIcon icon = resolveWindowIcon(seg.desktopFileName, seg.resourceClass);
+    if (icon.isNull() && seg.appKey != seg.resourceClass) {
+        icon = resolveIcon(seg.appKey);
+    }
+    if (icon.isNull() && !seg.windowId.isEmpty()) {
+        // Alle Fenster dieser Gruppe durchprobieren
+        QStringList ids = seg.groupWindowIds;
+        if (!ids.contains(seg.windowId)) ids.prepend(seg.windowId);
+        for (const auto &w : m_cachedWindows) {
+            if (!ids.contains(w.id)) continue;
+            icon = x11WindowIcon(w);
+            if (!icon.isNull()) break;
+        }
+    }
+
+    if (!icon.isNull()) {
+        QPixmap pix = icon.pixmap(size, size);
+        if (!pix.isNull() && pix.save(candidatePath, "PNG", 0)) {
+            m_iconPathCache.insert(key, candidatePath);
+            return candidatePath;
+        }
+    }
+
+    m_iconMissUntil.insert(key, nowMs + 10000);
+    if (!QFile::exists(genericPath)) {
+        QIcon generic = QIcon::fromTheme(QStringLiteral("application-x-executable"));
+        if (generic.isNull()) generic = QIcon::fromTheme(QStringLiteral("application-default-icon"));
+        QPixmap pix = generic.pixmap(size, size);
+        if (pix.isNull() || !pix.save(genericPath, "PNG", 0)) return {};
+    }
+    return genericPath;
 }
 
 QString CircleOverlay::appNameFromDesktopFile(const QString &path)
@@ -584,6 +727,46 @@ QString CircleOverlay::appNameFromDesktopFile(const QString &path)
     QSettings desktop(path, QSettings::IniFormat);
     desktop.beginGroup(QStringLiteral("Desktop Entry"));
     return desktop.value(QStringLiteral("Name")).toString();
+}
+
+// Zeigt dieses Fenster die angegebene Datei?
+//  - Der vollständige Dateiname (mit Endung) steht als eigenes Wort im Titel, ODER
+//  - der Name ohne Endung steht im Titel UND der Prozess wurde mit genau dieser Datei gestartet.
+// Der Name ohne Endung allein reicht nicht: "Report" träfe sonst jeden Browser-Tab "Report – …".
+bool CircleOverlay::windowShowsFile(const WindowInfo &w, const QString &filePath) const
+{
+    const QFileInfo fi(filePath);
+    const QString fileName = fi.fileName();
+    if (fileName.isEmpty() || w.caption.isEmpty()) return false;
+
+    static const QString delim = QStringLiteral("[\\s\\-_—–\\[\\]\\(\\)•*:/|]");
+    auto wordIn = [&](const QString &word) {
+        QRegularExpression re(QStringLiteral("(?:^|%1)%2(?:$|%1)").arg(delim, QRegularExpression::escape(word)),
+                              QRegularExpression::CaseInsensitiveOption);
+        return re.match(w.caption).hasMatch();
+    };
+
+    if (wordIn(fileName)) return true;
+
+    const QString baseName = fi.completeBaseName();
+    if (baseName.length() < 2 || baseName == fileName || !wordIn(baseName) || w.pid <= 0) return false;
+
+    QFile f(QStringLiteral("/proc/%1/cmdline").arg(w.pid));
+    if (!f.open(QIODevice::ReadOnly)) return false;
+    const QList<QByteArray> args = f.readAll().split('\0');
+    for (int i = 1; i < args.size(); ++i) {
+        QString a = QString::fromUtf8(args[i]);
+        if (a.startsWith(QLatin1String("file://"))) a = QUrl(a).toLocalFile();
+        if (a == filePath || (!a.contains(QLatin1Char('/')) && a == fileName)) return true;
+    }
+    return false;
+}
+
+// Name der App eines Fensters – dieselbe Erkennung wie für Icon, Gruppierung und Recent Apps.
+QString CircleOverlay::windowAppName(const WindowInfo &w) const
+{
+    const AppEntry app = AppManager::resolveWindowApp(w.desktopFileName, w.resourceClass, w.pid, w.caption);
+    return app.name.isEmpty() ? QStringLiteral("Window") : app.name;
 }
 
 QString CircleOverlay::resolveAppName(const QString &desktopFileName, const QString &resourceClass)
@@ -638,9 +821,14 @@ QString CircleOverlay::resolveAppName(const QString &desktopFileName, const QStr
     if (slash >= 0 && slash + 1 < raw.length()) {
         raw = raw.mid(slash + 1);
     }
-    int lastDot = raw.lastIndexOf(QLatin1Char('.'));
-    if (lastDot >= 0 && lastDot + 1 < raw.length()) {
-        raw = raw.mid(lastDot + 1);
+    // Programm-Endungen entfernen (Spiel.x86_64 -> Spiel), Reverse-DNS kürzen (org.kde.dolphin -> dolphin)
+    static const QRegularExpression binSuffixRe(
+        QStringLiteral("\\.(x86_64|x86|x64|amd64|exe|bin|sh|py|appimage|run)$"),
+        QRegularExpression::CaseInsensitiveOption);
+    raw.remove(binSuffixRe);
+    static const QRegularExpression rdnsRe(QStringLiteral("^[a-z]{2,6}(\\.[A-Za-z0-9_-]+){2,}$"));
+    if (rdnsRe.match(raw).hasMatch()) {
+        raw = raw.section(QLatin1Char('.'), -1);
     }
     if (!raw.isEmpty()) {
         raw[0] = raw[0].toUpper();
@@ -674,7 +862,7 @@ QString CircleOverlay::formatWindowTooltip(const QString &appName, const QString
     }
     cleanCap = cleanCap.trimmed();
 
-    if (cleanCap.isEmpty()) {
+    if (cleanCap.isEmpty() || cleanCap.compare(appName.trimmed(), Qt::CaseInsensitive) == 0) {
         return appName;
     }
 
@@ -795,7 +983,7 @@ QSet<QString> CircleOverlay::openAppIdentifiers() const
             }
         }
 
-        QString name = const_cast<CircleOverlay*>(this)->resolveAppName(w.desktopFileName, w.resourceClass).toLower();
+        QString name = windowAppName(w).toLower();
         if (!name.isEmpty() && name != QLatin1String("window")) {
             set.insert(name);
         }
@@ -856,11 +1044,13 @@ void CircleOverlay::partitionWindows(const QList<WindowInfo> &mru,
     const double gapAng1 = (double)segGap() / r1Outer;
     const double maxSegAng1 = segmentWidth() / r1Outer;
 
+    // Gruppierungsschlüssel = erkannte App-ID. Derselbe Schlüssel wie seg.appKey auf Ring 1,
+    // damit weitere Fenster einer App (AppImage, Spiel, ...) über ihrer App landen.
     auto getAppKey = [](const WindowInfo &w) {
+        AppEntry app = AppManager::resolveWindowApp(w.desktopFileName, w.resourceClass, w.pid, w.caption);
+        if (!app.id.isEmpty()) return app.id;
         if (w.resourceClass.contains(QLatin1String("plasmawindowed"), Qt::CaseInsensitive) ||
             w.desktopFileName.contains(QLatin1String("plasmawindowed"), Qt::CaseInsensitive)) {
-            AppEntry app = AppManager::resolveWindowApp(w.desktopFileName, w.resourceClass, w.pid, w.caption);
-            if (!app.id.isEmpty()) return app.id;
             return QStringLiteral("plasmawindowed:") + w.caption.trimmed().toLower();
         }
         return w.desktopFileName.isEmpty() ? w.resourceClass : w.desktopFileName;
@@ -881,21 +1071,7 @@ void CircleOverlay::partitionWindows(const QList<WindowInfo> &mru,
 
     auto matchesFileWindow = [&](const WindowInfo &w, const PinnedItem &item) -> bool {
         if (item.type != PinnedItemType::File) return false;
-        QFileInfo fi(item.execOrPath);
-        QString fileName = fi.fileName();
-        if (!fileName.isEmpty() && w.caption.contains(fileName, Qt::CaseInsensitive)) {
-            return true;
-        }
-        QString baseName = fi.completeBaseName();
-        if (baseName.length() >= 2) {
-            QRegularExpression re(QStringLiteral("(?:^|[\\s\\-_—\\[\\]\\(\\)•*])%1(?:$|[\\s\\-_—\\[\\]\\(\\)•*])")
-                                  .arg(QRegularExpression::escape(baseName)),
-                                  QRegularExpression::CaseInsensitiveOption);
-            if (re.match(w.caption).hasMatch()) {
-                return true;
-            }
-        }
-        return false;
+        return windowShowsFile(w, item.execOrPath);
     };
 
     QSet<QString> appsWithPinAssigned;
@@ -1124,7 +1300,7 @@ void CircleOverlay::partitionWindows(const QList<WindowInfo> &mru,
                 return true;
             }
             if (!item.name.isEmpty()) {
-                QString wName = const_cast<CircleOverlay*>(this)->resolveAppName(w.desktopFileName, w.resourceClass);
+                QString wName = windowAppName(w);
                 if (!wName.isEmpty() && wName.compare(item.name, Qt::CaseInsensitive) == 0) {
                     return true;
                 }
@@ -1666,7 +1842,7 @@ void CircleOverlay::partitionWindows(const QList<WindowInfo> &mru,
             seg.angle = ang;
             seg.span = segAng2;
             seg.ring = 2;
-            seg.tooltipText = formatWindowTooltip(resolveAppName(winsToPlace[k].desktopFileName, winsToPlace[k].resourceClass), winsToPlace[k].caption, winsToPlace[k].resourceClass);
+            seg.tooltipText = formatWindowTooltip(windowAppName(winsToPlace[k]), winsToPlace[k].caption, winsToPlace[k].resourceClass);
             seg.segmentType = QStringLiteral("window");
             seg.isRealWindow = true;
             configurePinStatus(seg, winsToPlace[k]);
@@ -1865,7 +2041,7 @@ void CircleOverlay::partitionWindows(const QList<WindowInfo> &mru,
         seg.angle = ang;
         seg.span = segAng2;
         seg.ring = 2;
-        seg.tooltipText = formatWindowTooltip(resolveAppName(win.desktopFileName, win.resourceClass), win.caption, win.resourceClass);
+        seg.tooltipText = formatWindowTooltip(windowAppName(win), win.caption, win.resourceClass);
         seg.segmentType = QStringLiteral("window");
         seg.isRealWindow = true;
         configurePinStatus(seg, win);
@@ -1971,7 +2147,7 @@ void CircleOverlay::partitionWindows(const QList<WindowInfo> &mru,
             seg.angle = ang;
             seg.span = segAng3;
             seg.ring = 3;
-            seg.tooltipText = formatWindowTooltip(resolveAppName(wins[k].desktopFileName, wins[k].resourceClass), wins[k].caption, wins[k].resourceClass);
+            seg.tooltipText = formatWindowTooltip(windowAppName(wins[k]), wins[k].caption, wins[k].resourceClass);
             seg.segmentType = QStringLiteral("window");
             seg.isRealWindow = true;
             configurePinStatus(seg, wins[k]);
@@ -2121,7 +2297,7 @@ void CircleOverlay::partitionWindows(const QList<WindowInfo> &mru,
             seg.angle = ang;
             seg.span = segAng3;
             seg.ring = 3;
-            seg.tooltipText = formatWindowTooltip(resolveAppName(win.desktopFileName, win.resourceClass), win.caption, win.resourceClass);
+            seg.tooltipText = formatWindowTooltip(windowAppName(win), win.caption, win.resourceClass);
             seg.segmentType = QStringLiteral("window");
             seg.isRealWindow = true;
             configurePinStatus(seg, win);
@@ -2297,26 +2473,7 @@ void CircleOverlay::populateSegments(const QList<WindowInfo> &windows, bool &out
                     }
                 }
             } else {
-                QString key = seg.appKey;
-                iconPath = m_iconPathCache.value(key);
-                if (iconPath.isEmpty() || !QFile::exists(iconPath)) {
-                    QString cleanKey = key;
-                    cleanKey.replace(QLatin1Char('/'), QLatin1Char('_')).replace(QLatin1Char(':'), QLatin1Char('_'));
-                    QString candidatePath = tmpDir + QStringLiteral("/") + cleanKey + QStringLiteral(".png");
-                    if (QFile::exists(candidatePath)) {
-                        iconPath = candidatePath;
-                    } else {
-                        QIcon icon = resolveWindowIcon(seg.desktopFileName, seg.resourceClass);
-                        if (!icon.isNull()) {
-                            QPixmap pix = icon.pixmap(iconSize(), iconSize());
-                            pix.save(candidatePath, "PNG", 0);
-                            iconPath = candidatePath;
-                        }
-                    }
-                    if (!iconPath.isEmpty()) {
-                        m_iconPathCache.insert(key, iconPath);
-                    }
-                }
+                iconPath = iconFileForSegment(seg, tmpDir);
             }
 
             QVariantMap m;
@@ -2894,6 +3051,21 @@ void CircleOverlay::partitionRecentFiles(QList<OverlaySegment> &outRing1,
     }
 }
 
+// Kategorie, die auf einer Seite bei 12 Uhr liegt (dort steht beim Öffnen auch der Mauszeiger).
+// Muss exakt zur Geometrie in partitionCategories() passen: centerIndex = (Einträge - 1) / 2.
+int CircleOverlay::defaultCategoryIndex(int page) const
+{
+    const int total = m_cachedCategories.size();
+    if (total <= 0) return -1;
+    int start = page * 12;
+    if (start >= total) start = 0;
+    const int rem = total - start;
+    const bool paging = total > 13;
+    const int count = paging ? std::min(12, rem) : rem;
+    const int items = count + (paging ? 1 : 0);
+    return start + std::min((items - 1) / 2, count - 1);
+}
+
 void CircleOverlay::partitionCategories(QList<OverlaySegment> &outRing1,
                                        int activeCatIndex,
                                        QList<OverlaySegment> &outRing2,
@@ -2926,16 +3098,11 @@ void CircleOverlay::partitionCategories(QList<OverlaySegment> &outRing1,
     }
 
     int remaining = totalCats - startIndex;
-    bool hasMore = false;
-    int numCatsOnPage = 0;
-
-    if (remaining <= MAX_CATS_SINGLE_PAGE) {
-        numCatsOnPage = remaining;
-        hasMore = false;
-    } else {
-        numCatsOnPage = MAX_CATS_WITH_MORE; // 12
-        hasMore = true;
-    }
+    // Passen nicht alle Kategorien auf eine Seite, bekommt JEDE Seite ein "More" – auch die
+    // letzte (dort springt es zurück zur ersten). Vorher gab es von der letzten Seite keinen Weg zurück.
+    const bool paging = totalCats > MAX_CATS_SINGLE_PAGE;
+    const bool hasMore = paging;
+    const int numCatsOnPage = paging ? std::min(MAX_CATS_WITH_MORE, remaining) : remaining;
 
     int itemsOnPage = numCatsOnPage + (hasMore ? 1 : 0);
 
@@ -2986,7 +3153,7 @@ void CircleOverlay::partitionCategories(QList<OverlaySegment> &outRing1,
 
     // Aktive Kategorie für Ring 2 & 3 validieren
     if (activeCatIndex < startIndex || activeCatIndex >= startIndex + numCatsOnPage) {
-        activeCatIndex = startIndex + (numCatsOnPage / 2);
+        activeCatIndex = defaultCategoryIndex(m_categoryPage);
     }
     m_activeCategoryIndex = activeCatIndex;
 
@@ -3436,26 +3603,7 @@ void CircleOverlay::populateRecentAppsSegments(bool &outHasRing2, bool &outHasRi
                     }
                 }
             } else {
-                QString key = seg.appKey;
-                iconPath = m_iconPathCache.value(key);
-                if (iconPath.isEmpty() || !QFile::exists(iconPath)) {
-                    QString cleanKey = key;
-                    cleanKey.replace(QLatin1Char('/'), QLatin1Char('_')).replace(QLatin1Char(':'), QLatin1Char('_'));
-                    QString candidatePath = tmpDir + QStringLiteral("/") + cleanKey + QStringLiteral(".png");
-                    if (QFile::exists(candidatePath)) {
-                        iconPath = candidatePath;
-                    } else {
-                        QIcon icon = resolveWindowIcon(seg.desktopFileName, seg.resourceClass);
-                        if (!icon.isNull()) {
-                            QPixmap pix = icon.pixmap(iconSize(), iconSize());
-                            pix.save(candidatePath, "PNG", 0);
-                            iconPath = candidatePath;
-                        }
-                    }
-                    if (!iconPath.isEmpty()) {
-                        m_iconPathCache.insert(key, iconPath);
-                    }
-                }
+                iconPath = iconFileForSegment(seg, tmpDir);
             }
 
             QVariantMap m;
@@ -3647,6 +3795,45 @@ void CircleOverlay::refreshCurrentMode()
 
     KLOG("Overlay", "refreshCurrentMode() exit: ring1=%d ring2=%d ring3=%d", m_currentRing1.size(), m_currentRing2.size(), m_currentRing3.size());
     m_isRefreshing = false;
+
+    ensureRingsOnScreen(hasRing2, hasRing3);
+}
+
+// Beim Öffnen wird das Overlay nur für die anfangs vorhandenen Ringe in den Bildschirm geschoben.
+// Kommen später Ring 2/3 dazu (Wechsel zu Apps, Startmenü, weitere Fenster), würden sie am Rand
+// abgeschnitten. Dann Overlay UND Mauszeiger um denselben Betrag verschieben – die Auswahl
+// unter dem Zeiger bleibt dadurch unverändert.
+void CircleOverlay::ensureRingsOnScreen(bool hasRing2, bool hasRing3)
+{
+    if (!m_view || !m_view->isVisible()) return;
+
+    QScreen *screen = QGuiApplication::screenAt(QPoint(m_centerX, m_centerY));
+    if (!screen) screen = QGuiApplication::primaryScreen();
+    if (!screen) return;
+
+    const int vr = visualRadius(hasRing2, hasRing3);
+    const QRect geo = screen->geometry();
+    if (geo.width() < 2 * vr || geo.height() < 2 * vr) return;
+
+    const int cx = std::clamp(m_centerX, geo.left() + vr, geo.left() + geo.width() - vr);
+    const int cy = std::clamp(m_centerY, geo.top() + vr, geo.top() + geo.height() - vr);
+    if (cx == m_centerX && cy == m_centerY) return;
+
+    KLOG("Overlay", "ensureRingsOnScreen: shifting center (%d,%d) -> (%d,%d)", m_centerX, m_centerY, cx, cy);
+    m_centerX = cx;
+    m_centerY = cy;
+    const int wr = windowRadius(true, true);
+    m_view->setPosition(cx - wr, cy - wr);
+
+    if (!m_isGameActive) {
+        const QPoint cur(cx + m_lastAimX, cy + m_lastAimY);
+        QCursor::setPos(cur);
+        if (m_monitor) {
+            QRect vGeo = screen->virtualGeometry();
+            if (vGeo.isEmpty()) vGeo = geo;
+            m_monitor->warpCursor(cur.x() - vGeo.x(), cur.y() - vGeo.y(), vGeo.width(), vGeo.height());
+        }
+    }
 }
 
 void CircleOverlay::refreshCategoriesAndFavorites(bool force)
@@ -3663,6 +3850,15 @@ void CircleOverlay::refreshCategoriesAndFavorites(bool force)
                 cat.apps = m_cachedFavorites;
                 favCatFound = true;
                 break;
+            }
+        }
+        if (favCatFound && m_cachedFavorites.isEmpty()) {
+            // Letzter Favorit entfernt: Kategorie ganz herausnehmen statt leer anzeigen
+            for (int i = 0; i < m_cachedCategories.size(); ++i) {
+                if (m_cachedCategories[i].id == QLatin1String("__FAVORITES__")) {
+                    m_cachedCategories.removeAt(i);
+                    break;
+                }
             }
         }
         if (!favCatFound && !m_cachedFavorites.isEmpty()) {
@@ -3935,8 +4131,7 @@ void CircleOverlay::handleAimChanged(int offsetX, int offsetY, bool isDrilldown,
             if (isDrilldown && curId == QLatin1String("__APP_MENU__")) {
                 m_recentStage = RecentAppsStage::Categories;
                 m_categoryPage = 0;
-                int p0Count = (m_cachedCategories.size() <= 13) ? m_cachedCategories.size() : 12;
-                m_activeCategoryIndex = p0Count / 2;
+                m_activeCategoryIndex = defaultCategoryIndex(0);
                 refreshCurrentMode();
             } else if (isDrilldown && curId == QLatin1String("__FAVORITES__")) {
                 m_recentStage = RecentAppsStage::Favorites;
@@ -3959,8 +4154,7 @@ void CircleOverlay::handleAimChanged(int offsetX, int offsetY, bool isDrilldown,
             } else if (isDrilldown && curId == QLatin1String("__APP_MENU__")) {
                 m_recentStage = RecentAppsStage::Categories;
                 m_categoryPage = 0;
-                int p0Count = (m_cachedCategories.size() <= 13) ? m_cachedCategories.size() : 12;
-                m_activeCategoryIndex = p0Count / 2;
+                m_activeCategoryIndex = defaultCategoryIndex(0);
                 refreshCurrentMode();
             } else if (isDrilldown && curId == QLatin1String("__TRAY__")) {
                 m_recentStage = RecentAppsStage::Tray;
@@ -3980,18 +4174,21 @@ void CircleOverlay::handleAimChanged(int offsetX, int offsetY, bool isDrilldown,
                 m_activeCategoryIndex = -1;
                 refreshCurrentMode();
             } else {
+                // "More" blättert genau einmal pro Überfahren. Es liegt auf der nächsten Seite an
+                // derselben Stelle – ohne diese Sperre würde jede weitere Mausbewegung weiterblättern.
+                const bool onCatMore = (selRing == 1 && curId == QLatin1String("__CAT_MORE__") && isDrilldown);
+                if (!onCatMore) m_catMoreArmed = true;
                 if (selRing == 1) {
-                    if (curId == QLatin1String("__CAT_MORE__") && isDrilldown) {
-                        m_categoryPage++;
-                        int newStart = m_categoryPage * 12;
-                        if (newStart >= m_cachedCategories.size()) {
-                            m_categoryPage = 0;
-                            newStart = 0;
+                    if (onCatMore) {
+                        if (m_catMoreArmed) {
+                            m_catMoreArmed = false;
+                            m_categoryPage++;
+                            if (m_categoryPage * 12 >= m_cachedCategories.size()) {
+                                m_categoryPage = 0;
+                            }
+                            m_activeCategoryIndex = defaultCategoryIndex(m_categoryPage);
+                            refreshCurrentMode();
                         }
-                        int rem = m_cachedCategories.size() - newStart;
-                        int countOnNewPage = (rem <= 13) ? rem : 12;
-                        m_activeCategoryIndex = newStart + countOnNewPage / 2;
-                        refreshCurrentMode();
                     } else if (isDrilldown && curId == QLatin1String("__FAVORITES__")) {
                         m_recentStage = RecentAppsStage::Favorites;
                         refreshCurrentMode();
@@ -4074,8 +4271,7 @@ void CircleOverlay::handleAimChanged(int offsetX, int offsetY, bool isDrilldown,
             } else if (isDrilldown && curId == QLatin1String("__APP_MENU__")) {
                 m_recentStage = RecentAppsStage::Categories;
                 m_categoryPage = 0;
-                int p0Count = (m_cachedCategories.size() <= 13) ? m_cachedCategories.size() : 12;
-                m_activeCategoryIndex = p0Count / 2;
+                m_activeCategoryIndex = defaultCategoryIndex(0);
                 refreshCurrentMode();
             } else if (isDrilldown && curId == QLatin1String("__FAVORITES__")) {
                 m_recentStage = RecentAppsStage::Favorites;
@@ -4115,17 +4311,15 @@ void CircleOverlay::togglePinForCurrentSelection()
                 QFileInfo fi(item.execOrPath);
                 QString fileName = fi.fileName();
                 QString baseName = fi.completeBaseName();
-                bool matches = false;
-                if (!fileName.isEmpty() && seg->caption.contains(fileName, Qt::CaseInsensitive)) {
-                    matches = true;
-                } else if (baseName.length() >= 2) {
-                    QRegularExpression re(QStringLiteral("(?:^|[\\s\\-_—\\[\\]\\(\\)•*])%1(?:$|[\\s\\-_—\\[\\]\\(\\)•*])")
-                                          .arg(QRegularExpression::escape(baseName)),
-                                          QRegularExpression::CaseInsensitiveOption);
-                    if (re.match(seg->caption).hasMatch()) {
-                        matches = true;
+                WindowInfo segWin;
+                segWin.caption = seg->caption;
+                for (const auto &cw : m_cachedWindows) {
+                    if (cw.id == seg->windowId) {
+                        segWin = cw;
+                        break;
                     }
                 }
+                bool matches = windowShowsFile(segWin, item.execOrPath);
                 if (matches) {
                     m_pinnedManager.unpinFile(item.execOrPath);
                     m_launchedFiles.remove(item.execOrPath);
@@ -4238,7 +4432,13 @@ void CircleOverlay::togglePinForCurrentSelection()
         QString exec = !app.exec.isEmpty() ? app.exec : trayId;
         QString icon = !app.icon.isEmpty() ? app.icon : (!trayIcon.isEmpty() ? trayIcon : trayId);
         QString desktopFile = app.desktopFile;
-        m_pinnedManager.toggleAppPin(id, trayTitle, name, exec, icon, desktopFile);
+        if (!m_pinnedManager.isAppPinned(id, trayTitle) && m_pinnedManager.isAppPinned(trayId, trayTitle)) {
+            // Angepinnt wurde unter der Tray-Kennung, die App-Suche liefert aber eine andere ID:
+            // lösen statt versehentlich ein zweites Mal anzupinnen.
+            m_pinnedManager.unpinApp(trayId, trayTitle);
+        } else {
+            m_pinnedManager.toggleAppPin(id, trayTitle, name, exec, icon, desktopFile);
+        }
     }
 
     refreshCurrentMode();

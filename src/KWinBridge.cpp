@@ -32,6 +32,19 @@ KWinBridge::KWinBridge(QObject *parent)
 
     setupDaemon();
     queryCursor();
+
+    // Startet KWin neu, ist unser Daemon-Skript weg: Fensterliste und Mausposition blieben
+    // sonst stehen. Sobald KWin wieder am Bus ist, Skript neu laden.
+    m_kwinWatcher = new QDBusServiceWatcher(QStringLiteral("org.kde.KWin"), bus,
+                                            QDBusServiceWatcher::WatchForRegistration, this);
+    connect(m_kwinWatcher, &QDBusServiceWatcher::serviceRegistered, this, [this]() {
+        KLOG("KWin", "KWin re-registered on D-Bus -> reloading daemon script");
+        m_daemonSid = -1;
+        QTimer::singleShot(1500, this, [this]() {
+            setupDaemon();
+            queryCursor();
+        });
+    });
 }
 
 void KWinBridge::stopDaemon()
@@ -44,6 +57,10 @@ void KWinBridge::stopDaemon()
             QStringLiteral("org.kde.kwin.Script"),
             QStringLiteral("stop"));
         bus.send(msg);
+        bus.send(QDBusMessage::createMethodCall(
+            QStringLiteral("org.kde.KWin"), QStringLiteral("/Scripting"),
+            QStringLiteral("org.kde.kwin.Scripting"), QStringLiteral("unloadScript"))
+                 << QStringLiteral("karyon_daemon"));
         m_daemonSid = -1;
     }
     if (!m_daemonScriptPath.isEmpty()) {
@@ -112,9 +129,16 @@ if (initC) {
 callDBus("%1", "%2", "%3", "onDaemonInit", JSON.stringify(initList));
 
 workspace.windowActivated.connect(function(w) {
-    if (w && (w.normalWindow || w.fullScreen) && !w.deleted && w.resourceClass !== "karyon") {
+    if (w && w.resourceClass === "karyon") return;
+    if (w && (w.normalWindow || w.fullScreen) && !w.deleted) {
         callDBus("%1", "%2", "%3", "onWindowActivated",
                  w.internalId.toString(), w.resourceClass, w.desktopFileName, w.caption, (w.minimized === true), (w.pid ? w.pid : 0));
+    } else if (w && !w.deleted && (w.dialog || w.utility || w.transient)) {
+        // Dialog o.ä. hat den Fokus: ID melden, damit Fenster-Gesten das richtige Fenster treffen
+        callDBus("%1", "%2", "%3", "onOtherActivated", w.internalId.toString());
+    } else {
+        // Desktop, Leiste oder gar kein Fenster: kein Spiel mehr im Vordergrund
+        callDBus("%1", "%2", "%3", "onOtherActivated", "");
     }
 });
 
@@ -144,7 +168,10 @@ workspace.windowRemoved.connect(function(w) {
     QDBusInterface scripting(QStringLiteral("org.kde.KWin"), QStringLiteral("/Scripting"),
                              QStringLiteral("org.kde.kwin.Scripting"), bus);
 
-    QDBusReply<int> reply = scripting.call(QStringLiteral("loadScript"), m_daemonScriptPath);
+    // Skript unter festem Namen laden und ein evtl. noch laufendes Skript einer abgestürzten
+    // Vorgänger-Instanz zuerst entladen – sonst liefern zwei Skripte jedes Ereignis doppelt.
+    scripting.call(QStringLiteral("unloadScript"), QStringLiteral("karyon_daemon"));
+    QDBusReply<int> reply = scripting.call(QStringLiteral("loadScript"), m_daemonScriptPath, QStringLiteral("karyon_daemon"));
     if (reply.isValid()) {
         m_daemonSid = reply.value();
         if (m_daemonSid >= 0) {
@@ -194,10 +221,6 @@ void KWinBridge::onDaemonInit(const QString &json)
     if (!activeId.isEmpty()) {
         m_mruOrder.append(activeId);
         if (m_knownWindows.contains(activeId)) {
-            AppManager::recordAppUsage(m_knownWindows[activeId].desktopFileName,
-                                       m_knownWindows[activeId].resourceClass,
-                                       m_knownWindows[activeId].pid,
-                                       m_knownWindows[activeId].caption);
             const WindowInfo &actInfo = m_knownWindows[activeId];
             bool isGame = GameModeDetector::isGame(actInfo.resourceClass, actInfo.desktopFileName, actInfo.caption, actInfo.pid);
             m_activeWindowIsGame = isGame;
@@ -212,8 +235,10 @@ void KWinBridge::onDaemonInit(const QString &json)
 void KWinBridge::onWindowActivated(const QString &id, const QString &rc, const QString &df, const QString &cap, bool min, int pid)
 {
     if (id.isEmpty() || rc == QLatin1String("karyon")) return;
+    m_focusedId = id;
+    m_focusOnDesktop = false;
 
-    AppManager::recordAppUsage(df, rc, pid, cap);
+    // Kein recordAppUsage hier: Recent Apps zählt Programmstarts, nicht Fensterwechsel.
 
     WindowInfo info;
     info.id = id;
@@ -259,7 +284,23 @@ void KWinBridge::onWindowAdded(const QString &id, const QString &rc, const QStri
 
     KLOG("KWin", "Window added: id=%s caption='%s' df='%s' pid=%d", qPrintable(id), qPrintable(cap), qPrintable(df), pid);
 
-    AppManager::recordAppUsage(df, rc, pid, cap);
+    // Programmstart = erstes Fenster einer App, die bisher kein Fenster hatte.
+    // Weitere Fenster einer laufenden App (neues Browserfenster, Dialoge) sind kein Start.
+    {
+        const AppEntry newApp = AppManager::resolveWindowApp(df, rc, pid, cap);
+        bool alreadyRunning = false;
+        for (auto it = m_knownWindows.constBegin(); it != m_knownWindows.constEnd(); ++it) {
+            if (it.key() == id) continue;
+            const WindowInfo &o = it.value();
+            if (AppManager::resolveWindowApp(o.desktopFileName, o.resourceClass, o.pid, o.caption).id == newApp.id) {
+                alreadyRunning = true;
+                break;
+            }
+        }
+        if (!alreadyRunning) {
+            AppManager::recordAppUsage(df, rc, pid, cap);
+        }
+    }
 
     WindowInfo info;
     info.id = id;
@@ -275,9 +316,24 @@ void KWinBridge::onWindowAdded(const QString &id, const QString &rc, const QStri
     }
 }
 
+void KWinBridge::onOtherActivated(const QString &id)
+{
+    m_focusedId = id;
+    m_focusOnDesktop = id.isEmpty();
+    if (id.isEmpty()) {
+        // Fokus liegt auf dem Desktop / keinem Fenster: Spielmodus beenden, sonst bliebe die
+        // Auslösetaste wirkungslos, bis irgendwann ein normales Fenster aktiviert wird.
+        if (m_activeWindowIsGame) {
+            m_activeWindowIsGame = false;
+            emit activeWindowGameStatusChanged(false);
+        }
+    }
+}
+
 void KWinBridge::onWindowRemoved(const QString &id)
 {
     KLOG("KWin", "Window removed: id=%s", qPrintable(id));
+    if (m_focusedId == id) m_focusedId.clear();
     bool changed = false;
     if (m_knownWindows.contains(id)) {
         m_knownWindows.remove(id);
@@ -334,6 +390,7 @@ QPoint KWinBridge::lastCursorPos() const
 
 bool KWinBridge::isActiveWindowGame() const
 {
+    if (m_focusOnDesktop) return false;
     if (!m_mruOrder.isEmpty() && m_knownWindows.contains(m_mruOrder.first())) {
         const WindowInfo &top = m_knownWindows[m_mruOrder.first()];
         return GameModeDetector::isGame(top.resourceClass, top.desktopFileName, top.caption, top.pid);

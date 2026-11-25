@@ -179,6 +179,13 @@ private:
     int windowRadius(bool hasRing2, bool hasRing3) const;
     int totalRadius(bool hasRing2, bool hasRing3 = false) const { return visualRadius(hasRing2, hasRing3); }
     QIcon resolveWindowIcon(const QString &desktopFileName, const QString &resourceClass);
+    QIcon x11WindowIcon(const WindowInfo &w);
+    QString iconFileForSegment(const OverlaySegment &seg, const QString &tmpDir);
+    QString windowAppName(const WindowInfo &w) const;
+    bool windowShowsFile(const WindowInfo &w, const QString &filePath) const;
+    void ensureRingsOnScreen(bool hasRing2, bool hasRing3);
+    int defaultCategoryIndex(int page) const;
+    bool m_catMoreArmed = true;
     QIcon resolveIcon(const QString &name);
     bool resolveSteamGame(const QString &steamId, QString &outName, QIcon &outIcon);
     QString findDesktopFile(const QString &name);
@@ -227,6 +234,7 @@ private:
     void refreshCategoriesAndFavorites(bool force = false);
 
     QHash<QString, QString> m_iconPathCache;
+    QHash<QString, qint64> m_iconMissUntil; // App-Schlüssel -> bis wann nicht erneut nach einem Icon suchen
     QHash<QString, QString> m_appNameCache;
     int m_lastAimX = 0;
     int m_lastAimY = -CURSOR_OFFSET_Y;
@@ -283,6 +291,7 @@ private:
 
     JobProgressManager m_jobProgressManager;
     QTimer m_progressThrottleTimer;
+    QTimer m_trayRebuildTimer;
     void onProgressUpdated();
     void updateSegmentProgress();
     void assignSegmentProgress(QList<OverlaySegment> &ring1, QList<OverlaySegment> &ring2, QList<OverlaySegment> &ring3);

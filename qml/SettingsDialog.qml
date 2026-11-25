@@ -153,7 +153,12 @@ Item {
         property string label: ""
         property string actionId: ""
         property string directionKey: ""
-        property string actionText: settingsController.actionDisplayForId(actionId, directionKey)
+        // gestureRevision erzwingt die Neuauswertung, wenn nur die gewählte App/Taste wechselt
+        // (actionId bleibt dann "custom_app"/"custom_key" und die Beschriftung bliebe sonst alt).
+        property string actionText: {
+            var rev = settingsController.gestureRevision;
+            return settingsController.actionDisplayForId(actionId, directionKey);
+        }
         signal selected(string newId)
 
         width: parent ? parent.width : 260
@@ -279,7 +284,7 @@ Item {
                         }
 
                         Text {
-                            text: "Version 3.2"
+                            text: "Version 3.3"
                             color: (typeof karyonTheme !== "undefined") ? karyonTheme.textMuted : "#96a2b4"
                             font.pixelSize: 11
                             anchors.verticalCenter: parent.verticalCenter
@@ -1489,7 +1494,7 @@ Item {
                             anchors.verticalCenter: parent.verticalCenter
                             text: {
                                 var s = settingsController.overlayScale;
-                                var isDef = Math.abs(s - 1.0) < 0.02;
+                                var isDef = Math.abs(s - 0.9) < 0.02;
                                 return s.toFixed(1) + "x" + (isDef ? " (def.)" : "");
                             }
                             color: (typeof karyonTheme !== "undefined") ? karyonTheme.textSecondary : "#cdd3de"

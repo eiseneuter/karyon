@@ -823,7 +823,7 @@ void SettingsManager::resetDefaults()
     m_gameModeEnabled = true;
     m_performanceMode = false;
     m_overlayMouseSpeed = -0.5;
-    m_overlayScale = 1.0;
+    m_overlayScale = 0.9; // derselbe Standard wie bei einer frischen Installation
     m_overlayTransparency = 4.0;
     m_maxRecentApps = 12;
     m_maxRecentFiles = 12;

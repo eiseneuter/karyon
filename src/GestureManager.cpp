@@ -13,30 +13,65 @@
 #include <QProcess>
 #include "ProcessUtils.h"
 #include <QDBusMessage>
+#include <QSet>
+#include <QDateTime>
 #include <QDBusConnection>
 
+// Liegt auf der aktiven Tastaturbelegung Z dort, wo bei QWERTY das Y ist (QWERTZ)?
+// Maßgeblich ist die GERADE AKTIVE Belegung laut KDE, nicht die Systemsprache.
 bool GestureManager::isGermanLayout()
 {
-    static bool checked = false;
-    static bool isDe = false;
-    if (!checked) {
-        checked = true;
-        QString kxkbrc = QDir::homePath() + QStringLiteral("/.config/kxkbrc");
-        if (QFile::exists(kxkbrc)) {
-            QSettings s(kxkbrc, QSettings::IniFormat);
-            QString layout = s.value(QStringLiteral("Layout/LayoutList")).toString();
-            if (layout.contains(QStringLiteral("de"), Qt::CaseInsensitive)) {
-                isDe = true;
-            }
-        }
-        if (!isDe) {
-            QString lang = QString::fromLocal8Bit(qgetenv("LANG"));
-            if (lang.contains(QStringLiteral("de"), Qt::CaseInsensitive)) {
-                isDe = true;
-            }
+    static qint64 lastCheckMs = 0;
+    static bool isQwertz = false;
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    if (lastCheckMs != 0 && (now - lastCheckMs) < 5000) {
+        return isQwertz;
+    }
+    lastCheckMs = now;
+
+    static const QSet<QString> qwertzLayouts = {
+        QStringLiteral("de"), QStringLiteral("at"), QStringLiteral("ch"), QStringLiteral("cz"),
+        QStringLiteral("sk"), QStringLiteral("hu"), QStringLiteral("si"), QStringLiteral("hr"),
+        QStringLiteral("ba"), QStringLiteral("al"), QStringLiteral("lu")
+    };
+
+    // 1. Liste der eingerichteten Belegungen (kann "us,de" sein -> als Liste lesen)
+    QStringList layouts;
+    QString kxkbrc = QDir::homePath() + QStringLiteral("/.config/kxkbrc");
+    if (QFile::exists(kxkbrc)) {
+        QSettings s(kxkbrc, QSettings::IniFormat);
+        const QVariant v = s.value(QStringLiteral("Layout/LayoutList"));
+        layouts = v.toStringList();
+        if (layouts.size() == 1 && layouts.first().contains(QLatin1Char(','))) {
+            layouts = layouts.first().split(QLatin1Char(','), Qt::SkipEmptyParts);
         }
     }
-    return isDe;
+
+    // 2. Welche davon ist gerade aktiv?
+    int activeIdx = 0;
+    QDBusMessage msg = QDBusMessage::createMethodCall(
+        QStringLiteral("org.kde.keyboard"), QStringLiteral("/Layouts"),
+        QStringLiteral("org.kde.KeyboardLayouts"), QStringLiteral("getLayout"));
+    const QDBusMessage reply = QDBusConnection::sessionBus().call(msg, QDBus::Block, 200);
+    if (reply.type() == QDBusMessage::ReplyMessage && !reply.arguments().isEmpty()) {
+        activeIdx = reply.arguments().first().toInt();
+    }
+
+    if (!layouts.isEmpty()) {
+        const QString active = layouts.value(activeIdx, layouts.first()).trimmed().toLower();
+        isQwertz = qwertzLayouts.contains(active);
+        return isQwertz;
+    }
+
+    // 3. Keine eigene Belegung eingerichtet (Systemstandard): Sprache des Systems als Näherung.
+    //    Karyon setzt LANG für sich selbst auf Englisch – der ursprüngliche Wert steht in KARYON_HOST_LANG.
+    QString lang = QString::fromLocal8Bit(qgetenv("KARYON_HOST_LANG"));
+    if (lang.isEmpty() || lang.startsWith(QLatin1Char('\x01'))) lang = QString::fromLocal8Bit(qgetenv("LANG"));
+    const QString country = lang.section(QLatin1Char('_'), 0, 0).toLower();
+    isQwertz = (country == QLatin1String("de") || country == QLatin1String("cs") ||
+                country == QLatin1String("sk") || country == QLatin1String("hu") ||
+                country == QLatin1String("sl") || country == QLatin1String("hr"));
+    return isQwertz;
 }
 
 int GestureManager::getZKey()

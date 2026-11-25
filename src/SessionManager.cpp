@@ -7,6 +7,29 @@
 #include <QProcess>
 #include <QDebug>
 
+namespace {
+// Blockierende Aufrufe höchstens so lange warten lassen (Standard wären 25 s Stillstand).
+constexpr int kSessionCallTimeoutMs = 4000;
+
+// Auf den Ersatzweg nur ausweichen, wenn es den Dienst/die Methode nicht gibt. Bei einer
+// Zeitüberschreitung läuft die erste Anfrage evtl. noch (z.B. wartet sie auf eine
+// Passwortabfrage) – ein zweiter Auslöser würde den Rechner dann zweimal schlafen legen.
+bool serviceUnavailable(const QDBusError &e)
+{
+    switch (e.type()) {
+    case QDBusError::ServiceUnknown:
+    case QDBusError::UnknownMethod:
+    case QDBusError::UnknownObject:
+    case QDBusError::UnknownInterface:
+    case QDBusError::NotSupported:
+    case QDBusError::Disconnected:
+        return true;
+    default:
+        return false;
+    }
+}
+} // namespace
+
 void SessionManager::callKdeShutdownMethod(const QString &methodName, const QStringList &fallbackCmd)
 {
     QDBusMessage msg = QDBusMessage::createMethodCall(
@@ -15,8 +38,8 @@ void SessionManager::callKdeShutdownMethod(const QString &methodName, const QStr
         QStringLiteral("org.kde.Shutdown"),
         methodName
     );
-    QDBusReply<void> reply = QDBusConnection::sessionBus().call(msg);
-    if (!reply.isValid()) {
+    QDBusReply<void> reply = QDBusConnection::sessionBus().call(msg, QDBus::Block, kSessionCallTimeoutMs);
+    if (!reply.isValid() && serviceUnavailable(reply.error())) {
         qWarning() << "org.kde.Shutdown" << methodName << "failed:" << reply.error().message() << ". Trying fallback:" << fallbackCmd;
         if (!fallbackCmd.isEmpty()) {
             QString prog = fallbackCmd.first();
@@ -34,8 +57,8 @@ void SessionManager::callPowerManagementMethod(const QString &methodName, const 
         QStringLiteral("org.freedesktop.PowerManagement"),
         methodName
     );
-    QDBusReply<void> reply = QDBusConnection::sessionBus().call(msg);
-    if (!reply.isValid()) {
+    QDBusReply<void> reply = QDBusConnection::sessionBus().call(msg, QDBus::Block, kSessionCallTimeoutMs);
+    if (!reply.isValid() && serviceUnavailable(reply.error())) {
         qWarning() << "org.freedesktop.PowerManagement" << methodName << "failed:" << reply.error().message() << ". Trying fallback:" << fallbackCmd;
         if (!fallbackCmd.isEmpty()) {
             QString prog = fallbackCmd.first();
@@ -53,8 +76,8 @@ void SessionManager::logout()
         QStringLiteral("org.kde.Shutdown"),
         QStringLiteral("logout")
     );
-    QDBusReply<void> reply = QDBusConnection::sessionBus().call(msg);
-    if (!reply.isValid()) {
+    QDBusReply<void> reply = QDBusConnection::sessionBus().call(msg, QDBus::Block, kSessionCallTimeoutMs);
+    if (!reply.isValid() && serviceUnavailable(reply.error())) {
         // Fallback 1: KSMServer
         QDBusMessage msgKsm = QDBusMessage::createMethodCall(
             QStringLiteral("org.kde.ksmserver"),
@@ -62,8 +85,8 @@ void SessionManager::logout()
             QStringLiteral("org.kde.KSMServerInterface"),
             QStringLiteral("closeSession")
         );
-        QDBusReply<bool> repKsm = QDBusConnection::sessionBus().call(msgKsm);
-        if (!repKsm.isValid()) {
+        QDBusReply<bool> repKsm = QDBusConnection::sessionBus().call(msgKsm, QDBus::Block, kSessionCallTimeoutMs);
+        if (!repKsm.isValid() && serviceUnavailable(repKsm.error())) {
             // Fallback 2: loginctl
             ProcessUtils::startDetachedHost(QStringLiteral("loginctl"), {QStringLiteral("terminate-session"), QStringLiteral("self")});
         }
@@ -78,8 +101,8 @@ void SessionManager::lock()
         QStringLiteral("org.freedesktop.ScreenSaver"),
         QStringLiteral("Lock")
     );
-    QDBusReply<void> reply = QDBusConnection::sessionBus().call(msg);
-    if (!reply.isValid()) {
+    QDBusReply<void> reply = QDBusConnection::sessionBus().call(msg, QDBus::Block, kSessionCallTimeoutMs);
+    if (!reply.isValid() && serviceUnavailable(reply.error())) {
         ProcessUtils::startDetachedHost(QStringLiteral("loginctl"), {QStringLiteral("lock-session")});
     }
 }
@@ -92,8 +115,8 @@ void SessionManager::switchUser()
         QStringLiteral("org.freedesktop.DisplayManager.Seat"),
         QStringLiteral("SwitchToGreeter")
     );
-    QDBusReply<void> reply = QDBusConnection::systemBus().call(msg);
-    if (!reply.isValid()) {
+    QDBusReply<void> reply = QDBusConnection::systemBus().call(msg, QDBus::Block, kSessionCallTimeoutMs);
+    if (!reply.isValid() && serviceUnavailable(reply.error())) {
         qWarning() << "org.freedesktop.DisplayManager SwitchToGreeter failed:" << reply.error().message() << ". Falling back to lock.";
         lock();
     }
@@ -108,8 +131,8 @@ void SessionManager::suspend()
         QStringLiteral("Suspend")
     );
     msg << true;
-    QDBusReply<void> reply = QDBusConnection::systemBus().call(msg);
-    if (!reply.isValid()) {
+    QDBusReply<void> reply = QDBusConnection::systemBus().call(msg, QDBus::Block, kSessionCallTimeoutMs);
+    if (!reply.isValid() && serviceUnavailable(reply.error())) {
         callPowerManagementMethod(QStringLiteral("Suspend"), {QStringLiteral("systemctl"), QStringLiteral("suspend")});
     }
 }
@@ -123,8 +146,8 @@ void SessionManager::hibernate()
         QStringLiteral("Hibernate")
     );
     msg << true;
-    QDBusReply<void> reply = QDBusConnection::systemBus().call(msg);
-    if (!reply.isValid()) {
+    QDBusReply<void> reply = QDBusConnection::systemBus().call(msg, QDBus::Block, kSessionCallTimeoutMs);
+    if (!reply.isValid() && serviceUnavailable(reply.error())) {
         callPowerManagementMethod(QStringLiteral("Hibernate"), {QStringLiteral("systemctl"), QStringLiteral("hibernate")});
     }
 }
