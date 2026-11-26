@@ -494,6 +494,46 @@
         <translation>Visa spår</translation>
     </message>
     <message>
+        <location filename="../qml/SettingsDialog.qml" line="1943"/>
+        <source>Left</source>
+        <translation>Vänster</translation>
+    </message>
+    <message>
+        <location filename="../qml/SettingsDialog.qml" line="1950"/>
+        <source>Up</source>
+        <translation>Upp</translation>
+    </message>
+    <message>
+        <location filename="../qml/SettingsDialog.qml" line="1957"/>
+        <source>Left-Up</source>
+        <translation>Upp-vänster</translation>
+    </message>
+    <message>
+        <location filename="../qml/SettingsDialog.qml" line="1964"/>
+        <source>Left-Down</source>
+        <translation>Ned-vänster</translation>
+    </message>
+    <message>
+        <location filename="../qml/SettingsDialog.qml" line="1977"/>
+        <source>Right</source>
+        <translation>Höger</translation>
+    </message>
+    <message>
+        <location filename="../qml/SettingsDialog.qml" line="1984"/>
+        <source>Down</source>
+        <translation>Ned</translation>
+    </message>
+    <message>
+        <location filename="../qml/SettingsDialog.qml" line="1991"/>
+        <source>Right-Up</source>
+        <translation>Upp-höger</translation>
+    </message>
+    <message>
+        <location filename="../qml/SettingsDialog.qml" line="1998"/>
+        <source>Right-Down</source>
+        <translation>Ned-höger</translation>
+    </message>
+    <message>
         <location filename="../qml/SettingsDialog.qml" line="2102"/>
         <source>Reset Defaults</source>
         <translation>Återställ standardvärden</translation>

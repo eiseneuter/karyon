@@ -1940,28 +1940,28 @@ Item {
                     spacing: 5
 
                     KaryonDropdown {
-                        label: "Left"
+                        label: qsTr("Left")
                         directionKey: "left"
                         actionId: settingsController.gestureLeft
                         onSelected: function(id) { settingsController.gestureLeft = id; }
                     }
 
                     KaryonDropdown {
-                        label: "Up"
+                        label: qsTr("Up")
                         directionKey: "up"
                         actionId: settingsController.gestureUp
                         onSelected: function(id) { settingsController.gestureUp = id; }
                     }
 
                     KaryonDropdown {
-                        label: "Left-Up"
+                        label: qsTr("Left-Up")
                         directionKey: "Left-Up"
                         actionId: settingsController.gestureLeftUp
                         onSelected: function(id) { settingsController.gestureLeftUp = id; }
                     }
 
                     KaryonDropdown {
-                        label: "Left-Down"
+                        label: qsTr("Left-Down")
                         directionKey: "Left-Down"
                         actionId: settingsController.gestureLeftDown
                         onSelected: function(id) { settingsController.gestureLeftDown = id; }
@@ -1974,28 +1974,28 @@ Item {
                     spacing: 5
 
                     KaryonDropdown {
-                        label: "Right"
+                        label: qsTr("Right")
                         directionKey: "right"
                         actionId: settingsController.gestureRight
                         onSelected: function(id) { settingsController.gestureRight = id; }
                     }
 
                     KaryonDropdown {
-                        label: "Down"
+                        label: qsTr("Down")
                         directionKey: "down"
                         actionId: settingsController.gestureDown
                         onSelected: function(id) { settingsController.gestureDown = id; }
                     }
 
                     KaryonDropdown {
-                        label: "Right-Up"
+                        label: qsTr("Right-Up")
                         directionKey: "Right-Up"
                         actionId: settingsController.gestureRightUp
                         onSelected: function(id) { settingsController.gestureRightUp = id; }
                     }
 
                     KaryonDropdown {
-                        label: "Right-Down"
+                        label: qsTr("Right-Down")
                         directionKey: "Right-Down"
                         actionId: settingsController.gestureRightDown
                         onSelected: function(id) { settingsController.gestureRightDown = id; }
