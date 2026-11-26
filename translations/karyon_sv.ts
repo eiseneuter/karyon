@@ -581,4 +581,112 @@
 (vänsterklick används för Spara/Avbryt)</translation>
     </message>
 </context>
+<context>
+    <name>CrashHandler</name>
+    <message>
+        <location filename="../src/CrashHandler.cpp" line="737"/>
+        <source>Karyon - Unerwartet Beendet</source>
+        <translation>Karyon – avslutades oväntat</translation>
+    </message>
+    <message>
+        <location filename="../src/CrashHandler.cpp" line="739"/>
+        <source>&lt;b&gt;Karyon wurde unerwartet durch ein externes Signal beendet&lt;/b&gt;</source>
+        <translation>&lt;b&gt;Karyon avslutades oväntat efter en extern signal&lt;/b&gt;</translation>
+    </message>
+    <message>
+        <location filename="../src/CrashHandler.cpp" line="742"/>
+        <source>Ein anderes Programm oder das Betriebssystem hat ein Signal an Karyon gesendet. Details zum Absender:</source>
+        <translation>Ett annat program eller operativsystemet skickade en signal till Karyon. Information om avsändaren:</translation>
+    </message>
+    <message>
+        <location filename="../src/CrashHandler.cpp" line="746"/>
+        <source>Karyon - Verbindung Unterbrochen</source>
+        <translation>Karyon – anslutningen bröts</translation>
+    </message>
+    <message>
+        <location filename="../src/CrashHandler.cpp" line="748"/>
+        <source>&lt;b&gt;Karyon: Verbindung zum X-Server verloren&lt;/b&gt;</source>
+        <translation>&lt;b&gt;Karyon: anslutningen till X-servern förlorades&lt;/b&gt;</translation>
+    </message>
+    <message>
+        <location filename="../src/CrashHandler.cpp" line="751"/>
+        <source>Die Verbindung zum X-Server bzw. XWayland wurde unerwartet getrennt:</source>
+        <translation>Anslutningen till X-servern eller XWayland bröts oväntat:</translation>
+    </message>
+    <message>
+        <location filename="../src/CrashHandler.cpp" line="754"/>
+        <source>Karyon - Absturzbericht</source>
+        <translation>Karyon – kraschrapport</translation>
+    </message>
+    <message>
+        <location filename="../src/CrashHandler.cpp" line="756"/>
+        <source>&lt;b&gt;Karyon ist unerwartet abgestürzt&lt;/b&gt;</source>
+        <translation>&lt;b&gt;Karyon kraschade oväntat&lt;/b&gt;</translation>
+    </message>
+    <message>
+        <location filename="../src/CrashHandler.cpp" line="759"/>
+        <source>Ein interner Fehler hat zum Beenden von Karyon geführt. Der folgende Absturzbericht wurde automatisch gespeichert:</source>
+        <translation>Ett internt fel fick Karyon att avslutas. Följande kraschrapport sparades automatiskt:</translation>
+    </message>
+    <message>
+        <location filename="../src/CrashHandler.cpp" line="789"/>
+        <source>📋 In Zwischenablage kopieren</source>
+        <translation>📋 Kopiera till urklipp</translation>
+    </message>
+    <message>
+        <location filename="../src/CrashHandler.cpp" line="794"/>
+        <source>📂 Im Editor öffnen</source>
+        <translation>📂 Öppna i redigeraren</translation>
+    </message>
+    <message>
+        <location filename="../src/CrashHandler.cpp" line="800"/>
+        <source>🚀 Karyon neu starten</source>
+        <translation>🚀 Starta om Karyon</translation>
+    </message>
+    <message>
+        <location filename="../src/CrashHandler.cpp" line="805"/>
+        <source>Schließen</source>
+        <translation>Stäng</translation>
+    </message>
+    <message>
+        <location filename="../src/CrashHandler.cpp" line="816"/>
+        <source>✓ In die Zwischenablage kopiert!</source>
+        <translation>✓ Kopierat till urklipp!</translation>
+    </message>
+</context>
+<context>
+    <name>SettingsController</name>
+    <message>
+        <location filename="../src/SettingsController.cpp" line="496"/>
+        <source>Karyon - Select Base Color</source>
+        <translation>Karyon – Välj basfärg</translation>
+    </message>
+    <message>
+        <location filename="../src/SettingsController.cpp" line="681"/>
+        <source>Select Application for Gesture</source>
+        <translation>Välj program för gest</translation>
+    </message>
+</context>
+<context>
+    <name>main</name>
+    <message>
+        <location filename="../src/main.cpp" line="424"/>
+        <source>Karyon is already running.</source>
+        <translation>Karyon körs redan.</translation>
+    </message>
+    <message>
+        <location filename="../src/main.cpp" line="428"/>
+        <source>An active instance of Karyon is already running (Process ID %1).
+Running multiple instances simultaneously is not supported.</source>
+        <translation>En instans av Karyon körs redan (process-ID %1).
+Det går inte att köra flera instanser samtidigt.</translation>
+    </message>
+    <message>
+        <location filename="../src/main.cpp" line="433"/>
+        <source>An active instance of Karyon is already running.
+Running multiple instances simultaneously is not supported.</source>
+        <translation>En instans av Karyon körs redan.
+Det går inte att köra flera instanser samtidigt.</translation>
+    </message>
+</context>
 </TS>

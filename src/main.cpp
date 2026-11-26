@@ -8,6 +8,7 @@
 #include <QVBoxLayout>
 #include <QLabel>
 #include <QMessageBox>
+#include <QCoreApplication>
 #include <QTimer>
 #include <QTranslator>
 #include <QFile>
@@ -420,11 +421,16 @@ int main(int argc, char *argv[])
         msgBox.setWindowTitle(QStringLiteral("Karyon"));
         msgBox.setWindowIcon(ProcessUtils::karyonIcon());
         msgBox.setIcon(QMessageBox::Information);
-        msgBox.setText(QStringLiteral("Karyon is already running."));
+        msgBox.setText(QCoreApplication::translate("main", "Karyon is already running."));
         if (runningPid > 0) {
-            msgBox.setInformativeText(QStringLiteral("An active instance of Karyon is already running (Process ID %1).\nRunning multiple instances simultaneously is not supported.").arg(runningPid));
+            const QString informativeText = QCoreApplication::translate(
+                "main",
+                "An active instance of Karyon is already running (Process ID %1).\nRunning multiple instances simultaneously is not supported.");
+            msgBox.setInformativeText(informativeText.arg(runningPid));
         } else {
-            msgBox.setInformativeText(QStringLiteral("An active instance of Karyon is already running.\nRunning multiple instances simultaneously is not supported."));
+            msgBox.setInformativeText(QCoreApplication::translate(
+                "main",
+                "An active instance of Karyon is already running.\nRunning multiple instances simultaneously is not supported."));
         }
         msgBox.setStandardButtons(QMessageBox::Ok);
         msgBox.setDefaultButton(QMessageBox::Ok);

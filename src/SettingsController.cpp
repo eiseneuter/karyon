@@ -6,6 +6,7 @@
 #include "CrashHandler.h"
 
 #include <QQmlContext>
+#include <QCoreApplication>
 #include <QQuickItem>
 #include <QGuiApplication>
 #include <QScreen>
@@ -492,7 +493,8 @@ void SettingsController::openColorDialog()
 {
     QColor current = ThemeManager::instance().baseBg();
     QColorDialog dlg(current, nullptr);
-    dlg.setWindowTitle(QStringLiteral("Karyon - Select Base Color"));
+    dlg.setWindowTitle(QCoreApplication::translate(
+        "SettingsController", "Karyon - Select Base Color"));
     dlg.setOption(QColorDialog::DontUseNativeDialog, true);
     dlg.setLocale(QLocale(QLocale::English, QLocale::UnitedStates));
     if (dlg.exec() != QDialog::Accepted) {
@@ -676,7 +678,8 @@ void SettingsController::selectCustomApp(const QString &direction)
     if (dir < 0) return;
 
     KOpenWithDialog dlg;
-    dlg.setWindowTitle(QStringLiteral("Select Application for Gesture"));
+    dlg.setWindowTitle(QCoreApplication::translate(
+        "SettingsController", "Select Application for Gesture"));
     if (dlg.exec() == QDialog::Accepted) {
         KService::Ptr service = dlg.service();
         if (service) {

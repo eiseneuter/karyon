@@ -18,6 +18,7 @@
 #include <vector>
 
 #include <QApplication>
+#include <QCoreApplication>
 #include <QDialog>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -733,20 +734,31 @@ int CrashHandler::runCrashReporterDialog(const QString &crashReportPath)
     auto *subLabel = new QLabel(&dlg);
 
     if (isSignalExit) {
-        dlg.setWindowTitle(QStringLiteral("Karyon - Unerwartet Beendet"));
-        titleLabel->setText(QStringLiteral("<b>Karyon wurde unerwartet durch ein externes Signal beendet</b>"));
+        dlg.setWindowTitle(QCoreApplication::translate(
+            "CrashHandler", "Karyon - Unerwartet Beendet"));
+        titleLabel->setText(QCoreApplication::translate(
+            "CrashHandler", "<b>Karyon wurde unerwartet durch ein externes Signal beendet</b>"));
         titleLabel->setStyleSheet(QStringLiteral("font-size: 16px; color: #e0af68; font-weight: bold;"));
-        subLabel->setText(QStringLiteral("Ein anderes Programm oder das Betriebssystem hat ein Signal an Karyon gesendet. Details zum Absender:"));
+        subLabel->setText(QCoreApplication::translate(
+            "CrashHandler",
+            "Ein anderes Programm oder das Betriebssystem hat ein Signal an Karyon gesendet. Details zum Absender:"));
     } else if (isX11Exit) {
-        dlg.setWindowTitle(QStringLiteral("Karyon - Verbindung Unterbrochen"));
-        titleLabel->setText(QStringLiteral("<b>Karyon: Verbindung zum X-Server verloren</b>"));
+        dlg.setWindowTitle(QCoreApplication::translate(
+            "CrashHandler", "Karyon - Verbindung Unterbrochen"));
+        titleLabel->setText(QCoreApplication::translate(
+            "CrashHandler", "<b>Karyon: Verbindung zum X-Server verloren</b>"));
         titleLabel->setStyleSheet(QStringLiteral("font-size: 16px; color: #f7768e; font-weight: bold;"));
-        subLabel->setText(QStringLiteral("Die Verbindung zum X-Server bzw. XWayland wurde unerwartet getrennt:"));
+        subLabel->setText(QCoreApplication::translate(
+            "CrashHandler", "Die Verbindung zum X-Server bzw. XWayland wurde unerwartet getrennt:"));
     } else {
-        dlg.setWindowTitle(QStringLiteral("Karyon - Absturzbericht"));
-        titleLabel->setText(QStringLiteral("<b>Karyon ist unerwartet abgestürzt</b>"));
+        dlg.setWindowTitle(QCoreApplication::translate(
+            "CrashHandler", "Karyon - Absturzbericht"));
+        titleLabel->setText(QCoreApplication::translate(
+            "CrashHandler", "<b>Karyon ist unerwartet abgestürzt</b>"));
         titleLabel->setStyleSheet(QStringLiteral("font-size: 16px; color: #f7768e; font-weight: bold;"));
-        subLabel->setText(QStringLiteral("Ein interner Fehler hat zum Beenden von Karyon geführt. Der folgende Absturzbericht wurde automatisch gespeichert:"));
+        subLabel->setText(QCoreApplication::translate(
+            "CrashHandler",
+            "Ein interner Fehler hat zum Beenden von Karyon geführt. Der folgende Absturzbericht wurde automatisch gespeichert:"));
     }
 
     subLabel->setStyleSheet(QStringLiteral("font-size: 12px; color: #9aa5ce;"));
@@ -773,20 +785,24 @@ int CrashHandler::runCrashReporterDialog(const QString &crashReportPath)
     auto *btnLayout = new QHBoxLayout();
     btnLayout->setSpacing(10);
 
-    auto *btnCopy = new QPushButton(QStringLiteral("📋 In Zwischenablage kopieren"), &dlg);
+    auto *btnCopy = new QPushButton(
+        QCoreApplication::translate("CrashHandler", "📋 In Zwischenablage kopieren"), &dlg);
     btnCopy->setObjectName(QStringLiteral("btnCopy"));
     btnLayout->addWidget(btnCopy);
 
-    auto *btnOpenEditor = new QPushButton(QStringLiteral("📂 Im Editor öffnen"), &dlg);
+    auto *btnOpenEditor = new QPushButton(
+        QCoreApplication::translate("CrashHandler", "📂 Im Editor öffnen"), &dlg);
     btnLayout->addWidget(btnOpenEditor);
 
     btnLayout->addStretch(1);
 
-    auto *btnRestart = new QPushButton(QStringLiteral("🚀 Karyon neu starten"), &dlg);
+    auto *btnRestart = new QPushButton(
+        QCoreApplication::translate("CrashHandler", "🚀 Karyon neu starten"), &dlg);
     btnRestart->setObjectName(QStringLiteral("btnRestart"));
     btnLayout->addWidget(btnRestart);
 
-    auto *btnClose = new QPushButton(QStringLiteral("Schließen"), &dlg);
+    auto *btnClose = new QPushButton(
+        QCoreApplication::translate("CrashHandler", "Schließen"), &dlg);
     btnLayout->addWidget(btnClose);
 
     mainLayout->addLayout(btnLayout);
@@ -797,7 +813,8 @@ int CrashHandler::runCrashReporterDialog(const QString &crashReportPath)
         if (clipboard) {
             clipboard->setText(textEdit->toPlainText());
             QString origText = btnCopy->text();
-            btnCopy->setText(QStringLiteral("✓ In die Zwischenablage kopiert!"));
+            btnCopy->setText(QCoreApplication::translate(
+                "CrashHandler", "✓ In die Zwischenablage kopiert!"));
             QTimer::singleShot(2500, [btnCopy, origText]() {
                 btnCopy->setText(origText);
             });
