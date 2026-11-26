@@ -8,7 +8,9 @@
 #include <QVBoxLayout>
 #include <QLabel>
 #include <QMessageBox>
+#include <QCoreApplication>
 #include <QTimer>
+#include <QTranslator>
 #include <QFile>
 #include <QLockFile>
 #include <QStandardPaths>
@@ -389,8 +391,13 @@ int main(int argc, char *argv[])
     QSurfaceFormat::setDefaultFormat(defaultFormat);
 
     QApplication app(argc, argv);
-    // Re-apply default English QLocale after QApplication constructor (which calls setlocale internally)
+    // QApplication can reset the locale; keep native Qt dialogs in English.
     QLocale::setDefault(QLocale(QLocale::English, QLocale::UnitedStates));
+    QTranslator applicationTranslator;
+    if (detectedLocaleStr.startsWith(QLatin1String("sv"), Qt::CaseInsensitive)
+        && applicationTranslator.load(QStringLiteral(":/i18n/karyon_sv.qm"))) {
+        app.installTranslator(&applicationTranslator);
+    }
     app.setApplicationName(QStringLiteral("Karyon"));
     app.setApplicationDisplayName(QStringLiteral("Karyon"));
     app.setDesktopFileName(QStringLiteral("karyon"));
@@ -414,11 +421,16 @@ int main(int argc, char *argv[])
         msgBox.setWindowTitle(QStringLiteral("Karyon"));
         msgBox.setWindowIcon(ProcessUtils::karyonIcon());
         msgBox.setIcon(QMessageBox::Information);
-        msgBox.setText(QStringLiteral("Karyon is already running."));
+        msgBox.setText(QCoreApplication::translate("main", "Karyon is already running."));
         if (runningPid > 0) {
-            msgBox.setInformativeText(QStringLiteral("An active instance of Karyon is already running (Process ID %1).\nRunning multiple instances simultaneously is not supported.").arg(runningPid));
+            const QString informativeText = QCoreApplication::translate(
+                "main",
+                "An active instance of Karyon is already running (Process ID %1).\nRunning multiple instances simultaneously is not supported.");
+            msgBox.setInformativeText(informativeText.arg(runningPid));
         } else {
-            msgBox.setInformativeText(QStringLiteral("An active instance of Karyon is already running.\nRunning multiple instances simultaneously is not supported."));
+            msgBox.setInformativeText(QCoreApplication::translate(
+                "main",
+                "An active instance of Karyon is already running.\nRunning multiple instances simultaneously is not supported."));
         }
         msgBox.setStandardButtons(QMessageBox::Ok);
         msgBox.setDefaultButton(QMessageBox::Ok);

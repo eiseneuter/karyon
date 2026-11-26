@@ -93,7 +93,7 @@ Item {
 
                 Text {
                     anchors.centerIn: parent
-                    text: "Cancel"
+                    text: qsTr("Cancel")
                     color: cancelMa.containsMouse ? ((typeof karyonTheme !== "undefined") ? karyonTheme.textPrimary : "#ffffff") : ((typeof karyonTheme !== "undefined") ? karyonTheme.textSecondary : "#abb2bf")
                     font.pixelSize: 12
                     font.bold: true

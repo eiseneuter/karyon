@@ -86,7 +86,7 @@ Item {
         id: cbRoot
         property bool checked: false
         property string text: ""
-        property string tooltip: ""
+        property string tooltip: qsTr("")
         signal toggled(bool newState)
 
         implicitWidth: cbRow.implicitWidth
@@ -277,7 +277,7 @@ Item {
                         spacing: 8
 
                         Text {
-                            text: "Karyon Settings"
+                            text: qsTr("Karyon Settings")
                             color: (typeof karyonTheme !== "undefined") ? karyonTheme.textPrimary : "#ffffff"
                             font.pixelSize: 14
                             font.bold: true
@@ -292,7 +292,7 @@ Item {
                     }
 
                     Text {
-                        text: "Hold trigger button to open overlay • Aim & release to trigger action"
+                        text: qsTr("Hold trigger button to open overlay • Aim & release to trigger action")
                         color: (typeof karyonTheme !== "undefined") ? karyonTheme.textSubtle : "#b8c0cc"
                         font.pixelSize: 11
                     }
@@ -371,7 +371,7 @@ Item {
                         Text {
                             anchors.left: parent.left
                             anchors.verticalCenter: parent.verticalCenter
-                            text: "Trigger Button / Key"
+                            text: qsTr("Trigger Button / Key")
                             color: (typeof karyonTheme !== "undefined") ? karyonTheme.textPrimary : "#e8ecf4"
                             font.pixelSize: 12
                             font.bold: true
@@ -406,7 +406,7 @@ Item {
 
                             Text {
                                 anchors.centerIn: parent
-                                text: "Select trigger"
+                                text: qsTr("Select trigger")
                                 color: selectTriggerMa.containsMouse ? ((typeof karyonTheme !== "undefined") ? karyonTheme.textPrimary : "#ffffff") : ((typeof karyonTheme !== "undefined") ? karyonTheme.textSecondary : "#cdd3de")
                                 font.pixelSize: 10
                                 font.bold: true
@@ -457,7 +457,7 @@ Item {
                         Text {
                             anchors.left: parent.left
                             anchors.verticalCenter: parent.verticalCenter
-                            text: "Trigger Hold"
+                            text: qsTr("Trigger Hold")
                             color: (typeof karyonTheme !== "undefined") ? karyonTheme.textPrimary : "#e8ecf4"
                             font.pixelSize: 12
                             font.bold: true
@@ -577,7 +577,7 @@ Item {
                         Text {
                             anchors.left: parent.left
                             anchors.verticalCenter: parent.verticalCenter
-                            text: "Overlay Mouse Speed"
+                            text: qsTr("Overlay Mouse Speed")
                             color: (typeof karyonTheme !== "undefined") ? karyonTheme.textPrimary : "#e8ecf4"
                             font.pixelSize: 12
                             font.bold: true
@@ -707,7 +707,7 @@ Item {
                         Text {
                             anchors.left: parent.left
                             anchors.verticalCenter: parent.verticalCenter
-                            text: "Max Recent Apps"
+                            text: qsTr("Max Recent Apps")
                             color: (typeof karyonTheme !== "undefined") ? karyonTheme.textPrimary : "#e8ecf4"
                             font.pixelSize: 12
                             font.bold: true
@@ -827,7 +827,7 @@ Item {
                         Text {
                             anchors.left: parent.left
                             anchors.verticalCenter: parent.verticalCenter
-                            text: "Max Recent Files"
+                            text: qsTr("Max Recent Files")
                             color: (typeof karyonTheme !== "undefined") ? karyonTheme.textPrimary : "#e8ecf4"
                             font.pixelSize: 12
                             font.bold: true
@@ -947,7 +947,7 @@ Item {
                         Text {
                             anchors.left: parent.left
                             anchors.verticalCenter: parent.verticalCenter
-                            text: "Volume Steps"
+                            text: qsTr("Volume Steps")
                             color: (typeof karyonTheme !== "undefined") ? karyonTheme.textPrimary : "#e8ecf4"
                             font.pixelSize: 12
                             font.bold: true
@@ -1085,7 +1085,7 @@ Item {
 
                 // Hub Section Header
                 Text {
-                    text: "HUB DISPLAY"
+                    text: qsTr("HUB DISPLAY")
                     color: root.accentColor
                     font.pixelSize: 11
                     font.bold: true
@@ -1098,9 +1098,9 @@ Item {
 
                     KaryonCheckBox {
                         x: 0
-                        text: "Clock"
+                        text: qsTr("Clock")
                         checked: settingsController.showClock
-                        tooltip: "Show time in Karyon hub"
+                        tooltip: qsTr("Show time in Karyon hub")
                         onToggled: function(val) {
                             settingsController.showClock = val;
                         }
@@ -1108,9 +1108,9 @@ Item {
 
                     KaryonCheckBox {
                         x: 82
-                        text: "Date"
+                        text: qsTr("Date")
                         checked: settingsController.showDate
-                        tooltip: "Show date in Karyon hub"
+                        tooltip: qsTr("Show date in Karyon hub")
                         onToggled: function(val) {
                             settingsController.showDate = val;
                         }
@@ -1118,9 +1118,9 @@ Item {
 
                     KaryonCheckBox {
                         x: 164
-                        text: "Volume"
+                        text: qsTr("Volume")
                         checked: settingsController.showVolumeControl
-                        tooltip: "Show volume control in Karyon hub"
+                        tooltip: qsTr("Show volume control in Karyon hub")
                         onToggled: function(val) {
                             settingsController.showVolumeControl = val;
                         }
@@ -1145,7 +1145,7 @@ Item {
 
                         Text {
                             anchors.centerIn: parent
-                            text: "Date format"
+                            text: qsTr("Date format")
                             color: switchDateMa.containsMouse ? ((typeof karyonTheme !== "undefined") ? karyonTheme.textPrimary : "#ffffff") : ((typeof karyonTheme !== "undefined") ? karyonTheme.textSecondary : "#cdd3de")
                             font.pixelSize: 10
                             font.bold: true
@@ -1241,7 +1241,7 @@ Item {
 
                         Text {
                             anchors.centerIn: parent
-                            text: "Time format"
+                            text: qsTr("Time format")
                             color: switchTimeMa.containsMouse ? ((typeof karyonTheme !== "undefined") ? karyonTheme.textPrimary : "#ffffff") : ((typeof karyonTheme !== "undefined") ? karyonTheme.textSecondary : "#cdd3de")
                             font.pixelSize: 10
                             font.bold: true
@@ -1281,9 +1281,9 @@ Item {
 
                     KaryonCheckBox {
                         x: 0
-                        text: "Game Mode"
+                        text: qsTr("Game Mode")
                         checked: settingsController.gameMode
-                        tooltip: "Bypasses overlay and gestures in games"
+                        tooltip: qsTr("Bypasses overlay and gestures in games")
                         onToggled: function(val) {
                             settingsController.gameMode = val;
                         }
@@ -1291,9 +1291,9 @@ Item {
 
                     KaryonCheckBox {
                         x: 100
-                        text: "Performance Mode"
+                        text: qsTr("Performance Mode")
                         checked: settingsController.performanceMode
-                        tooltip: "Caps overlay to 30 FPS and antialiases only top edges for lower CPU usage"
+                        tooltip: qsTr("Caps overlay to 30 FPS and antialiases only top edges for lower CPU usage")
                         onToggled: function(val) {
                             settingsController.performanceMode = val;
                         }
@@ -1308,7 +1308,7 @@ Item {
 
                 // Kategorien Header
                 Text {
-                    text: "CATEGORIES"
+                    text: qsTr("CATEGORIES")
                     color: root.accentColor
                     font.pixelSize: 11
                     font.bold: true
@@ -1321,10 +1321,10 @@ Item {
 
                     KaryonCheckBox {
                         x: 0
-                        text: "Windows"
+                        text: qsTr("Windows")
                         checked: settingsController.categoryWindowsEnabled
                         enabled: !checked || root.activeCategoryCount() > 1
-                        tooltip: "Enable Windows category"
+                        tooltip: qsTr("Enable Windows category")
                         onToggled: function(val) {
                             if (!val && root.activeCategoryCount() <= 1) return;
                             settingsController.categoryWindowsEnabled = val;
@@ -1333,10 +1333,10 @@ Item {
 
                     KaryonCheckBox {
                         x: 82
-                        text: "Apps"
+                        text: qsTr("Apps")
                         checked: settingsController.categoryAppsEnabled
                         enabled: !checked || root.activeCategoryCount() > 1
-                        tooltip: "Enable Recent Apps category"
+                        tooltip: qsTr("Enable Recent Apps category")
                         onToggled: function(val) {
                             if (!val && root.activeCategoryCount() <= 1) return;
                             settingsController.categoryAppsEnabled = val;
@@ -1345,10 +1345,10 @@ Item {
 
                     KaryonCheckBox {
                         x: 164
-                        text: "Files"
+                        text: qsTr("Files")
                         checked: settingsController.categoryFilesEnabled
                         enabled: !checked || root.activeCategoryCount() > 1
-                        tooltip: "Enable Recent Files category"
+                        tooltip: qsTr("Enable Recent Files category")
                         onToggled: function(val) {
                             if (!val && root.activeCategoryCount() <= 1) return;
                             settingsController.categoryFilesEnabled = val;
@@ -1358,7 +1358,7 @@ Item {
 
                 // Karyon Icons Header
                 Text {
-                    text: "KARYON ICONS"
+                    text: qsTr("KARYON ICONS")
                     color: root.accentColor
                     font.pixelSize: 11
                     font.bold: true
@@ -1371,9 +1371,9 @@ Item {
 
                     KaryonCheckBox {
                         x: 0
-                        text: "Desktop"
+                        text: qsTr("Desktop")
                         checked: settingsController.showDesktop
-                        tooltip: "Show Desktop segment in Windows"
+                        tooltip: qsTr("Show Desktop segment in Windows")
                         onToggled: function(val) {
                             settingsController.showDesktop = val;
                         }
@@ -1381,9 +1381,9 @@ Item {
 
                     KaryonCheckBox {
                         x: 82
-                        text: "Tray"
+                        text: qsTr("Tray")
                         checked: settingsController.showTray
-                        tooltip: "Show System Tray segment in Apps"
+                        tooltip: qsTr("Show System Tray segment in Apps")
                         onToggled: function(val) {
                             settingsController.showTray = val;
                         }
@@ -1391,9 +1391,9 @@ Item {
 
                     KaryonCheckBox {
                         x: 164
-                        text: "Menu"
+                        text: qsTr("Menu")
                         checked: settingsController.showMenu
-                        tooltip: "Show App Menu (Start Menu) segment in Apps"
+                        tooltip: qsTr("Show App Menu (Start Menu) segment in Apps")
                         onToggled: function(val) {
                             settingsController.showMenu = val;
                         }
@@ -1407,9 +1407,9 @@ Item {
 
                     KaryonCheckBox {
                         x: 0
-                        text: "Favorites"
+                        text: qsTr("Favorites")
                         checked: settingsController.showFavorites
-                        tooltip: "Show Favorites segment in Apps (replaces Menu when Menu is off)"
+                        tooltip: qsTr("Show Favorites segment in Apps (replaces Menu when Menu is off)")
                         onToggled: function(val) {
                             settingsController.showFavorites = val;
                         }
@@ -1417,9 +1417,9 @@ Item {
 
                     KaryonCheckBox {
                         x: 82
-                        text: "Session"
+                        text: qsTr("Session")
                         checked: settingsController.showSession
-                        tooltip: "Show Session segment in Apps"
+                        tooltip: qsTr("Show Session segment in Apps")
                         onToggled: function(val) {
                             settingsController.showSession = val;
                         }
@@ -1427,9 +1427,9 @@ Item {
 
                     KaryonCheckBox {
                         x: 164
-                        text: "Media"
+                        text: qsTr("Media")
                         checked: settingsController.showMediaControls
-                        tooltip: "Show media controls under Karyon hub"
+                        tooltip: qsTr("Show media controls under Karyon hub")
                         onToggled: function(val) {
                             settingsController.showMediaControls = val;
                         }
@@ -1482,7 +1482,7 @@ Item {
                         Text {
                             anchors.left: parent.left
                             anchors.verticalCenter: parent.verticalCenter
-                            text: "Overlay Scale"
+                            text: qsTr("Overlay Scale")
                             color: (typeof karyonTheme !== "undefined") ? karyonTheme.textPrimary : "#e8ecf4"
                             font.pixelSize: 12
                             font.bold: true
@@ -1607,7 +1607,7 @@ Item {
                         Text {
                             anchors.left: parent.left
                             anchors.verticalCenter: parent.verticalCenter
-                            text: "Overlay Transparency"
+                            text: qsTr("Overlay Transparency")
                             color: (typeof karyonTheme !== "undefined") ? karyonTheme.textPrimary : "#e8ecf4"
                             font.pixelSize: 12
                             font.bold: true
@@ -1767,7 +1767,7 @@ Item {
 
                 Text {
                     anchors.verticalCenter: parent.verticalCenter
-                    text: "Base Color:"
+                    text: qsTr("Base Color:")
                     color: (typeof karyonTheme !== "undefined") ? karyonTheme.textSecondary : "#cdd3de"
                     font.pixelSize: 11
                     font.bold: true
@@ -1795,7 +1795,7 @@ Item {
                         }
 
                         Text {
-                            text: "Choose Color..."
+                            text: qsTr("Choose Color...")
                             color: baseColorDlgMa.containsMouse ? ((typeof karyonTheme !== "undefined") ? karyonTheme.textPrimary : "#ffffff") : ((typeof karyonTheme !== "undefined") ? karyonTheme.textSecondary : "#cdd3de")
                             font.pixelSize: 11
                             font.bold: true
@@ -1844,7 +1844,7 @@ Item {
                         }
 
                         Text {
-                            text: "Pick from Screen"
+                            text: qsTr("Pick from Screen")
                             color: screenPickerMa.containsMouse ? ((typeof karyonTheme !== "undefined") ? karyonTheme.textPrimary : "#ffffff") : ((typeof karyonTheme !== "undefined") ? karyonTheme.textSecondary : "#cdd3de")
                             font.pixelSize: 11
                             font.bold: true
@@ -1903,7 +1903,7 @@ Item {
 
                 Text {
                     anchors.verticalCenter: parent.verticalCenter
-                    text: "MOUSE GESTURES (TRIGGER + FAST SWIPE)"
+                    text: qsTr("MOUSE GESTURES (TRIGGER + FAST SWIPE)")
                     color: root.accentColor
                     font.pixelSize: 11
                     font.bold: true
@@ -1913,14 +1913,14 @@ Item {
 
                 KaryonCheckBox {
                     anchors.verticalCenter: parent.verticalCenter
-                    text: "Enable gestures"
+                    text: qsTr("Enable gestures")
                     checked: settingsController.gesturesEnabled
                     onToggled: function(c) { settingsController.gesturesEnabled = c; }
                 }
 
                 KaryonCheckBox {
                     anchors.verticalCenter: parent.verticalCenter
-                    text: "Show trail"
+                    text: qsTr("Show trail")
                     checked: settingsController.showGestureTrail
                     enabled: settingsController.gesturesEnabled
                     opacity: settingsController.gesturesEnabled ? 1.0 : 0.45
@@ -1940,28 +1940,28 @@ Item {
                     spacing: 5
 
                     KaryonDropdown {
-                        label: "Left"
+                        label: qsTr("Left")
                         directionKey: "left"
                         actionId: settingsController.gestureLeft
                         onSelected: function(id) { settingsController.gestureLeft = id; }
                     }
 
                     KaryonDropdown {
-                        label: "Up"
+                        label: qsTr("Up")
                         directionKey: "up"
                         actionId: settingsController.gestureUp
                         onSelected: function(id) { settingsController.gestureUp = id; }
                     }
 
                     KaryonDropdown {
-                        label: "Left-Up"
+                        label: qsTr("Left-Up")
                         directionKey: "Left-Up"
                         actionId: settingsController.gestureLeftUp
                         onSelected: function(id) { settingsController.gestureLeftUp = id; }
                     }
 
                     KaryonDropdown {
-                        label: "Left-Down"
+                        label: qsTr("Left-Down")
                         directionKey: "Left-Down"
                         actionId: settingsController.gestureLeftDown
                         onSelected: function(id) { settingsController.gestureLeftDown = id; }
@@ -1974,28 +1974,28 @@ Item {
                     spacing: 5
 
                     KaryonDropdown {
-                        label: "Right"
+                        label: qsTr("Right")
                         directionKey: "right"
                         actionId: settingsController.gestureRight
                         onSelected: function(id) { settingsController.gestureRight = id; }
                     }
 
                     KaryonDropdown {
-                        label: "Down"
+                        label: qsTr("Down")
                         directionKey: "down"
                         actionId: settingsController.gestureDown
                         onSelected: function(id) { settingsController.gestureDown = id; }
                     }
 
                     KaryonDropdown {
-                        label: "Right-Up"
+                        label: qsTr("Right-Up")
                         directionKey: "Right-Up"
                         actionId: settingsController.gestureRightUp
                         onSelected: function(id) { settingsController.gestureRightUp = id; }
                     }
 
                     KaryonDropdown {
-                        label: "Right-Down"
+                        label: qsTr("Right-Down")
                         directionKey: "Right-Down"
                         actionId: settingsController.gestureRightDown
                         onSelected: function(id) { settingsController.gestureRightDown = id; }
@@ -2104,7 +2104,7 @@ Item {
 
                     Text {
                         anchors.centerIn: parent
-                        text: "Reset Defaults"
+                        text: qsTr("Reset Defaults")
                         color: resetMa.containsMouse ? ((typeof karyonTheme !== "undefined") ? karyonTheme.textPrimary : "#ffffff") : ((typeof karyonTheme !== "undefined") ? karyonTheme.textSecondary : "#cdd3de")
                         font.pixelSize: 12
                         font.bold: true
@@ -2137,7 +2137,7 @@ Item {
 
                     Text {
                         anchors.centerIn: parent
-                        text: "Quit"
+                        text: qsTr("Quit")
                         color: "#ffffff"
                         font.pixelSize: 12
                         font.bold: true
@@ -2162,7 +2162,7 @@ Item {
 
                     Text {
                         anchors.centerIn: parent
-                        text: "Save"
+                        text: qsTr("Save")
                         color: "#ffffff"
                         font.pixelSize: 12
                         font.bold: true
@@ -2200,7 +2200,7 @@ Item {
                 anchors.centerIn: parent
                 width: parent.width - 16
                 wrapMode: Text.WordWrap
-                text: ""
+                text: qsTr("")
                 color: (typeof karyonTheme !== "undefined" && karyonTheme.isLight) ? "#000000" : "#e8ecf4"
                 font.pixelSize: 11
                 lineHeight: 1.25
@@ -2450,14 +2450,14 @@ Item {
                     spacing: 12
 
                     Text {
-                        text: "SET KEY FOR GESTURE: " + keyRecorderModal.targetLabel.toUpperCase()
+                        text: qsTr("SET KEY FOR GESTURE: ") + keyRecorderModal.targetLabel.toUpperCase()
                         color: root.accentColor
                         font.pixelSize: 11
                         font.bold: true
                     }
 
                     Text {
-                        text: "Press the desired key or shortcut\n(e.g. Ctrl+C, F11, Alt+Tab, Super+D...)"
+                        text: qsTr("Press the desired key or shortcut\n(e.g. Ctrl+C, F11, Alt+Tab, Super+D...)")
                         color: (typeof karyonTheme !== "undefined") ? karyonTheme.textSecondary : "#cdd3de"
                         font.pixelSize: 11
                         lineHeight: 1.3
@@ -2493,7 +2493,7 @@ Item {
                             border.width: 1
                             Text {
                                 anchors.centerIn: parent
-                                text: "Cancel"
+                                text: qsTr("Cancel")
                                 color: cancelKeyMa.containsMouse ? ((typeof karyonTheme !== "undefined") ? karyonTheme.textPrimary : "#ffffff") : ((typeof karyonTheme !== "undefined") ? karyonTheme.textSecondary : "#cdd3de")
                                 font.pixelSize: 10
                                 font.bold: true
@@ -2515,7 +2515,7 @@ Item {
                             opacity: keyRecorderModal.keyValid ? 1.0 : 0.4
                             Text {
                                 anchors.centerIn: parent
-                                text: "Save"
+                                text: qsTr("Save")
                                 color: "#ffffff"
                                 font.pixelSize: 10
                                 font.bold: true
@@ -2663,14 +2663,14 @@ Item {
                     spacing: 12
 
                     Text {
-                        text: "SELECT TRIGGER BUTTON OR SHORTCUT"
+                        text: qsTr("SELECT TRIGGER BUTTON OR SHORTCUT")
                         color: root.accentColor
                         font.pixelSize: 11
                         font.bold: true
                     }
 
                     Text {
-                        text: "Click Right / Middle / Side button or press any shortcut\n(Left Click is reserved for Save / Cancel)"
+                        text: qsTr("Click Right / Middle / Side button or press any shortcut\n(Left Click is reserved for Save / Cancel)")
                         color: (typeof karyonTheme !== "undefined") ? karyonTheme.textSecondary : "#cdd3de"
                         font.pixelSize: 11
                         lineHeight: 1.3
@@ -2725,7 +2725,7 @@ Item {
                             border.width: 1
                             Text {
                                 anchors.centerIn: parent
-                                text: "Cancel"
+                                text: qsTr("Cancel")
                                 color: cancelTriggerMa.containsMouse ? ((typeof karyonTheme !== "undefined") ? karyonTheme.textPrimary : "#ffffff") : ((typeof karyonTheme !== "undefined") ? karyonTheme.textSecondary : "#cdd3de")
                                 font.pixelSize: 10
                                 font.bold: true
@@ -2747,7 +2747,7 @@ Item {
                             opacity: triggerRecorderModal.triggerValid ? 1.0 : 0.4
                             Text {
                                 anchors.centerIn: parent
-                                text: "Save"
+                                text: qsTr("Save")
                                 color: "#ffffff"
                                 font.pixelSize: 10
                                 font.bold: true
